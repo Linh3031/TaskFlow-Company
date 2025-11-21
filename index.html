@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>TaskFlow</title>
+    <title>Check List công việc 908</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#ffffff">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.jpg">
 
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -23,9 +23,13 @@
 
     <div id="login-screen" class="screen">
         <div class="login-card">
-            <div class="brand-logo"><span class="material-icons-round">rocket_launch</span></div>
+            
+            <div class="brand-logo">
+                <span class="material-icons-round">rocket_launch</span>
+            </div>
+
             <h2>Xin chào!</h2>
-            <p>Hệ thống TaskFlow Online</p>
+            <p>Check List công việc 908</p>
             <form id="login-form">
                 <div class="input-wrapper">
                     <span class="material-icons-round input-icon">person</span>
@@ -50,7 +54,6 @@
                     <span id="sync-status" style="font-size: 10px; color: #4caf50; display:flex; align-items:center; gap:3px;">● Online</span>
                 </div>
             </div>
-            
             <div style="display: flex; gap: 5px; align-items: center;">
                 <button id="admin-btn" class="btn-icon hidden"><span class="material-icons-round" style="color: #ff9800;">settings</span></button>
                 <button id="logout-btn" class="btn-icon"><span class="material-icons-round">logout</span></button>
@@ -58,15 +61,9 @@
         </header>
 
         <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="warehouse" style="--theme-color: #ff9800;">
-                <div class="icon-box"><span class="material-icons-round">inventory_2</span></div><small>Kho</small>
-            </button>
-            <button class="tab-btn" data-tab="cashier" style="--theme-color: #4caf50;">
-                <div class="icon-box"><span class="material-icons-round">point_of_sale</span></div><small>Thu Ngân</small>
-            </button>
-            <button class="tab-btn" data-tab="handover" style="--theme-color: #673ab7;">
-                <div class="icon-box"><span class="material-icons-round">campaign</span></div><small>Bàn Giao</small>
-            </button>
+            <button class="tab-btn active" data-tab="warehouse" style="--theme-color: #ff9800;"><div class="icon-box"><span class="material-icons-round">inventory_2</span></div><small>Kho</small></button>
+            <button class="tab-btn" data-tab="cashier" style="--theme-color: #4caf50;"><div class="icon-box"><span class="material-icons-round">point_of_sale</span></div><small>Thu Ngân</small></button>
+            <button class="tab-btn" data-tab="handover" style="--theme-color: #673ab7;"><div class="icon-box"><span class="material-icons-round">campaign</span></div><small>Bàn Giao</small></button>
         </nav>
 
         <main class="content-area">
@@ -74,12 +71,10 @@
                 <div class="section-header warehouse-theme"><h3>📦 Kho</h3><span class="task-count" id="count-warehouse">...</span></div>
                 <div class="task-list" id="list-warehouse"></div>
             </div>
-
             <div id="tab-cashier" class="tab-content">
                 <div class="section-header cashier-theme"><h3>💰 Thu Ngân</h3><span class="task-count" id="count-cashier">...</span></div>
                 <div class="task-list" id="list-cashier"></div>
             </div>
-
             <div id="tab-handover" class="tab-content">
                 <div class="section-header handover-theme"><h3>📢 Bàn Giao</h3><span class="task-count" id="count-handover">...</span></div>
                 <div class="input-card">
@@ -90,7 +85,6 @@
                 <div class="task-list" id="list-handover"></div>
             </div>
         </main>
-
         <footer>Design by 3031</footer>
     </div>
 

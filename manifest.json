@@ -1,6 +1,6 @@
 {
-  "name": "TaskFlow - Quản Lý Công Việc",
-  "short_name": "TaskFlow",
+  "name": "Check List công việc 908",
+  "short_name": "Check List 908",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f4f7fc",
@@ -8,14 +8,14 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "logo.png",
+      "src": "logo.jpg",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/jpeg"
     },
     {
-      "src": "logo.png",
+      "src": "logo.jpg",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/jpeg"
     }
   ]
 }

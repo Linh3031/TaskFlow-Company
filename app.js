@@ -1,4 +1,4 @@
-// Version 7.0 - Scroll Fixed & Handover Deadline Logic
+// Version 9.1 - FIX LOGIN NULL ERROR
 
 const firebaseConfig = {
   apiKey: "AIzaSyDqNsRClI9_ygv-FLn1MeFWxa8DTscu8lI",
@@ -55,8 +55,6 @@ let pendingTaskId = null; let unsubscribeTasks = null;
 function init() { checkLoginStatus(); setupEventListeners(); }
 function safeString(val) { return (val === undefined || val === null) ? '' : String(val).trim(); }
 function getTodayStr() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; }
-
-// --- FORMAT TIME ---
 function formatDateTime(isoStr) {
     if(!isoStr) return "";
     const d = new Date(isoStr);
@@ -64,10 +62,9 @@ function formatDateTime(isoStr) {
     const m = d.getMinutes().toString().padStart(2, '0');
     const day = d.getDate().toString().padStart(2, '0');
     const mon = (d.getMonth()+1).toString().padStart(2, '0');
-    return `${h}:${m} ngày ${day}/${mon}`;
+    return `${h}:${m} - ${day}/${mon}`;
 }
 
-// --- LOGIN ---
 async function login(u, p) {
     const cleanU = safeString(u).toLowerCase();
     const cleanP = safeString(p);
@@ -140,7 +137,6 @@ function initializeDailyTasks() {
     batch.commit();
 }
 
-// --- RENDER TASKS (ĐÃ CÓ SORT DEADLINE) ---
 function renderTasks(type) {
     const container = document.getElementById(`list-${type}`);
     if(!container) return;
@@ -148,18 +144,14 @@ function renderTasks(type) {
     const tasks = currentTasks.filter(t => t.type === type);
     document.getElementById(`count-${type}`).textContent = `${tasks.filter(t => !t.completed).length} chưa xong`;
 
-    // LOGIC SẮP XẾP
     tasks.sort((a, b) => {
-        // 1. Nếu là Bàn Giao -> Sắp xếp theo Deadline (gần nhất lên đầu)
         if (type === 'handover') {
-            if (a.completed !== b.completed) return a.completed - b.completed; // Chưa xong lên trước
-            if (a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline); // Deadline gần lên trước
-            if (a.deadline && !b.deadline) return -1; // Có deadline lên trước không có
+            if (a.completed !== b.completed) return a.completed - b.completed;
+            if (a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline);
+            if (a.deadline && !b.deadline) return -1;
             if (!a.deadline && b.deadline) return 1;
-            return (b.timestamp && a.timestamp) ? b.timestamp - a.timestamp : 0; // Mới tạo lên trước
-        } 
-        // 2. Nếu là Kho/Thu Ngân -> Sắp xếp theo TimeSlot
-        else {
+            return (b.timestamp && a.timestamp) ? b.timestamp - a.timestamp : 0;
+        } else {
             const timeA = a.timeSlot || "00:00";
             const timeB = b.timeSlot || "00:00";
             if (timeA !== timeB) return timeA.localeCompare(timeB);
@@ -169,7 +161,6 @@ function renderTasks(type) {
 
     let lastTimeSlot = null;
     tasks.forEach(task => {
-        // Header giờ (Chỉ cho Kho/Thu Ngân)
         const currentTime = task.timeSlot || "Khác";
         if (type !== 'handover' && currentTime !== lastTimeSlot) {
             const header = document.createElement('div');
@@ -184,14 +175,13 @@ function renderTasks(type) {
         el.setAttribute('data-type', type);
         el.onclick = () => { if(task.completed) undoTask(task.id); else openModal(task); };
 
-        // Hiển thị Deadline (Bàn giao)
         let meta = '';
         if (task.type === 'handover' && task.deadline && !task.completed) {
             meta += `<span class="deadline-tag"><span class="material-icons-round" style="font-size:12px">alarm</span> Hạn: ${formatDateTime(task.deadline)}</span> `;
         }
         if (task.createdBy && task.createdBy !== 'System') meta += `<span class="creator-tag">${task.createdBy}</span> `;
-
         if(task.completed) meta += `<span class="done-tag"><span class="material-icons-round" style="font-size:14px">check_circle</span> ${task.completedBy} • ${task.time}</span>`;
+        
         let note = task.note ? `<div class="task-note-display"><span>${task.note}</span></div>` : '';
 
         el.innerHTML = `<div class="checkbox-circle"></div><div class="task-content"><div class="task-title">${task.title}</div><div class="task-meta">${meta}</div>${note}</div>`;
@@ -199,18 +189,14 @@ function renderTasks(type) {
     });
 }
 
-// --- ADD HANDOVER TASK (LƯU DEADLINE) ---
 function addHandoverTask() {
     const val = document.getElementById('new-handover-task').value.trim();
     const deadlineVal = document.getElementById('new-handover-deadline').value;
-    
     if (val) {
         db.collection('tasks').add({
             type: 'handover', title: val, completed: false, completedBy: null, note: '', time: null,
-            createdBy: currentUser.name || currentUser.username, 
-            deadline: deadlineVal, // Lưu hạn chót
-            date: getTodayStr(), 
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            createdBy: currentUser.name || currentUser.username, deadline: deadlineVal,
+            date: getTodayStr(), timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });
         document.getElementById('new-handover-task').value = '';
         document.getElementById('new-handover-deadline').value = '';
@@ -279,13 +265,18 @@ function renderAdminTaskList() {
 }
 function openModal(task) { pendingTaskId = task.id; document.getElementById('modal-task-title').textContent = task.title; document.getElementById('task-note-input').value = ''; document.getElementById('modal-complete').classList.remove('hidden'); }
 function closeModal() { document.getElementById('modal-complete').classList.add('hidden'); pendingTaskId = null; }
+
+// FIX LỖI Ở ĐÂY: Xóa dòng tìm 'user-role' đi vì HTML không còn nữa
 function renderUserInfo() { 
     const dName = currentUser.name || currentUser.username; 
     document.getElementById('display-username').textContent = dName; 
     document.getElementById('user-avatar').textContent = dName.charAt(0).toUpperCase(); 
-    document.getElementById('user-role').textContent = currentUser.role === 'admin' ? 'Admin' : 'Staff'; 
+    // Xóa dòng này đi để không bị lỗi null
+    // document.getElementById('user-role').textContent ... 
+    
     if(currentUser.role === 'admin') document.getElementById('admin-btn').classList.remove('hidden'); 
 }
+
 function showLoginScreen() { document.getElementById('login-screen').classList.remove('hidden'); document.getElementById('main-app').classList.add('hidden'); }
 function showMainApp() { document.getElementById('login-screen').classList.add('hidden'); document.getElementById('main-app').classList.remove('hidden'); }
 function logout() { localStorage.removeItem('taskflow_user'); if (unsubscribeTasks) unsubscribeTasks(); location.reload(); }
