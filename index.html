@@ -12,7 +12,6 @@
     <link rel="apple-touch-icon" href="logo.jpg">
 
     <link rel="stylesheet" href="style.css">
-    
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     
@@ -42,6 +41,8 @@
                 </div>
                 <button type="submit" class="btn-grad">VÀO CA</button>
                 <p class="error-msg" id="login-error"></p>
+                
+                <div class="login-signature">Design by 3031</div>
             </form>
         </div>
     </div>
@@ -86,6 +87,7 @@
                 <div class="task-list" id="list-handover"></div>
             </div>
         </main>
+        
         <footer>Design by 3031</footer>
     </div>
 
@@ -122,15 +124,5 @@
     </div>
 
     <script src="app.js"></script>
-    
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('Service Worker registered!', reg))
-                    .catch(err => console.log('SW registration failed:', err));
-            });
-        }
-    </script>
 </body>
 </html>
