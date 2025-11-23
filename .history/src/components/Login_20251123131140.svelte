@@ -20,10 +20,10 @@
     if (cleanU === 'setup' && cleanP === 'Linh30!0') {
         try {
             await setDoc(doc(db, 'users', 'admin'), {
-                username: 'admin', username_idx: 'admin', pass: 'Linh30!0', name: 'Super Admin', 
+                username: 'admin', username_idx: 'admin', pass: '123456', name: 'Super Admin', 
                 role: 'super_admin', storeIds: [], createdAt: serverTimestamp()
             });
-            alert("✅ Đã tạo User: admin / Linh30!0"); username = 'admin'; password = '123456'; isSuperAdminLogin = true; handleLogin(); return;
+            alert("✅ Đã tạo User: admin / 123456"); username = 'admin'; password = '123456'; isSuperAdminLogin = true; handleLogin(); return;
         } catch (e) { alert(e.message); isLoading = false; return; }
     }
 
