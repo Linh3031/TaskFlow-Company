@@ -1,0 +1,36 @@
+/* src/app.css */
+
+/* 1. QUAN TRỌNG: Nạp Tailwind CSS */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 2. Font Icon (Giữ lại từ bước sửa lỗi trước) */
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons+Round');
+
+/* 3. Cấu hình Font & Icon */
+.material-icons-round {
+  font-family: 'Material Icons Round';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 4. Global Reset (Tailwind đã lo phần lớn, chỉ thêm font chữ) */
+body { 
+  font-family: 'Nunito', sans-serif; 
+  background-color: #f4f7fc; /* Màu nền body cũ */
+}
+
+/* Các class hỗ trợ ẩn hiện */
+.hidden { display: none !important; }
