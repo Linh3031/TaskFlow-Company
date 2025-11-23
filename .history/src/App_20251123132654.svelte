@@ -19,52 +19,31 @@
   let selectedTask = null;
   let noteInput = '';
   
-  // --- LOGIC TOUR GUIDE (CẬP NHẬT KỊCH BẢN) ---
+  // --- LOGIC TOUR GUIDE ---
   let showTour = false;
   const tourKey = 'taskflow_v5_tour_seen';
   
+  // Kịch bản Tour (Đã cập nhật target bước 3 vào #demo-task)
   const tourSteps = [
-    // 1. Chào mừng
     { 
         target: '.app-header', 
-        title: 'Xin chào!', 
-        content: 'Chào mừng bạn đến với TaskFlow. Đây là trung tâm điều khiển cá nhân của bạn.' 
+        title: 'Trung tâm điều khiển', 
+        content: 'Nơi xem thông tin tài khoản, cài đặt Admin (nếu có quyền) và xem lại hướng dẫn này bất cứ lúc nào.' 
     },
-    // 2. Cài đặt App (Chỉ hiện nếu nút Download có trên màn hình)
-    { 
-        target: '#btn-install', 
-        title: 'Cài đặt Ứng dụng', 
-        content: 'Bấm vào đây để tải App về điện thoại hoặc máy tính để sử dụng nhanh và mượt mà hơn.' 
-    },
-    // 3. Chọn bộ phận
     { 
         target: '.tab-nav', 
-        title: 'Chọn Khu Vực', 
-        content: 'Chuyển đổi linh hoạt giữa danh sách công việc Kho, Thu Ngân và Bàn Giao ca.' 
+        title: 'Chuyển đổi khu vực', 
+        content: 'Bấm vào đây để chuyển giữa danh sách Kho, Thu Ngân hoặc nhập Bàn Giao ca.' 
     },
-    // 4. Thử việc mẫu
     { 
-        target: '#demo-task', 
+        target: '#demo-task', // Trỏ vào công việc ảo
         title: 'Thao tác công việc', 
-        content: 'Đây là ví dụ một công việc. Hãy BẤM VÀO ĐÂY để xác nhận hoàn thành. Bấm lại lần nữa nếu muốn hoàn tác.' 
+        content: 'Đây là một công việc mẫu. Bạn hãy BẤM VÀO DÒNG NÀY để xác nhận hoàn thành hoặc hoàn tác.' 
     },
-    // 5. Admin (Chỉ hiện nếu là Admin)
-    { 
-        target: '#btn-admin', 
-        title: 'Quản trị hệ thống', 
-        content: 'Dành cho Quản lý: Nơi tạo thêm công việc mẫu, cấp tài khoản cho nhân viên và cấu hình kho.' 
-    },
-    // 6. Footer thông tin
     { 
         target: 'footer', 
         title: 'Thông tin Kho', 
-        content: 'Xem mã kho bạn đang làm việc. Nếu bạn quản lý nhiều kho, mã kho sẽ hiển thị cạnh tên công việc.' 
-    },
-    // 7. Help (Bước cuối cùng)
-    { 
-        target: '#btn-help', 
-        title: 'Xem lại hướng dẫn', 
-        content: 'Bất cứ khi nào quên cách sử dụng, hãy bấm vào dấu chấm hỏi (?) này để xem lại toàn bộ hướng dẫn nhé!' 
+        content: 'Hiển thị mã kho bạn đang làm việc. Nếu quản lý nhiều kho, mã kho sẽ hiện ngay cạnh tên công việc.' 
     }
   ];
 
@@ -86,12 +65,10 @@
         const isSuperAdmin = $currentUser.role === 'super_admin';
 
         if (!isSuperAdmin && myStores.length > 0) {
-            // Load Template
             unsubTemplate = onSnapshot(doc(db, 'settings', `template_${myStores[0]}`), (docSnap) => {
                 taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
             });
 
-            // Load Tasks
             const today = getTodayStr();
             const q = query(collection(db, 'tasks'), where('date', '==', today), where('storeId', 'in', myStores));
             
@@ -155,7 +132,7 @@
       <Header 
         on:openAdmin={() => showAdminModal = true} 
         on:openTour={() => showTour = true} 
-        on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ (ở giữa dưới cùng) -> Chọn "Thêm vào MH chính"')} 
+        on:openIosGuide={() => alert('...')} 
       />
 
       <nav class="tab-nav">
@@ -186,7 +163,7 @@
         {#if activeTab === 'handover'} <HandoverInput /> {/if}
         
         {#if showTour}
-            <div id="demo-task" class="w-full bg-white p-4 mb-4 rounded-xl flex items-start gap-3 shadow-lg border-l-4 border-l-orange-500 animate-pulse relative z-10 cursor-pointer">
+            <div id="demo-task" class="w-full bg-white p-4 mb-4 rounded-xl flex items-start gap-3 shadow-lg border-l-4 border-l-orange-500 animate-pulse relative z-10">
                 <div class="w-6 h-6 rounded-full border-2 border-gray-300 flex-shrink-0 mt-0.5"></div>
                 <div class="flex-1 text-left">
                     <div class="text-sm font-semibold text-gray-800 leading-snug">
