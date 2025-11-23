@@ -4,26 +4,23 @@
 
   const dispatch = createEventDispatcher();
   
-  // LOGIC PWA (Cài đặt App)
+  // LOGIC PWA
   let deferredPrompt;
   let showInstallBtn = false;
 
   onMount(() => {
-    // 1. Bắt sự kiện cài đặt trên Android/PC
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       deferredPrompt = e;
       showInstallBtn = true;
     });
 
-    // 2. Kiểm tra iOS (để hiện nút hướng dẫn)
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
     const isInStandaloneMode = ('standalone' in window.navigator) && (window.navigator.standalone);
     if (isIos && !isInStandaloneMode) {
       showInstallBtn = true;
     }
     
-    // 3. Admin luôn thấy để test
     if ($currentUser?.role?.includes('admin')) {
       showInstallBtn = true;
     }
@@ -32,13 +29,11 @@
   function handleInstall() {
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
     if (isIos) {
-      dispatch('openIosGuide'); // Báo ra ngoài để hiện hướng dẫn iOS
+      dispatch('openIosGuide');
     } else if (deferredPrompt) {
       deferredPrompt.prompt();
       deferredPrompt.userChoice.then((choiceResult) => {
-        if (choiceResult.outcome === 'accepted') {
-          console.log('User accepted install');
-        }
+        if (choiceResult.outcome === 'accepted') console.log('Accepted');
         deferredPrompt = null;
         showInstallBtn = false;
       });

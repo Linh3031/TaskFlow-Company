@@ -2,49 +2,67 @@
   import { createEventDispatcher, onMount } from 'svelte';
   import { read, utils } from 'xlsx';
   import { db } from '../lib/firebase';
-  import { collection, doc, setDoc, writeBatch, addDoc, serverTimestamp, onSnapshot, deleteDoc, updateDoc } from 'firebase/firestore';
+  import { 
+    collection, 
+    doc, 
+    setDoc, 
+    writeBatch, 
+    addDoc, 
+    serverTimestamp, 
+    onSnapshot, 
+    deleteDoc, 
+    updateDoc 
+  } from 'firebase/firestore';
   import { taskTemplate, currentUser, storeList } from '../lib/stores';
   import { safeString, getTodayStr } from '../lib/utils';
 
   const dispatch = createEventDispatcher();
   
-  // Reactive check role
+  // --- REACTIVE VARIABLES (Tự động cập nhật khi user đổi) ---
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
-  $: myStoreId = $currentUser?.storeId; // Dùng cho Admin thường
-  $: myStores = $currentUser?.storeIds || []; // Dùng cho Admin thường quản lý nhiều kho
+  $: myStoreId = $currentUser?.storeId;
+  $: myStores = $currentUser?.storeIds || [];
 
-  // STATE: Tabs
-  let saTab = 'store'; // 'store' | 'account' | 'user_manage'
-
-  // STATE: Create Store
+  // --- STATE: SUPER ADMIN ---
+  let saTab = 'store'; // Các tab: 'store' | 'account' | 'user_manage'
+  
+  // Tab 1: Tạo Kho
   let newStoreId = '';
   let newStoreName = '';
 
-  // STATE: Create Account
+  // Tab 2: Tạo Admin
   let newAdminUser = '';
   let newAdminPass = '';
   let selectedStoresForAdmin = []; 
 
-  // STATE: User Management
+  // Tab 3: Quản lý User
   let allUsers = [];
   let isEditingUser = false;
   let editingUser = null;
-  let editSelectedStores = [];
+  let editSelectedStores = []; // Danh sách kho khi đang sửa user
 
-  // STATE: Admin Kho
+  // --- STATE: ADMIN KHO ---
   let activeType = 'warehouse';
   let newTime = '08:00';
   let newTaskTitle = '';
+  let isImportant = false; // Checkbox Quan trọng
   let isUploading = false;
+  
+  // State Edit Mode (Sửa checklist)
+  let editingIndex = -1; // -1: Thêm mới, >=0: Đang sửa index đó
 
-  // --- INIT: LOAD USERS IF SUPER ADMIN ---
+  // --- INIT: LOAD USER LIST (CHỈ SUPER ADMIN) ---
   onMount(() => {
     let unsubUsers = () => {};
     if ($currentUser?.role === 'super_admin') {
+        // Lắng nghe realtime toàn bộ user
         unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
             const users = [];
-            snap.forEach(d => users.push({ id: d.id, ...d.data() }));
-            // Sắp xếp: Admin lên đầu, Staff xuống dưới
+            snap.forEach(d => {
+                users.push({ id: d.id, ...d.data() });
+            });
+            
+            // Sắp xếp: Admin lên đầu, Staff xuống dưới, cùng role thì xếp theo tên
             allUsers = users.sort((a, b) => {
                 if (a.role === 'admin' && b.role !== 'admin') return -1;
                 if (a.role !== 'admin' && b.role === 'admin') return 1;
@@ -52,30 +70,37 @@
             });
         });
     }
+    // Cleanup khi đóng modal
     return () => unsubUsers();
   });
 
-  // --- LOGIC SUPER ADMIN: 1. STORE ---
+  // ============================================================
+  // LOGIC SUPER ADMIN
+  // ============================================================
+
+  // 1. TẠO KHO MỚI
   async function createStore() {
-    if(!newStoreId || !newStoreName) return alert("Vui lòng nhập đủ Mã kho và Tên kho!");
+    if (!newStoreId || !newStoreName) {
+        return alert("Vui lòng nhập đủ Mã kho và Tên kho!");
+    }
     try {
         const cleanId = newStoreId.trim().toUpperCase();
         await setDoc(doc(db, 'stores', cleanId), { 
             name: newStoreName.trim(), 
             createdAt: serverTimestamp() 
         });
-        alert(`✅ Đã tạo kho: ${newStoreName} (${cleanId})`);
+        alert(`✅ Đã tạo kho thành công: ${newStoreName} (${cleanId})`);
         newStoreId = ''; 
         newStoreName = '';
-    } catch(e) { 
-        alert("Lỗi: " + e.message); 
+    } catch (e) { 
+        alert("Lỗi khi tạo kho: " + e.message); 
     }
   }
 
-  // --- LOGIC SUPER ADMIN: 2. CREATE ADMIN ---
+  // 2. TẠO TÀI KHOẢN ADMIN
   async function createAdminAccount() {
-    if(!newAdminUser || !newAdminPass || selectedStoresForAdmin.length === 0) {
-        return alert("Nhập đủ Username, Pass và chọn ít nhất 1 kho!");
+    if (!newAdminUser || !newAdminPass || selectedStoresForAdmin.length === 0) {
+        return alert("Vui lòng nhập đủ Username, Password và chọn ít nhất 1 kho!");
     }
     try {
         const u = newAdminUser.trim().toLowerCase();
@@ -83,33 +108,34 @@
             username: u, 
             username_idx: u, 
             pass: newAdminPass.trim(),
-            name: newAdminUser.trim(), // Tên hiển thị giống username
+            name: newAdminUser.trim(), 
             role: 'admin', 
-            storeIds: selectedStoresForAdmin, // Lưu mảng các kho
+            storeIds: selectedStoresForAdmin, 
             createdAt: serverTimestamp()
         });
-        alert(`✅ Đã tạo Admin: ${u} quản lý: ${selectedStoresForAdmin.join(', ')}`);
+        alert(`✅ Đã tạo Admin: ${u} quản lý các kho: ${selectedStoresForAdmin.join(', ')}`);
         newAdminUser = ''; 
         newAdminPass = ''; 
         selectedStoresForAdmin = [];
-    } catch(e) { 
-        alert("Lỗi: " + e.message); 
+    } catch (e) { 
+        alert("Lỗi tạo tài khoản: " + e.message); 
     }
   }
 
-  // --- LOGIC SUPER ADMIN: 3. MANAGE USERS ---
+  // 3. QUẢN LÝ USER (XÓA/SỬA)
   async function deleteUser(uid) {
-    if(!confirm(`CẢNH BÁO: Bạn có chắc muốn XÓA vĩnh viễn user "${uid}" không?`)) return;
+    if (!confirm(`CẢNH BÁO: Bạn có chắc muốn XÓA vĩnh viễn user "${uid}" không?`)) return;
     try {
         await deleteDoc(doc(db, 'users', uid));
-    } catch(e) { 
-        alert("Lỗi xóa: " + e.message); 
+    } catch (e) { 
+        alert("Lỗi khi xóa: " + e.message); 
     }
   }
 
   function openEditUser(user) {
     editingUser = user;
-    // Load danh sách kho hiện tại của user đó vào mảng checkbox
+    // Load danh sách kho hiện tại của user đó vào mảng checkbox để sửa
+    // Hỗ trợ cả cấu trúc cũ (storeId string) và mới (storeIds array)
     editSelectedStores = user.storeIds ? [...user.storeIds] : (user.storeId ? [user.storeId] : []);
     isEditingUser = true;
   }
@@ -120,20 +146,24 @@
         await updateDoc(doc(db, 'users', editingUser.id), {
             storeIds: editSelectedStores
         });
-        alert("✅ Đã cập nhật kho cho user!");
+        alert("✅ Đã cập nhật quyền kho cho user thành công!");
         isEditingUser = false;
         editingUser = null;
-    } catch(e) { 
+    } catch (e) { 
         alert("Lỗi cập nhật: " + e.message); 
     }
   }
 
-  // --- LOGIC ADMIN KHO: 1. UPLOAD EXCEL ---
+  // ============================================================
+  // LOGIC ADMIN KHO
+  // ============================================================
+
+  // 1. UPLOAD EXCEL
   async function handleExcelUpload(event) {
     const file = event.target.files[0]; 
     if (!file) return;
     
-    // Reset để chọn lại file cũ vẫn trigger change
+    // Reset giá trị input để có thể chọn lại file cũ nếu cần
     event.target.value = null;
     isUploading = true;
 
@@ -151,17 +181,17 @@
         
         const uName = safeString(nRow.username || nRow.user);
         if (uName) {
-            // Xác định Role
+            // Xác định Role: Nếu excel ghi 'admin' thì cấp quyền admin, ngược lại là staff
             const role = safeString(nRow.role).toLowerCase() === 'admin' ? 'admin' : 'staff';
             
-            // Xác định Store: Ưu tiên cột 'makho'/'mã kho', nếu không thì lấy hết kho của Admin hiện tại
+            // Xác định Store: Ưu tiên cột trong excel, nếu không có thì lấy kho của người upload
             let targetStores = [];
             const excelStore = safeString(nRow.makho || nRow['mã kho'] || nRow.storeid);
             
             if (excelStore) {
                 targetStores = [excelStore];
             } else {
-                targetStores = myStores; // Default gán hết kho của admin quản lý
+                targetStores = myStores; // Gán tất cả kho của admin hiện tại
             }
 
             batch.set(doc(db, 'users', uName.toLowerCase()), {
@@ -176,68 +206,113 @@
         }
       });
       await batch.commit(); 
-      alert(`✅ Đã đồng bộ ${count} tài khoản!`);
+      alert(`✅ Đã đồng bộ thành công ${count} tài khoản!`);
     } catch (err) { 
-        alert("Lỗi upload: " + err.message); 
+        alert("Lỗi upload file: " + err.message); 
     } finally { 
         isUploading = false; 
     }
   }
 
-  // --- LOGIC ADMIN KHO: 2. CHECKLIST ---
-  async function addTemplateTask() {
+  // 2. QUẢN LÝ CHECKLIST (THÊM/SỬA/XÓA)
+  
+  // Hàm đưa dữ liệu lên form để sửa
+  function startEdit(index, item) {
+      editingIndex = index;
+      newTime = item.time;
+      newTaskTitle = item.title;
+      isImportant = item.isImportant || false;
+  }
+
+  // Hàm hủy bỏ chế độ sửa
+  function cancelEdit() {
+      editingIndex = -1;
+      newTaskTitle = '';
+      isImportant = false;
+      newTime = '08:00';
+  }
+
+  // Hàm Lưu (Dùng chung cho cả Thêm Mới và Cập Nhật)
+  async function saveTemplateTask() {
     if (!newTaskTitle.trim()) return;
 
-    // Lặp qua tất cả kho mà admin quản lý để thêm việc mẫu
+    // Lấy danh sách các kho cần cập nhật (kho mà admin đang quản lý)
     const storesToUpdate = myStores.length > 0 ? myStores : [];
     
     storesToUpdate.forEach(sId => {
-        // 1. Lưu Template (Mẫu)
-        const currentTemp = $taskTemplate; // Lưu ý: Đây là template đang hiển thị (của kho đầu tiên)
-        const updated = { ...currentTemp };
-        if (!updated[activeType]) updated[activeType] = [];
-        updated[activeType].push({ title: newTaskTitle, time: newTime });
-        updated[activeType].sort((a, b) => (a.time||"00:00").localeCompare(b.time||"00:00"));
-        
-        setDoc(doc(db, 'settings', `template_${sId}`), updated);
+        // A. Cập nhật vào Template (Mẫu cho ngày mai)
+        taskTemplate.update(curr => {
+            const up = { ...$taskTemplate }; // Tạo bản sao để đảm bảo reactivity
+            if (!up[activeType]) up[activeType] = [];
+            
+            const newItem = { 
+                title: newTaskTitle, 
+                time: newTime,
+                isImportant: isImportant 
+            };
 
-        // 2. Thêm việc NGAY vào hôm nay
-        addDoc(collection(db, 'tasks'), { 
-            type: activeType, 
-            title: newTaskTitle, 
-            timeSlot: newTime, 
-            completed: false, 
-            createdBy: 'Admin', 
-            date: getTodayStr(), 
-            storeId: sId, 
-            timestamp: serverTimestamp() 
+            if (editingIndex >= 0) {
+                // Nếu đang ở chế độ Sửa: Ghi đè vào vị trí cũ
+                up[activeType][editingIndex] = newItem;
+            } else {
+                // Nếu đang ở chế độ Thêm mới: Thêm vào cuối danh sách
+                up[activeType].push(newItem);
+            }
+            
+            // Sắp xếp lại danh sách theo giờ để hiển thị đẹp
+            up[activeType].sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
+            
+            // Lưu lên Firestore
+            setDoc(doc(db, 'settings', `template_${sId}`), up);
+            return up;
         });
+
+        // B. Nếu là THÊM MỚI -> Tạo ngay task cho hôm nay để thấy liền
+        if (editingIndex === -1) {
+            addDoc(collection(db, 'tasks'), { 
+                type: activeType, 
+                title: newTaskTitle, 
+                timeSlot: newTime, 
+                completed: false, 
+                createdBy: 'Admin', 
+                date: getTodayStr(), 
+                storeId: sId, 
+                isImportant: isImportant, 
+                timestamp: serverTimestamp() 
+            });
+        }
     });
     
-    newTaskTitle = '';
-    alert("✅ Đã thêm việc vào danh sách!");
+    // Thông báo
+    if (editingIndex !== -1) {
+        alert("✅ Đã cập nhật mẫu công việc (Sẽ áp dụng cho ngày mai)!");
+    }
+
+    cancelEdit(); // Reset form
   }
   
+  // Hàm xóa mẫu công việc
   function removeTemplateTask(index) {
-    if(!confirm('CẢNH BÁO: Việc này chỉ xóa trong MẪU (cho ngày mai).\nCông việc hôm nay giữ nguyên.\nBạn chắc chắn xóa?')) return;
+    if (!confirm('CẢNH BÁO: Hành động này chỉ xóa trong MẪU (cho ngày mai trở đi).\nCông việc của ngày hôm nay vẫn giữ nguyên.\n\nBạn có chắc chắn muốn xóa?')) return;
     
-    // Logic đơn giản: Xóa mẫu ở giao diện hiện tại, và lưu lại cho kho chính
-    // (Để đồng bộ hoàn hảo cần logic phức tạp hơn, nhưng tạm thời như vầy là đủ dùng)
     taskTemplate.update(curr => {
-        const up = {...curr}; 
-        up[activeType].splice(index, 1);
+        const up = { ...curr }; 
+        up[activeType].splice(index, 1); // Xóa phần tử tại index
         
-        // Lưu cho kho đầu tiên (Kho chính đang hiển thị)
-        if (myStores.length > 0) {
-            setDoc(doc(db, 'settings', `template_${myStores[0]}`), up);
-        }
+        // Cập nhật lại cho tất cả các kho
+        myStores.forEach(sId => {
+            setDoc(doc(db, 'settings', `template_${sId}`), up);
+        });
         return up;
     });
+
+    // Nếu đang sửa đúng cái việc vừa xóa thì hủy chế độ sửa
+    if (editingIndex === index) cancelEdit();
   }
 </script>
 
 <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-  <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-popIn">
+  <div class="bg-white w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-popIn">
     
     <div class="p-4 border-b flex items-center gap-2 bg-slate-50">
       <span class="material-icons-round text-orange-500 text-3xl">settings</span>
@@ -255,13 +330,22 @@
         
         {#if isSuperAdmin}
             <div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">
-                <button class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='store'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" on:click={()=>saTab='store'}>
+                <button 
+                    class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='store'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" 
+                    on:click={()=>saTab='store'}
+                >
                     1. Quản lý Kho
                 </button>
-                <button class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='account'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" on:click={()=>saTab='account'}>
+                <button 
+                    class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='account'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" 
+                    on:click={()=>saTab='account'}
+                >
                     2. Cấp Admin Mới
                 </button>
-                <button class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='user_manage'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" on:click={()=>saTab='user_manage'}>
+                <button 
+                    class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='user_manage'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" 
+                    on:click={()=>saTab='user_manage'}
+                >
                     3. Danh Sách User ({allUsers.length})
                 </button>
             </div>
@@ -279,10 +363,18 @@
                         <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Kho hiện có:</h4>
                         <div class="max-h-60 overflow-y-auto border rounded bg-gray-50">
                             <table class="w-full text-sm text-left">
-                                <thead class="bg-gray-100 text-gray-600 font-bold sticky top-0"><tr><th class="p-2">Mã</th><th class="p-2">Tên</th></tr></thead>
+                                <thead class="bg-gray-100 text-gray-600 font-bold sticky top-0">
+                                    <tr>
+                                        <th class="p-2">Mã</th>
+                                        <th class="p-2">Tên</th>
+                                    </tr>
+                                </thead>
                                 <tbody class="divide-y">
                                     {#each $storeList as s}
-                                        <tr class="hover:bg-white"><td class="p-2 font-mono font-bold text-indigo-700">{s.id}</td><td class="p-2">{s.name}</td></tr>
+                                        <tr class="hover:bg-white">
+                                            <td class="p-2 font-mono font-bold text-indigo-700">{s.id}</td>
+                                            <td class="p-2">{s.name}</td>
+                                        </tr>
                                     {/each}
                                 </tbody>
                             </table>
@@ -310,12 +402,12 @@
                 {:else if saTab === 'user_manage'}
                     
                     {#if isEditingUser}
-                        <div class="mb-4 bg-yellow-50 p-4 rounded border border-yellow-200">
+                        <div class="mb-4 bg-yellow-50 p-4 rounded border border-yellow-200 animate-popIn">
                             <h4 class="font-bold text-yellow-800 mb-2">Đang chỉnh sửa quyền: <span class="text-black">{editingUser.username}</span></h4>
                             <p class="text-xs text-yellow-600 mb-2">Tick chọn các kho mà user này được phép truy cập:</p>
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 max-h-40 overflow-y-auto p-1">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 max-h-40 overflow-y-auto p-1 border rounded bg-white">
                                 {#each $storeList as s}
-                                    <label class="flex items-center gap-2 bg-white p-2 rounded border cursor-pointer hover:border-indigo-300">
+                                    <label class="flex items-center gap-2 bg-white p-2 rounded cursor-pointer hover:bg-gray-50">
                                         <input type="checkbox" bind:group={editSelectedStores} value={s.id} class="accent-indigo-600">
                                         <span class="text-xs font-bold">{s.name}</span>
                                     </label>
@@ -328,7 +420,7 @@
                         </div>
                     {/if}
 
-                    <div class="overflow-x-auto border rounded bg-white shadow-sm max-h-[400px]">
+                    <div class="overflow-x-auto border rounded bg-white shadow-sm max-h-[500px]">
                         <table class="w-full text-sm text-left relative">
                             <thead class="bg-gray-100 text-gray-600 uppercase text-xs font-bold sticky top-0 z-10 shadow-sm">
                                 <tr>
@@ -381,6 +473,7 @@
             </div>
 
         {:else}
+            
             <div class="mb-6 border-b pb-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
                 <h4 class="text-sm font-bold text-slate-700 uppercase mb-3 flex items-center gap-2">
                     <span class="material-icons-round text-blue-500">group_add</span>
@@ -404,35 +497,72 @@
                     <span class="material-icons-round text-orange-500">playlist_add_check</span> 
                     2. Cấu hình việc mẫu
                 </h4>
-                <div class="flex gap-2 mb-2">
-                    <select bind:value={activeType} class="w-full p-2 border rounded bg-gray-50 font-medium focus:ring-2 focus:ring-orange-200 outline-none">
+                
+                <div class="flex gap-2 mb-3">
+                    <select bind:value={activeType} class="w-full p-2 border rounded bg-gray-50 font-medium focus:ring-2 focus:ring-orange-200 outline-none" on:change={cancelEdit}>
                         <option value="warehouse">📦 Kho</option>
                         <option value="cashier">💰 Thu Ngân</option>
                     </select>
                 </div>
-                <div class="flex gap-2 mb-3">
-                    <input type="text" bind:value={newTime} class="w-24 text-center p-2 border rounded font-mono" placeholder="08:00">
-                    <input type="text" bind:value={newTaskTitle} class="flex-1 p-2 border rounded" placeholder="Nhập tên công việc mẫu..." on:keydown={(e)=>e.key==='Enter'&&addTemplateTask()}>
-                    <button class="w-12 bg-orange-500 text-white rounded flex items-center justify-center shadow-md hover:bg-orange-600 active:scale-95 transition-all" on:click={addTemplateTask}>
-                        <span class="material-icons-round">add</span>
-                    </button>
+
+                <div class="flex flex-col gap-2 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div class="flex gap-2">
+                        <input type="text" bind:value={newTime} class="w-24 text-center p-2 border rounded font-mono" placeholder="08:00">
+                        <input type="text" bind:value={newTaskTitle} class="flex-1 p-2 border rounded" placeholder="Tên công việc..." on:keydown={(e)=>e.key==='Enter'&&saveTemplateTask()}>
+                    </div>
+                    
+                    <div class="flex justify-between items-center">
+                        <label class="flex items-center gap-2 cursor-pointer select-none bg-white px-3 py-1.5 rounded border hover:bg-red-50 transition-colors">
+                            <input type="checkbox" bind:checked={isImportant} class="w-4 h-4 accent-red-500 cursor-pointer">
+                            <span class="text-sm font-bold {isImportant ? 'text-red-600' : 'text-gray-500'}">
+                                Công việc quan trọng {isImportant ? '⭐' : ''}
+                            </span>
+                        </label>
+                        
+                        <div class="flex gap-2">
+                            {#if editingIndex >= 0}
+                                <button class="px-3 py-1 bg-gray-300 text-gray-700 rounded text-sm font-bold hover:bg-gray-400" on:click={cancelEdit}>Hủy</button>
+                            {/if}
+                            <button 
+                                class="px-4 py-1 rounded text-sm font-bold text-white shadow-md transition-all {editingIndex >= 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600'}" 
+                                on:click={saveTemplateTask}
+                            >
+                                {editingIndex >= 0 ? 'Lưu Sửa' : 'Thêm Mới'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 
-                <ul class="border rounded-lg divide-y max-h-56 overflow-y-auto bg-slate-50">
-                    {#if $taskTemplate[activeType]}
-                        {#each $taskTemplate[activeType] as item, i}
-                        <li class="flex justify-between p-3 text-sm items-center hover:bg-white transition-colors group">
-                            <span class="flex items-center gap-2">
-                                <b class="bg-gray-200 px-1.5 py-0.5 rounded text-xs text-gray-700 font-mono">{item.time}</b> 
-                                {item.title}
-                            </span> 
-                            <button class="text-gray-300 hover:text-red-500 p-1 rounded hover:bg-red-50 transition-colors" on:click={()=>removeTemplateTask(i)}>
-                                <span class="material-icons-round text-base">delete</span>
-                            </button>
-                        </li>
-                        {/each}
-                    {/if}
-                </ul>
+                <div class="border rounded-lg overflow-hidden bg-white flex flex-col">
+                    <div class="bg-gray-100 p-2 text-xs font-bold text-gray-500 flex justify-between border-b">
+                        <span>DANH SÁCH ({$taskTemplate[activeType]?.length || 0})</span>
+                        <span>Thao tác</span>
+                    </div>
+                    
+                    <ul class="divide-y overflow-y-auto max-h-[60vh] overscroll-contain">
+                        {#if $taskTemplate[activeType]}
+                            {#each $taskTemplate[activeType] as item, i}
+                            <li class="flex justify-between p-3 text-sm items-center hover:bg-blue-50 transition-colors group {editingIndex === i ? 'bg-blue-100' : ''}">
+                                <div class="flex items-center gap-2 overflow-hidden flex-1 mr-2">
+                                    <b class="bg-gray-200 px-1.5 py-0.5 rounded text-xs text-gray-700 font-mono flex-shrink-0">{item.time}</b> 
+                                    <span class="truncate block {item.isImportant ? 'font-bold text-red-600' : 'text-gray-700'}">
+                                        {item.isImportant ? '⭐ ' : ''}{item.title}
+                                    </span>
+                                </div>
+                                
+                                <div class="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                    <button class="p-1.5 text-blue-500 bg-white hover:bg-blue-100 rounded border border-gray-200 shadow-sm" title="Sửa" on:click={()=>startEdit(i, item)}>
+                                        <span class="material-icons-round text-base">edit</span>
+                                    </button>
+                                    <button class="p-1.5 text-red-500 bg-white hover:bg-red-100 rounded border border-gray-200 shadow-sm" title="Xóa" on:click={()=>removeTemplateTask(i)}>
+                                        <span class="material-icons-round text-base">delete</span>
+                                    </button>
+                                </div>
+                            </li>
+                            {/each}
+                        {/if}
+                    </ul>
+                </div>
             </div>
         {/if}
     </div>

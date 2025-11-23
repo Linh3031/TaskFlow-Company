@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, setDoc, writeBatch, updateDoc, serverTimestamp } from 'firebase/firestore';
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList } from './lib/stores.js';
@@ -19,97 +19,78 @@
   let selectedTask = null;
   let noteInput = '';
   
-  // --- LOGIC TOUR GUIDE (CẬP NHẬT KỊCH BẢN) ---
+  // --- LOGIC LỊCH SỬ ---
+  let selectedDate = getTodayStr(); 
+
+  // --- LOGIC TOUR GUIDE (KỊCH BẢN ĐẦY ĐỦ) ---
   let showTour = false;
-  const tourKey = 'taskflow_v5_tour_seen';
+  const tourKey = 'taskflow_v6_tour_seen'; // Đổi key để user cũ cũng thấy lại tour mới
   
   const tourSteps = [
-    // 1. Chào mừng
-    { 
-        target: '.app-header', 
-        title: 'Xin chào!', 
-        content: 'Chào mừng bạn đến với TaskFlow. Đây là trung tâm điều khiển cá nhân của bạn.' 
-    },
-    // 2. Cài đặt App (Chỉ hiện nếu nút Download có trên màn hình)
-    { 
-        target: '#btn-install', 
-        title: 'Cài đặt Ứng dụng', 
-        content: 'Bấm vào đây để tải App về điện thoại hoặc máy tính để sử dụng nhanh và mượt mà hơn.' 
-    },
-    // 3. Chọn bộ phận
-    { 
-        target: '.tab-nav', 
-        title: 'Chọn Khu Vực', 
-        content: 'Chuyển đổi linh hoạt giữa danh sách công việc Kho, Thu Ngân và Bàn Giao ca.' 
-    },
-    // 4. Thử việc mẫu
-    { 
-        target: '#demo-task', 
-        title: 'Thao tác công việc', 
-        content: 'Đây là ví dụ một công việc. Hãy BẤM VÀO ĐÂY để xác nhận hoàn thành. Bấm lại lần nữa nếu muốn hoàn tác.' 
-    },
-    // 5. Admin (Chỉ hiện nếu là Admin)
-    { 
-        target: '#btn-admin', 
-        title: 'Quản trị hệ thống', 
-        content: 'Dành cho Quản lý: Nơi tạo thêm công việc mẫu, cấp tài khoản cho nhân viên và cấu hình kho.' 
-    },
-    // 6. Footer thông tin
-    { 
-        target: 'footer', 
-        title: 'Thông tin Kho', 
-        content: 'Xem mã kho bạn đang làm việc. Nếu bạn quản lý nhiều kho, mã kho sẽ hiển thị cạnh tên công việc.' 
-    },
-    // 7. Help (Bước cuối cùng)
-    { 
-        target: '#btn-help', 
-        title: 'Xem lại hướng dẫn', 
-        content: 'Bất cứ khi nào quên cách sử dụng, hãy bấm vào dấu chấm hỏi (?) này để xem lại toàn bộ hướng dẫn nhé!' 
-    }
+    { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Đây là trung tâm điều khiển của bạn.' },
+    { target: '#btn-install', title: 'Cài đặt App', content: 'Bấm vào đây để tải App về máy, giúp truy cập nhanh và mượt mà hơn.' },
+    { target: '#date-picker-container', title: 'Xem Lịch Sử', content: 'Bạn có thể chọn ngày quá khứ tại đây để xem lại ai đã làm gì vào ngày hôm đó.' },
+    { target: '.tab-nav', title: 'Chọn Khu Vực', content: 'Chuyển đổi giữa danh sách việc Kho, Thu Ngân và Bàn Giao ca.' },
+    { target: '#demo-task', title: 'Thao tác', content: 'Đây là ví dụ. Hãy BẤM VÀO DÒNG NÀY để xác nhận hoàn thành hoặc hoàn tác.' },
+    { target: '#btn-admin', title: 'Quản trị', content: 'Dành cho Quản lý: Tạo công việc mẫu, cấp tài khoản nhân viên và cấu hình kho.' },
+    { target: 'footer', title: 'Thông tin Kho', content: 'Hiển thị mã kho hiện tại. Nếu quản lý nhiều kho, mã sẽ hiện cạnh tên công việc.' },
+    { target: '#btn-help', title: 'Xem lại', content: 'Quên cách dùng? Bấm vào dấu chấm hỏi này để xem lại hướng dẫn nhé!' }
   ];
 
+  // Variables for unsubscribing
+  let unsubStores = () => {};
+  let unsubTemplate = () => {};
+  let unsubTasks = () => {};
+
+  // 1. INIT
   onMount(() => {
-    // 1. Load Stores
-    const unsubStores = onSnapshot(collection(db, 'stores'), (snap) => {
+    unsubStores = onSnapshot(collection(db, 'stores'), (snap) => {
         storeList.set(snap.docs.map(d => ({id:d.id, ...d.data()})));
     });
 
-    // 2. Load User & Tasks
-    let unsubTemplate = () => {};
-    let unsubTasks = () => {};
-
-    if ($currentUser) {
-        // Kiểm tra Tour Guide
-        if (!localStorage.getItem(tourKey)) showTour = true;
-
-        const myStores = $currentUser.storeIds || ($currentUser.storeId ? [$currentUser.storeId] : []);
-        const isSuperAdmin = $currentUser.role === 'super_admin';
-
-        if (!isSuperAdmin && myStores.length > 0) {
-            // Load Template
-            unsubTemplate = onSnapshot(doc(db, 'settings', `template_${myStores[0]}`), (docSnap) => {
-                taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
-            });
-
-            // Load Tasks
-            const today = getTodayStr();
-            const q = query(collection(db, 'tasks'), where('date', '==', today), where('storeId', 'in', myStores));
-            
-            unsubTasks = onSnapshot(q, (snapshot) => {
-                const tasks = [];
-                snapshot.forEach(doc => tasks.push({ id: doc.id, ...doc.data() }));
-                currentTasks.set(tasks);
-
-                if (tasks.length === 0 && $currentUser.role.includes('admin')) {
-                    initializeDailyTasks(today, myStores);
-                }
-            });
-        }
+    if ($currentUser && !localStorage.getItem(tourKey)) {
+        showTour = true;
     }
-    return () => { unsubStores(); unsubTemplate(); unsubTasks(); };
   });
 
-  async function initializeDailyTasks(today, storeIds) {
+  onDestroy(() => {
+    unsubStores(); unsubTemplate(); unsubTasks();
+  });
+
+  // 2. REACTIVE DATA LOADING
+  $: if ($currentUser) {
+      loadDataForUser($currentUser, selectedDate);
+  }
+
+  function loadDataForUser(user, dateStr) {
+      unsubTemplate(); unsubTasks();
+
+      const myStores = user.storeIds || (user.storeId ? [user.storeId] : []);
+      const isSuperAdmin = user.role === 'super_admin';
+
+      if (!isSuperAdmin && myStores.length > 0) {
+          unsubTemplate = onSnapshot(doc(db, 'settings', `template_${myStores[0]}`), (docSnap) => {
+              taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
+          });
+
+          const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', 'in', myStores));
+          
+          unsubTasks = onSnapshot(q, (snapshot) => {
+              const tasks = [];
+              snapshot.forEach(doc => tasks.push({ id: doc.id, ...doc.data() }));
+              currentTasks.set(tasks);
+
+              const isToday = dateStr === getTodayStr();
+              if (isToday && tasks.length === 0 && user.role.includes('admin')) {
+                  initializeDailyTasks(dateStr, myStores);
+              }
+          });
+      } else {
+          currentTasks.set([]);
+      }
+  }
+
+  async function initializeDailyTasks(dateStr, storeIds) {
     const batch = writeBatch(db);
     const template = $taskTemplate;
     storeIds.forEach(storeId => {
@@ -117,9 +98,13 @@
             if (template[type]) {
                 template[type].forEach(item => {
                     const newRef = doc(collection(db, 'tasks'));
+                    const title = typeof item === 'object' ? item.title : item;
+                    const time = typeof item === 'object' ? item.time : "00:00";
+                    const isImportant = typeof item === 'object' ? (item.isImportant || false) : false;
+
                     batch.set(newRef, {
-                        type, title: item.title, timeSlot: item.time, completed: false, completedBy: null, time: null, note: '',
-                        createdBy: 'System', date: today, storeId: storeId, timestamp: serverTimestamp()
+                        type, title, timeSlot: time, completed: false, completedBy: null, time: null, note: '',
+                        createdBy: 'System', date: dateStr, storeId: storeId, isImportant: isImportant, timestamp: serverTimestamp()
                     });
                 });
             }
@@ -131,7 +116,7 @@
   function handleTaskClick(event) {
     const task = event.detail;
     if (task.completed) {
-      if(confirm('Hoàn tác công việc này?')) updateDoc(doc(db, 'tasks', task.id), { completed: false, completedBy: null, time: null, note: '' });
+      if(confirm('Hoàn tác (Undo)?')) updateDoc(doc(db, 'tasks', task.id), { completed: false, completedBy: null, time: null, note: '' });
     } else {
       selectedTask = task; noteInput = ''; showTaskModal = true;
     }
@@ -141,7 +126,8 @@
     if (!selectedTask) return;
     const now = new Date();
     updateDoc(doc(db, 'tasks', selectedTask.id), {
-      completed: true, completedBy: $currentUser.name, time: `${now.getHours()}:${now.getMinutes()<10?'0':''}${now.getMinutes()}`, note: noteInput
+      completed: true, completedBy: $currentUser.name || $currentUser.username, 
+      time: `${now.getHours()}:${now.getMinutes()<10?'0':''}${now.getMinutes()}`, note: noteInput
     });
     showTaskModal = false; selectedTask = null;
   }
@@ -155,7 +141,7 @@
       <Header 
         on:openAdmin={() => showAdminModal = true} 
         on:openTour={() => showTour = true} 
-        on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ (ở giữa dưới cùng) -> Chọn "Thêm vào MH chính"')} 
+        on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ -> Chọn "Thêm vào MH chính"')} 
       />
 
       <nav class="tab-nav">
@@ -171,19 +157,26 @@
       </nav>
 
       <div class="content-area">
-        <div class="section-header {activeTab}-theme">
-          <h3>
-            {#if $currentUser.role === 'super_admin'}🛡️ Super Admin View
-            {:else}
-                {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
-                {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
-                {#if activeTab==='handover'}📢 Bàn Giao Ca{/if}
-            {/if}
-          </h3>
-          <span class="task-count">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+        <div class="section-header {activeTab}-theme flex flex-col gap-2 items-start sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex items-center justify-between w-full sm:w-auto">
+              <h3>
+                {#if $currentUser.role === 'super_admin'}🛡️ Super Admin View
+                {:else}
+                    {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
+                    {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
+                    {#if activeTab==='handover'}📢 Bàn Giao Ca{/if}
+                {/if}
+              </h3>
+              <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+          </div>
+          
+          <div id="date-picker-container" class="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-full sm:w-auto">
+              <span class="material-icons-round text-gray-500 text-sm">calendar_today</span>
+              <input type="date" bind:value={selectedDate} class="bg-transparent border-none outline-none text-sm font-bold text-gray-700 w-full sm:w-auto">
+          </div>
         </div>
 
-        {#if activeTab === 'handover'} <HandoverInput /> {/if}
+        {#if activeTab === 'handover' && selectedDate === getTodayStr()} <HandoverInput /> {/if}
         
         {#if showTour}
             <div id="demo-task" class="w-full bg-white p-4 mb-4 rounded-xl flex items-start gap-3 shadow-lg border-l-4 border-l-orange-500 animate-pulse relative z-10 cursor-pointer">
@@ -201,6 +194,7 @@
                 </div>
             </div>
         {/if}
+
         <TaskList {activeTab} on:taskClick={handleTaskClick} />
       </div>
 
@@ -215,10 +209,7 @@
   
   {#if showAdminModal} <AdminModal on:close={() => showAdminModal = false} /> {/if}
   {#if showTaskModal && selectedTask} <TaskModal taskTitle={selectedTask.title} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> {/if}
-  
-  {#if showTour} 
-    <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> 
-  {/if}
+  {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
 </main>
 
 <style>
@@ -231,7 +222,7 @@
   .tab-btn.active { color: var(--theme-color); }
   .tab-btn.active .icon-box { background: var(--theme-color); color: white; width: 45px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
   .content-area { flex-grow: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; padding: 10px; }
-  .section-header { flex-shrink: 0; padding: 10px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .section-header { flex-shrink: 0; padding: 10px; border-radius: 10px; margin-bottom: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
   .section-header h3 { font-size: 1rem; margin: 0; font-weight: 700; }
   .task-count { background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 800; color: #555; }
   footer { flex-shrink: 0; text-align: center; padding: 10px; color: #999; font-size: 0.75rem; font-weight: 700; background: #f4f7fc; }
