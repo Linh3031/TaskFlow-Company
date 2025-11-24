@@ -170,9 +170,11 @@
             <tbody class="divide-y">
                 {#each scheduleData.stats as staff, i}
                     <tr class="hover:bg-blue-50 transition-colors group">
-                        <td id={i===0?'sch-first-staff':''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-10 text-indigo-700 cursor-pointer hover:underline shadow pl-4"
+                        <td id={i===0?'sch-first-staff':''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-10 cursor-pointer hover:underline shadow pl-4"
                             on:click={()=>viewPersonalSchedule(staff.id, staff.name)}>
-                            {staff.name}
+                            <span class={staff.gender === 'Nam' ? 'text-blue-600' : (staff.gender === 'Nữ' ? 'text-rose-700' : 'text-gray-700')}>
+                                {staff.name}
+                            </span>
                         </td>
                         {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d, j}
                             {@const assign = (scheduleData.data[d]||[]).find(x => x.staffId === staff.id)}

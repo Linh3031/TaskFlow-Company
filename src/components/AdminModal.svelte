@@ -12,18 +12,15 @@
   import TourGuide from './TourGuide.svelte';
 
   const dispatch = createEventDispatcher();
-  // VARIABLES
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
   $: myStoreId = $currentUser?.storeId;
   $: myStores = $currentUser?.storeIds || [];
-  // STATE
   let saTab = 'store';
   let newStoreId='', newStoreName='', newAdminUser='', newAdminPass='', selectedStoresForAdmin=[], allUsers=[], isEditingUser=false, editingUser=null, editSelectedStores=[];
   let activeType = 'warehouse';
   let newTime = '08:00', newTaskTitle = '', isImportant = false, isUploading = false, editingIndex = -1;
   let authorizedUserCount = 0;
 
-  // STATE PHÂN CA
   let scheduleStaffList = [];
   let shiftInputs = [
       { id: 'c1', label: 'Ca 1 (Sáng)', time: '08:00 - 09:00', qty: 6 },
@@ -38,7 +35,6 @@
   let scheduleMonth = new Date().getMonth() + 1;
   let scheduleYear = new Date().getFullYear();
 
-  // LOGIC MỚI: Tự động nhảy năm khi tăng giảm tháng
   $: {
       if (scheduleMonth > 12) {
           scheduleMonth = 1;
@@ -49,7 +45,6 @@
       }
   }
 
-  // TOUR GUIDE
   let showAdminTour = false;
   const adminTourKey = 'taskflow_admin_tour_seen_v7';
   const adminSteps = [
@@ -61,7 +56,6 @@
       { target: '#btn-help-admin', title: 'Hỗ Trợ', content: 'Bấm nút này để xem lại hướng dẫn bất cứ lúc nào.' }
   ];
 
-  // INIT
   onMount(async () => {
     let unsubUsers = () => {};
     if (isSuperAdmin) {
@@ -118,7 +112,7 @@
       await batch.commit(); alert(`✅ Đồng bộ ${c} tài khoản!`); countAuthorizedUsers();
     } catch(e){alert(e.message);} finally{isUploading=false;}
   }
-
+  
   function startEdit(i, item) { editingIndex=i;
     newTime=item.time; newTaskTitle=item.title; isImportant=item.isImportant||false; }
   function cancelEdit() { editingIndex=-1; newTaskTitle=''; isImportant=false; newTime='08:00'; }
@@ -152,28 +146,34 @@
         
         const scheduleData = snap.data();
         let updatedCount = 0;
+        
+        // LOGIC CẬP NHẬT: Thêm cả gender vào Stats
         const updatedStats = scheduleData.stats.map(stat => {
             const newInfo = scheduleStaffList.find(s => s.id === stat.id);
-            if (newInfo && newInfo.name !== stat.name) {
+            if (newInfo) {
                 updatedCount++;
-                return { ...stat, name: newInfo.name };
+                return { ...stat, name: newInfo.name, gender: newInfo.gender }; // Update Gender too
             }
             return stat;
         });
+
+        // LOGIC CẬP NHẬT: Thêm cả gender vào Data (ô lịch)
         const updatedData = { ...scheduleData.data };
         Object.keys(updatedData).forEach(day => {
             updatedData[day] = updatedData[day].map(assign => {
                  const newInfo = scheduleStaffList.find(s => s.id === assign.staffId);
-                 if (newInfo) return { ...assign, name: newInfo.name };
+                 if (newInfo) return { ...assign, name: newInfo.name, gender: newInfo.gender }; // Update Gender too
                  return assign;
             });
         });
+
         await updateDoc(scheduleRef, {
             stats: updatedStats,
             data: updatedData,
-            updatedBy: $currentUser.username + ' (Sync Name)'
+            updatedBy: $currentUser.username + ' (Sync Name+Gender)'
         });
-        alert(`✅ Đã cập nhật tên hiển thị mới cho lịch tháng ${scheduleMonth}!`);
+        
+        alert(`✅ Đã cập nhật Tên & Giới tính cho lịch tháng ${scheduleMonth}!`);
         dispatch('close');
     } catch(e) {
         alert("Lỗi đồng bộ: " + e.message);
@@ -195,7 +195,18 @@
           if(prevSnap.exists()) prevScheduleData = prevSnap.data();
           const result = generateMonthlySchedule(scheduleStaffList, computedShifts, roleConfig, scheduleMonth, scheduleYear, prevScheduleData);
           const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`;
-          await setDoc(doc(db, 'stores', targetStore, 'schedules', scheduleId), { config: { shiftInputs, roleConfig, computed: computedShifts }, data: result.schedule, stats: result.staffStats.map(s=>({id:s.id, name:s.name, ...s.stats})), endOffset: result.endOffset, updatedAt: serverTimestamp(), updatedBy: $currentUser.username });
+          
+          // LOGIC MỚI: Lưu kèm gender vào stats
+          await setDoc(doc(db, 'stores', targetStore, 'schedules', scheduleId), { 
+              config: { shiftInputs, roleConfig, computed: computedShifts }, 
+              data: result.schedule, 
+              // Quan trọng: Map thêm gender vào đây
+              stats: result.staffStats.map(s=>({id:s.id, name:s.name, gender:s.gender, ...s.stats})), 
+              endOffset: result.endOffset, 
+              updatedAt: serverTimestamp(), 
+              updatedBy: $currentUser.username 
+          });
+          
           await saveShiftConfig(true);
           alert(`✅ Đã tạo lịch T${scheduleMonth} thành công!`); dispatch('close');
       } catch(e) { alert("Lỗi: " + e.message); }

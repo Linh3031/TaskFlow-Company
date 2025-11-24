@@ -10,24 +10,21 @@
 
   onMount(() => {
     window.addEventListener('beforeinstallprompt', (e) => {
-      // Ngăn trình duyệt hiển thị popup mặc định xấu xí
       e.preventDefault();
-      // Lưu sự kiện lại để dùng sau khi bấm nút
       deferredPrompt = e;
-      // Lúc này mới chính thức hiện nút (cho người dùng thường)
       showInstallBtn = true;
-      console.log("✅ PWA Ready: beforeinstallprompt fired");
+      console.log("✅ PWA Ready: Event fired");
     });
 
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
     const isInStandaloneMode = ('standalone' in window.navigator) && (window.navigator.standalone);
     
-    // Logic cho iOS (Luôn hiện nếu chưa cài, vì iOS không có beforeinstallprompt)
+    // iOS: Luôn hiện nếu chưa cài
     if (isIos && !isInStandaloneMode) {
       showInstallBtn = true;
     }
     
-    // Logic cho Admin: Luôn hiện nút để test, nhưng cần xử lý khi bấm
+    // Admin: Luôn hiện nút để test bất chấp trạng thái
     if ($currentUser?.role?.includes('admin')) {
       showInstallBtn = true;
     }
@@ -37,25 +34,23 @@
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
     
     if (isIos) {
-      // 1. Xử lý iOS: Hiện hướng dẫn thủ công
       dispatch('openIosGuide');
     } else if (deferredPrompt) {
-      // 2. Xử lý Android chuẩn: Gọi prompt hệ thống
+      // TRƯỜNG HỢP 1: Trình duyệt cho phép cài (Lần đầu hoặc đã Clear cache)
       deferredPrompt.prompt();
       deferredPrompt.userChoice.then((choiceResult) => {
+        // Không ẩn nút ngay, để người dùng có thể bấm lại nếu lỡ tay hủy
         if (choiceResult.outcome === 'accepted') {
-            console.log('User accepted the install prompt');
-        } else {
-            console.log('User dismissed the install prompt');
+            showInstallBtn = false; // Chỉ ẩn khi đã chấp nhận cài
         }
-        deferredPrompt = null;
-        showInstallBtn = false;
+        deferredPrompt = null; // Sự kiện chỉ dùng được 1 lần, phải reload mới có lại
       });
     } else {
-      // 3. FALLBACK QUAN TRỌNG (Khi nút hiện nhưng trình duyệt chưa sẵn sàng)
-      // Đây là trường hợp bạn gặp phải: Bấm vào không thấy gì.
-      alert("⚠️ Trình duyệt chưa gửi yêu cầu cài đặt.\n\nNguyên nhân:\n1. App đã được cài rồi.\n2. Hãy thử tải lại trang và đợi 3-5 giây.\n3. Hoặc dùng menu 'Thêm vào màn hình chính' (Install App) trên trình duyệt.");
-      console.warn("handleInstall called but deferredPrompt is null");
+      // TRƯỜNG HỢP 2: Trình duyệt chặn (Do vừa xóa App hoặc Cache cũ)
+      // Thay vì báo lỗi, ta hướng dẫn cách "Ép cài"
+      if (confirm("⚠️ Trình duyệt đang chặn Popup cài đặt tự động (do bạn vừa xóa App).\n\nBạn có muốn xem cách cài đặt thủ công không?")) {
+          alert("👉 Hướng dẫn Cài lại:\n\n1. Bấm vào dấu 3 chấm (⋮) ở góc phải trên trình duyệt Chrome.\n2. Chọn dòng 'Cài đặt ứng dụng' (Install App) hoặc 'Thêm vào màn hình chính'.\n\n(Nếu không thấy, hãy Xóa lịch sử duyệt web và thử lại)");
+      }
     }
   }
 
@@ -79,11 +74,10 @@
   </div>
   
   <div class="flex items-center gap-2">
-    
     {#if showInstallBtn}
       <button 
         id="btn-install"
-        class="w-8 h-8 flex items-center justify-center text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors animate-bounce" 
+        class="w-8 h-8 flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors animate-bounce border border-blue-200" 
         on:click={handleInstall}
         title="Cài đặt App"
       >
