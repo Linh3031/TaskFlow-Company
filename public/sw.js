@@ -1,8 +1,18 @@
-// Version 1.1 - Fix Install Prompt
-const CACHE_NAME = 'taskflow-v1';
+const CACHE_NAME = 'taskflow-cache-v2';
+const urlsToCache = [
+  '/',
+  '/index.html',
+  '/logo.jpg',
+  '/manifest.json'
+];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(urlsToCache))
+      .catch((err) => console.log('Cache error:', err))
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -10,8 +20,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Logic đơn giản nhất để Chrome nhận diện đây là PWA
-  if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request));
-  }
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request))
+  );
 });
