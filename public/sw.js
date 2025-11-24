@@ -1,8 +1,9 @@
-const CACHE_NAME = 'taskflow-cache-v2';
+// Version 3.0 - Fix extension jpeg
+const CACHE_NAME = 'taskflow-v3-jpeg';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/logo.jpg',
+  '/logo.jpeg',
   '/manifest.json'
 ];
 
@@ -20,7 +21,11 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
-  );
+  if (event.request.mode === 'navigate') {
+    event.respondWith(fetch(event.request).catch(() => caches.match('/index.html')));
+  } else {
+    event.respondWith(
+      caches.match(event.request).then((response) => response || fetch(event.request))
+    );
+  }
 });
