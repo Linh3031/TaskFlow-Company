@@ -246,20 +246,25 @@
                 <div><h3 class="font-bold text-lg">{selectedStaff.name}</h3><p class="text-xs opacity-80">Giờ công: {selectedStaff.stats.totalHours}h</p></div>
                 <button on:click={()=>selectedStaff=null} class="hover:bg-white/20 rounded-full p-1" aria-label="Đóng"><span class="material-icons-round">close</span></button>
             </div>
-            <div class="p-4 bg-gray-50 grid grid-cols-7 gap-2">
+            <div class="p-4 bg-gray-50 grid grid-cols-7 gap-1 sm:gap-2">
                 <div class="col-span-7 grid grid-cols-7 mb-2 text-center text-xs font-bold text-gray-400 uppercase"><span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span class="text-red-500">CN</span></div>
                 {#each selectedStaff.days as day}
-                    <div class="relative aspect-square rounded-xl flex flex-col items-center justify-center shadow-sm transition-all border border-gray-100 overflow-hidden {getShiftColor(day.shift)}">
+                    <div class="aspect-square rounded-xl flex flex-col p-1 shadow-sm transition-all border border-gray-100 overflow-hidden {getShiftColor(day.shift)}">
+                        <div class="flex justify-start">
+                            <span class="text-[9px] sm:text-[10px] font-bold opacity-60 leading-none">{day.day}</span>
+                        </div>
                         
-                        <span class="absolute top-1 left-1.5 text-[10px] font-bold opacity-60 leading-none">{day.day}</span>
+                        <div class="flex-1 flex items-center justify-center">
+                            <span class="font-bold text-xs sm:text-sm drop-shadow-sm leading-none">{day.shift}</span>
+                        </div>
                         
-                        <span class="font-bold text-sm sm:text-base drop-shadow-sm">{day.shift}</span>
-                        
-                        {#if day.role}
-                            <span class="text-[8px] font-extrabold px-1.5 py-0.5 rounded mt-0.5 backdrop-blur-sm bg-white/30 shadow-sm">
-                                {day.role}
-                            </span>
-                        {/if}
+                        <div class="flex justify-center h-4 items-end">
+                            {#if day.role}
+                                <span class="text-[8px] font-extrabold px-1 rounded backdrop-blur-sm bg-white/30 shadow-sm leading-none">
+                                    {day.role}
+                                </span>
+                            {/if}
+                        </div>
                     </div>
                 {/each}
             </div>
