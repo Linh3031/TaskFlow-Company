@@ -1,133 +1,132 @@
 <script>
-  import { onMount, createEventDispatcher } from 'svelte';
-  
+  import { onMount, createEventDispatcher, onDestroy } from 'svelte';
   export let steps = []; 
   
   const dispatch = createEventDispatcher();
   let currentStepIndex = 0;
-  
-  // Style cho Spotlight (Lỗ thủng)
-  let styleString = '';
-  
-  // Style cho Hộp thoại hướng dẫn
-  let tooltipStyle = '';
-  
-  // Biến kiểm soát mũi tên trang trí
+  let styleString = 'opacity: 0;'; // Mặc định ẩn
+  let tooltipStyle = 'opacity: 0;'; // Mặc định ẩn
   let arrowClass = ''; 
   let isMobile = false;
+  let retryCount = 0;
+  const MAX_RETRIES = 5;
 
-  function calculatePosition() {
+  async function calculatePosition() {
     if (!steps || steps.length === 0) return;
     if (currentStepIndex >= steps.length) {
         completeTour(); return;
     }
 
     const step = steps[currentStepIndex];
+    
+    // LOGIC MỚI: Thử tìm element, nếu không thấy thì thử lại (Retry)
     const el = document.querySelector(step.target);
-
-    if (el) {
-        const rect = el.getBoundingClientRect();
-        isMobile = window.innerWidth < 640; // Coi dưới 640px là mobile
-
-        // 1. VẼ SPOTLIGHT (Lỗ thủng)
-        styleString = `
-            top: ${rect.top}px;
-            left: ${rect.left}px;
-            width: ${rect.width}px;
-            height: ${rect.height}px;
-        `;
-
-        // 2. TÍNH VỊ TRÍ TOOLTIP (HỘP THOẠI)
-        if (isMobile) {
-            // --- LOGIC MOBILE: GHIM CỐ ĐỊNH TRÊN/DƯỚI ---
-            // Kiểm tra xem đối tượng đang nằm ở nửa trên hay nửa dưới màn hình
-            const isTargetInBottomHalf = rect.top > (window.innerHeight / 2);
-            
-            if (isTargetInBottomHalf) {
-                // Nếu đối tượng ở dưới -> Tooltip hiện ở TRÊN CÙNG màn hình
-                tooltipStyle = `
-                    position: fixed;
-                    top: 20px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    width: 90%;
-                    max-width: 350px;
-                `;
-                arrowClass = 'hidden'; // Ẩn mũi tên trên mobile cho gọn
-            } else {
-                // Nếu đối tượng ở trên -> Tooltip hiện ở DƯỚI CÙNG màn hình
-                tooltipStyle = `
-                    position: fixed;
-                    bottom: 20px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    width: 90%;
-                    max-width: 350px;
-                `;
-                arrowClass = 'hidden';
-            }
+    
+    if (!el) {
+        if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            setTimeout(calculatePosition, 100); // Thử lại sau 100ms
+            return;
         } else {
-            // --- LOGIC DESKTOP: BÁM THEO ĐỐI TƯỢNG ---
-            const isBottom = rect.bottom + 250 < window.innerHeight;
-            
-            // Tính toạ độ Top
-            let topPos = isBottom ? (rect.bottom + 15) : (rect.top - 15);
-            let transformY = isBottom ? '' : 'translateY(-100%)';
-            
-            // Tính toạ độ Left (Cố gắng căn giữa đối tượng)
-            let leftPos = rect.left + (rect.width / 2) - 150; // 150 là 1 nửa chiều rộng tooltip (300px)
-            
-            // Chặn tràn lề trái/phải
-            if (leftPos < 10) leftPos = 10;
-            if (leftPos + 300 > window.innerWidth) leftPos = window.innerWidth - 310;
-
+            console.warn('TourGuide: Target not found after retries:', step.target);
+            // Nếu không tìm thấy, ẩn highlight đi để tránh hiển thị sai
+            styleString = 'display: none;';
+            // Vẫn hiện tooltip nhưng ở giữa màn hình để người dùng đọc được
             tooltipStyle = `
-                position: absolute;
-                top: ${topPos}px;
-                left: ${leftPos}px;
-                transform: ${transformY};
-                width: 300px;
+                position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                width: 300px; z-index: 10000;
             `;
-            
-            // Mũi tên chỉ hướng (Chỉ hiện trên Desktop)
-            arrowClass = isBottom 
-                ? 'top-[-6px] left-1/2 -translate-x-1/2 border-t border-l' // Mũi tên hướng lên
-                : 'bottom-[-6px] left-1/2 -translate-x-1/2 border-b border-r'; // Mũi tên hướng xuống
+            return;
         }
-            
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else {
-        nextStep();
     }
+    
+    // Reset retry count khi đã tìm thấy
+    retryCount = 0;
+
+    const rect = el.getBoundingClientRect();
+    isMobile = window.innerWidth < 640;
+
+    // 1. VẼ SPOTLIGHT (Fixed Position)
+    styleString = `
+        position: fixed;
+        top: ${rect.top}px;
+        left: ${rect.left}px;
+        width: ${rect.width}px;
+        height: ${rect.height}px;
+        transition: all 0.3s ease-out;
+        opacity: 1;
+    `;
+
+    // 2. TÍNH VỊ TRÍ TOOLTIP
+    if (isMobile) {
+        const isTargetInBottomHalf = rect.top > (window.innerHeight / 2);
+        tooltipStyle = `
+            position: fixed;
+            ${isTargetInBottomHalf ? 'top: 20px;' : 'bottom: 20px;'}
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 350px;
+            opacity: 1;
+        `;
+        arrowClass = 'hidden';
+    } else {
+        const isBottom = rect.bottom + 250 < window.innerHeight;
+        let topPos = isBottom ? (rect.bottom + 15) : (rect.top - 15);
+        let transformY = isBottom ? '' : 'translateY(-100%)';
+        let leftPos = rect.left + (rect.width / 2) - 150;
+        
+        if (leftPos < 10) leftPos = 10;
+        if (leftPos + 300 > window.innerWidth) leftPos = window.innerWidth - 310;
+
+        tooltipStyle = `
+            position: fixed;
+            top: ${topPos}px;
+            left: ${leftPos}px;
+            transform: ${transformY};
+            width: 300px;
+            opacity: 1;
+        `;
+        
+        arrowClass = isBottom 
+            ? 'top-[-6px] left-1/2 -translate-x-1/2 border-t border-l' 
+            : 'bottom-[-6px] left-1/2 -translate-x-1/2 border-b border-r';
+    }
+        
+    // Scroll vào tầm nhìn (Căn giữa)
+    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
   }
 
-  function nextStep() { currentStepIndex++; calculatePosition(); }
-  function prevStep() { if (currentStepIndex > 0) { currentStepIndex--; calculatePosition(); } }
+  function nextStep() { currentStepIndex++; retryCount=0; calculatePosition(); }
+  function prevStep() { if (currentStepIndex > 0) { currentStepIndex--; retryCount=0; calculatePosition(); } }
   function completeTour() { dispatch('complete'); }
   function skipTour() { dispatch('complete'); }
 
   onMount(() => {
-    // Chờ render ổn định
     setTimeout(calculatePosition, 500);
     window.addEventListener('resize', calculatePosition);
-    return () => window.removeEventListener('resize', calculatePosition);
+    window.addEventListener('scroll', calculatePosition, { capture: true });
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('resize', calculatePosition);
+    window.removeEventListener('scroll', calculatePosition, { capture: true });
   });
 </script>
 
 <div class="fixed inset-0 z-[9999] overflow-hidden pointer-events-none">
-    
     <div 
-        class="absolute box-content rounded-lg transition-all duration-300 ease-out border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.75)]"
+        class="box-content rounded-lg border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.75)]"
         style={styleString}
     ></div>
 
     <div 
-        class="z-[10000] bg-white p-5 rounded-xl shadow-2xl transition-all duration-300 animate-popIn border border-gray-100 pointer-events-auto flex flex-col"
+        class="bg-white p-5 rounded-xl shadow-2xl border border-gray-100 pointer-events-auto flex flex-col z-[10000]"
         style={tooltipStyle}
     >
         <div class="flex justify-between items-start mb-3">
             <h4 class="font-bold text-gray-800 text-lg">{steps[currentStepIndex]?.title}</h4>
-            <button class="text-gray-400 hover:text-gray-600 p-1" on:click={skipTour}>
+            <button class="text-gray-400 hover:text-gray-600 p-1" on:click={skipTour} aria-label="Đóng">
                 <span class="material-icons-round text-sm">close</span>
             </button>
         </div>
@@ -152,16 +151,8 @@
             </div>
         </div>
         
-        {#if !isMobile}
+        {#if !isMobile && arrowClass}
             <div class={`absolute w-3 h-3 bg-white transform rotate-45 border-gray-100 ${arrowClass}`}></div>
         {/if}
     </div>
 </div>
-
-<style>
-    @keyframes popIn { 
-        from { opacity: 0; transform: scale(0.95) translateY(5px); } 
-        to { opacity: 1; transform: scale(1) translateY(0); } 
-    }
-    .animate-popIn { animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
-</style>

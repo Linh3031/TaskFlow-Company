@@ -12,32 +12,31 @@
   import AdminModal from './components/AdminModal.svelte';
   import TaskModal from './components/TaskModal.svelte';
   import TourGuide from './components/TourGuide.svelte';
+  // Import Component Lịch Phân Ca (Phải được tạo từ bước trước)
+  import ShiftSchedule from './components/ShiftSchedule.svelte';
 
   let activeTab = 'warehouse';
   let showAdminModal = false;
   let showTaskModal = false;
   let selectedTask = null;
   let noteInput = '';
-  
   // --- LOGIC LỊCH SỬ ---
-  let selectedDate = getTodayStr(); 
-
-  // --- LOGIC TOUR GUIDE (KỊCH BẢN ĐẦY ĐỦ) ---
+  let selectedDate = getTodayStr();
+  // --- LOGIC TOUR GUIDE ---
   let showTour = false;
-  const tourKey = 'taskflow_v6_tour_seen'; // Đổi key để user cũ cũng thấy lại tour mới
+  const tourKey = 'taskflow_v6_tour_seen';
   
   const tourSteps = [
     { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Đây là trung tâm điều khiển của bạn.' },
     { target: '#btn-install', title: 'Cài đặt App', content: 'Bấm vào đây để tải App về máy, giúp truy cập nhanh và mượt mà hơn.' },
     { target: '#date-picker-container', title: 'Xem Lịch Sử', content: 'Bạn có thể chọn ngày quá khứ tại đây để xem lại ai đã làm gì vào ngày hôm đó.' },
-    { target: '.tab-nav', title: 'Chọn Khu Vực', content: 'Chuyển đổi giữa danh sách việc Kho, Thu Ngân và Bàn Giao ca.' },
+    { target: '.tab-nav', title: 'Chọn Khu Vực', content: 'Chuyển đổi giữa Kho, Thu Ngân, Bàn Giao và Lịch Phân Ca.' },
     { target: '#demo-task', title: 'Thao tác', content: 'Đây là ví dụ. Hãy BẤM VÀO DÒNG NÀY để xác nhận hoàn thành hoặc hoàn tác.' },
-    { target: '#btn-admin', title: 'Quản trị', content: 'Dành cho Quản lý: Tạo công việc mẫu, cấp tài khoản nhân viên và cấu hình kho.' },
+    { target: '#btn-admin', title: 'Quản trị', content: 'Dành cho Quản lý: Tạo công việc mẫu, cấp tài khoản nhân viên và cấu hình phân ca.' },
     { target: 'footer', title: 'Thông tin Kho', content: 'Hiển thị mã kho hiện tại. Nếu quản lý nhiều kho, mã sẽ hiện cạnh tên công việc.' },
     { target: '#btn-help', title: 'Xem lại', content: 'Quên cách dùng? Bấm vào dấu chấm hỏi này để xem lại hướng dẫn nhé!' }
   ];
 
-  // Variables for unsubscribing
   let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
@@ -52,7 +51,7 @@
         showTour = true;
     }
   });
-
+  
   onDestroy(() => {
     unsubStores(); unsubTemplate(); unsubTasks();
   });
@@ -72,9 +71,7 @@
           unsubTemplate = onSnapshot(doc(db, 'settings', `template_${myStores[0]}`), (docSnap) => {
               taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
           });
-
           const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', 'in', myStores));
-          
           unsubTasks = onSnapshot(q, (snapshot) => {
               const tasks = [];
               snapshot.forEach(doc => tasks.push({ id: doc.id, ...doc.data() }));
@@ -82,7 +79,7 @@
 
               const isToday = dateStr === getTodayStr();
               if (isToday && tasks.length === 0 && user.role.includes('admin')) {
-                  initializeDailyTasks(dateStr, myStores);
+                   initializeDailyTasks(dateStr, myStores);
               }
           });
       } else {
@@ -154,6 +151,9 @@
         <button class="tab-btn {activeTab==='handover'?'active':''}" on:click={() => activeTab='handover'} style="--theme-color: #673ab7;">
           <div class="icon-box"><span class="material-icons-round">campaign</span></div><small>Bàn Giao</small>
         </button>
+        <button class="tab-btn {activeTab==='schedule'?'active':''}" on:click={() => activeTab='schedule'} style="--theme-color: #e91e63;">
+            <div class="icon-box"><span class="material-icons-round">calendar_month</span></div><small>Lịch Ca</small>
+        </button>
       </nav>
 
       <div class="content-area">
@@ -165,15 +165,21 @@
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
                     {#if activeTab==='handover'}📢 Bàn Giao Ca{/if}
+                    {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                 {/if}
               </h3>
-              <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+              
+              {#if activeTab !== 'schedule'}
+                  <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+              {/if}
           </div>
           
-          <div id="date-picker-container" class="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-full sm:w-auto">
-              <span class="material-icons-round text-gray-500 text-sm">calendar_today</span>
-              <input type="date" bind:value={selectedDate} class="bg-transparent border-none outline-none text-sm font-bold text-gray-700 w-full sm:w-auto">
-          </div>
+          {#if activeTab !== 'schedule'}
+            <div id="date-picker-container" class="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-full sm:w-auto">
+                <span class="material-icons-round text-gray-500 text-sm">calendar_today</span>
+                <input type="date" bind:value={selectedDate} class="bg-transparent border-none outline-none text-sm font-bold text-gray-700 w-full sm:w-auto">
+            </div>
+          {/if}
         </div>
 
         {#if activeTab === 'handover' && selectedDate === getTodayStr()} <HandoverInput /> {/if}
@@ -186,20 +192,20 @@
                         <span class="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded mr-1 font-bold">[DEMO]</span>
                         Ví dụ: Kiểm tra hàng hóa đầu ca
                     </div>
-                    <div class="flex flex-wrap gap-2 mt-2">
-                        <span class="bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded flex items-center gap-1">
-                            <span class="material-icons-round text-[10px]">schedule</span> 08:00
-                        </span>
-                    </div>
                 </div>
             </div>
         {/if}
 
-        <TaskList {activeTab} on:taskClick={handleTaskClick} />
+        {#if activeTab === 'schedule'}
+            <ShiftSchedule {activeTab} />
+        {:else}
+            <TaskList {activeTab} on:taskClick={handleTaskClick} />
+        {/if}
+
       </div>
 
       <footer>
-        Design by 3031 | 
+        Design by 3031 |
         {#if $currentUser.role === 'super_admin'} Super Admin
         {:else} Kho: {$currentUser.storeIds?.join(', ')}
         {/if}

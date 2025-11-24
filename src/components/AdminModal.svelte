@@ -1,579 +1,274 @@
 <script>
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher, onMount, tick } from 'svelte';
   import { read, utils } from 'xlsx';
   import { db } from '../lib/firebase';
   import { 
-    collection, 
-    doc, 
-    setDoc, 
-    writeBatch, 
-    addDoc, 
-    serverTimestamp, 
-    onSnapshot, 
-    deleteDoc, 
-    updateDoc 
+    collection, doc, setDoc, writeBatch, addDoc, serverTimestamp, 
+    onSnapshot, deleteDoc, updateDoc, query, where, getDocs, getDoc
   } from 'firebase/firestore';
   import { taskTemplate, currentUser, storeList } from '../lib/stores';
   import { safeString, getTodayStr } from '../lib/utils';
+  import { generateMonthlySchedule, calculateShiftModes } from '../lib/scheduleLogic';
+  import TourGuide from './TourGuide.svelte';
 
   const dispatch = createEventDispatcher();
-  
-  // --- REACTIVE VARIABLES (Tự động cập nhật khi user đổi) ---
+  // VARIABLES
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
   $: myStoreId = $currentUser?.storeId;
   $: myStores = $currentUser?.storeIds || [];
-
-  // --- STATE: SUPER ADMIN ---
-  let saTab = 'store'; // Các tab: 'store' | 'account' | 'user_manage'
-  
-  // Tab 1: Tạo Kho
-  let newStoreId = '';
-  let newStoreName = '';
-
-  // Tab 2: Tạo Admin
-  let newAdminUser = '';
-  let newAdminPass = '';
-  let selectedStoresForAdmin = []; 
-
-  // Tab 3: Quản lý User
-  let allUsers = [];
-  let isEditingUser = false;
-  let editingUser = null;
-  let editSelectedStores = []; // Danh sách kho khi đang sửa user
-
-  // --- STATE: ADMIN KHO ---
+  // STATE
+  let saTab = 'store';
+  let newStoreId='', newStoreName='', newAdminUser='', newAdminPass='', selectedStoresForAdmin=[], allUsers=[], isEditingUser=false, editingUser=null, editSelectedStores=[];
   let activeType = 'warehouse';
-  let newTime = '08:00';
-  let newTaskTitle = '';
-  let isImportant = false; // Checkbox Quan trọng
-  let isUploading = false;
-  
-  // State Edit Mode (Sửa checklist)
-  let editingIndex = -1; // -1: Thêm mới, >=0: Đang sửa index đó
+  let newTime = '08:00', newTaskTitle = '', isImportant = false, isUploading = false, editingIndex = -1;
+  let authorizedUserCount = 0;
 
-  // --- INIT: LOAD USER LIST (CHỈ SUPER ADMIN) ---
-  onMount(() => {
+  // STATE PHÂN CA
+  let scheduleStaffList = [];
+  let shiftInputs = [
+      { id: 'c1', label: 'Ca 1 (Sáng)', time: '08:00 - 09:00', qty: 6 },
+      { id: 'c2', label: 'Ca 2 (Sáng)', time: '09:00 - 12:00', qty: 15 },
+      { id: 'c3', label: 'Ca 3 (Trưa)', time: '12:00 - 15:00', qty: 12 },
+      { id: 'c4', label: 'Ca 4 (Chiều)', time: '15:00 - 18:00', qty: 12 },
+      { id: 'c5', label: 'Ca 5 (Tối)', time: '18:00 - 21:00', qty: 15 },
+      { id: 'c6', label: 'Ca 6 (Đêm)', time: '21:00 - 21:30', qty: 6 }
+  ];
+  let ghQty = 1;
+  let roleConfig = { tn: 4, kho: 4 };
+  let scheduleMonth = new Date().getMonth() + 1;
+  let scheduleYear = new Date().getFullYear();
+
+  // TOUR GUIDE
+  let showAdminTour = false;
+  const adminTourKey = 'taskflow_admin_tour_seen_v7'; // Bump version
+  const adminSteps = [
+      { target: '.admin-header', title: 'Khu Vực Quản Trị', content: 'Nơi cấu hình toàn bộ hoạt động cho kho.' },
+      { target: '#section-upload', title: '1. Cấp Quyền App', content: 'Upload danh sách nhân viên để tạo tài khoản đăng nhập.' },
+      { target: '#section-template', title: '2. Việc Mẫu', content: 'Tạo các đầu việc checklist cố định hàng ngày.' },
+      // Sửa lại target ID vào header để hiển thị đẹp hơn
+      { target: '#section-schedule-header', title: '3. Phân Ca Tự Động', content: 'Upload nhân sự riêng, cấu hình định biên và tạo lịch công bằng tại đây.' },
+      { target: '#btn-help-admin', title: 'Hỗ Trợ', content: 'Bấm nút này để xem lại hướng dẫn bất cứ lúc nào.' }
+  ];
+
+  // INIT
+  onMount(async () => {
     let unsubUsers = () => {};
-    if ($currentUser?.role === 'super_admin') {
-        // Lắng nghe realtime toàn bộ user
+    if (isSuperAdmin) {
         unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
-            const users = [];
-            snap.forEach(d => {
-                users.push({ id: d.id, ...d.data() });
-            });
-            
-            // Sắp xếp: Admin lên đầu, Staff xuống dưới, cùng role thì xếp theo tên
-            allUsers = users.sort((a, b) => {
-                if (a.role === 'admin' && b.role !== 'admin') return -1;
-                if (a.role !== 'admin' && b.role === 'admin') return 1;
-                return a.username.localeCompare(b.username);
-            });
+            const users = []; snap.forEach(d => users.push({ id: d.id, ...d.data() }));
+            allUsers = users.sort((a, b) => (a.role === 'admin' ? -1 : 1));
         });
+    } else { countAuthorizedUsers(); }
+    await loadSavedData();
+
+    if (!localStorage.getItem(adminTourKey)) {
+        setTimeout(() => showAdminTour = true, 800);
     }
-    // Cleanup khi đóng modal
     return () => unsubUsers();
   });
+  
+  async function countAuthorizedUsers() { const targetStore = myStores[0]; if (!targetStore) return;
+    try { const q = query(collection(db, 'users'), where('storeIds', 'array-contains', targetStore)); const snap = await getDocs(q); authorizedUserCount = snap.size;
+    } catch (e) { console.error(e); } }
+  async function loadSavedData() { const targetStore = myStores[0]; if (!targetStore) return;
+    try { const configSnap = await getDoc(doc(db, 'settings', `shift_config_${targetStore}`)); if (configSnap.exists()) { const data = configSnap.data();
+    if (data.shiftInputs) shiftInputs = data.shiftInputs; if (data.roleConfig) roleConfig = data.roleConfig; if (data.ghQty !== undefined) ghQty = data.ghQty;
+    } const staffSnap = await getDoc(doc(db, 'settings', `staff_list_${targetStore}`)); if (staffSnap.exists() && staffSnap.data().staffList) { scheduleStaffList = staffSnap.data().staffList;
+    } } catch (e) { console.error(e); } }
+  async function saveShiftConfig(isSilent = false) { const targetStore = myStores[0];
+    if (!targetStore) return; try { await setDoc(doc(db, 'settings', `shift_config_${targetStore}`), { shiftInputs, roleConfig, ghQty, updatedAt: serverTimestamp(), updatedBy: $currentUser.username });
+    if (!isSilent) alert("✅ Đã lưu cấu hình!"); } catch (e) { if (!isSilent) alert("Lỗi: " + e.message);
+    } }
+  async function saveStaffList() { const targetStore = myStores[0]; if (!targetStore || scheduleStaffList.length === 0) return;
+    try { await setDoc(doc(db, 'settings', `staff_list_${targetStore}`), { staffList: scheduleStaffList, updatedAt: serverTimestamp() }); } catch (e) { console.error(e);
+    } }
 
-  // ============================================================
-  // LOGIC SUPER ADMIN
-  // ============================================================
+  async function createStore() { if (!newStoreId || !newStoreName) return alert("Thiếu thông tin");
+    try { await setDoc(doc(db, 'stores', newStoreId.trim().toUpperCase()), { name: newStoreName.trim(), createdAt: serverTimestamp() }); alert("✅ Đã tạo kho!"); newStoreId=''; newStoreName='';
+    } catch(e){ alert(e.message); } }
+  async function createAdminAccount() { if (!newAdminUser || !newAdminPass || selectedStoresForAdmin.length===0) return alert("Thiếu thông tin");
+    try { await setDoc(doc(db, 'users', newAdminUser.trim().toLowerCase()), { username: newAdminUser.trim().toLowerCase(), username_idx: newAdminUser.trim().toLowerCase(), pass: newAdminPass, name: newAdminUser, role: 'admin', storeIds: selectedStoresForAdmin, createdAt: serverTimestamp() });
+    alert("✅ Đã tạo Admin!"); newAdminUser=''; newAdminPass=''; selectedStoresForAdmin=[]; } catch(e){ alert(e.message);
+    } }
+  async function deleteUser(uid) { if(confirm("Xóa user?")) try { await deleteDoc(doc(db,'users',uid)); } catch(e){ alert(e.message);
+    } }
+  function openEditUser(user) { editingUser=user; editSelectedStores=user.storeIds?[...user.storeIds]:[]; isEditingUser=true; }
+  async function saveEditUser() { if(!editingUser) return;
+    try{ await updateDoc(doc(db,'users',editingUser.id), {storeIds:editSelectedStores}); alert("✅ Xong!"); isEditingUser=false; editingUser=null; }catch(e){alert(e.message);} }
 
-  // 1. TẠO KHO MỚI
-  async function createStore() {
-    if (!newStoreId || !newStoreName) {
-        return alert("Vui lòng nhập đủ Mã kho và Tên kho!");
-    }
-    try {
-        const cleanId = newStoreId.trim().toUpperCase();
-        await setDoc(doc(db, 'stores', cleanId), { 
-            name: newStoreName.trim(), 
-            createdAt: serverTimestamp() 
-        });
-        alert(`✅ Đã tạo kho thành công: ${newStoreName} (${cleanId})`);
-        newStoreId = ''; 
-        newStoreName = '';
-    } catch (e) { 
-        alert("Lỗi khi tạo kho: " + e.message); 
-    }
-  }
-
-  // 2. TẠO TÀI KHOẢN ADMIN
-  async function createAdminAccount() {
-    if (!newAdminUser || !newAdminPass || selectedStoresForAdmin.length === 0) {
-        return alert("Vui lòng nhập đủ Username, Password và chọn ít nhất 1 kho!");
-    }
-    try {
-        const u = newAdminUser.trim().toLowerCase();
-        await setDoc(doc(db, 'users', u), {
-            username: u, 
-            username_idx: u, 
-            pass: newAdminPass.trim(),
-            name: newAdminUser.trim(), 
-            role: 'admin', 
-            storeIds: selectedStoresForAdmin, 
-            createdAt: serverTimestamp()
-        });
-        alert(`✅ Đã tạo Admin: ${u} quản lý các kho: ${selectedStoresForAdmin.join(', ')}`);
-        newAdminUser = ''; 
-        newAdminPass = ''; 
-        selectedStoresForAdmin = [];
-    } catch (e) { 
-        alert("Lỗi tạo tài khoản: " + e.message); 
-    }
-  }
-
-  // 3. QUẢN LÝ USER (XÓA/SỬA)
-  async function deleteUser(uid) {
-    if (!confirm(`CẢNH BÁO: Bạn có chắc muốn XÓA vĩnh viễn user "${uid}" không?`)) return;
-    try {
-        await deleteDoc(doc(db, 'users', uid));
-    } catch (e) { 
-        alert("Lỗi khi xóa: " + e.message); 
-    }
-  }
-
-  function openEditUser(user) {
-    editingUser = user;
-    // Load danh sách kho hiện tại của user đó vào mảng checkbox để sửa
-    // Hỗ trợ cả cấu trúc cũ (storeId string) và mới (storeIds array)
-    editSelectedStores = user.storeIds ? [...user.storeIds] : (user.storeId ? [user.storeId] : []);
-    isEditingUser = true;
-  }
-
-  async function saveEditUser() {
-    if (!editingUser) return;
-    try {
-        await updateDoc(doc(db, 'users', editingUser.id), {
-            storeIds: editSelectedStores
-        });
-        alert("✅ Đã cập nhật quyền kho cho user thành công!");
-        isEditingUser = false;
-        editingUser = null;
-    } catch (e) { 
-        alert("Lỗi cập nhật: " + e.message); 
-    }
-  }
-
-  // ============================================================
-  // LOGIC ADMIN KHO
-  // ============================================================
-
-  // 1. UPLOAD EXCEL
   async function handleExcelUpload(event) {
-    const file = event.target.files[0]; 
-    if (!file) return;
-    
-    // Reset giá trị input để có thể chọn lại file cũ nếu cần
-    event.target.value = null;
-    isUploading = true;
-
+    const file = event.target.files[0];
+    if(!file) return; event.target.value=null; isUploading=true;
     try {
-      const data = await file.arrayBuffer();
-      const workbook = read(data);
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawData = utils.sheet_to_json(sheet);
-      const batch = writeBatch(db);
-      let count = 0;
-      
-      rawData.forEach(row => {
-        const nRow = {}; 
-        Object.keys(row).forEach(k => nRow[k.toLowerCase().trim()] = row[k]);
-        
-        const uName = safeString(nRow.username || nRow.user);
-        if (uName) {
-            // Xác định Role: Nếu excel ghi 'admin' thì cấp quyền admin, ngược lại là staff
-            const role = safeString(nRow.role).toLowerCase() === 'admin' ? 'admin' : 'staff';
-            
-            // Xác định Store: Ưu tiên cột trong excel, nếu không có thì lấy kho của người upload
-            let targetStores = [];
-            const excelStore = safeString(nRow.makho || nRow['mã kho'] || nRow.storeid);
-            
-            if (excelStore) {
-                targetStores = [excelStore];
-            } else {
-                targetStores = myStores; // Gán tất cả kho của admin hiện tại
-            }
-
-            batch.set(doc(db, 'users', uName.toLowerCase()), {
-                username: uName, 
-                username_idx: uName.toLowerCase(), 
-                pass: safeString(nRow.pass || nRow.password),
-                name: nRow.name ? safeString(nRow.name) : uName,
-                role: role, 
-                storeIds: targetStores
-            }, { merge: true });
-            count++;
-        }
-      });
-      await batch.commit(); 
-      alert(`✅ Đã đồng bộ thành công ${count} tài khoản!`);
-    } catch (err) { 
-        alert("Lỗi upload file: " + err.message); 
-    } finally { 
-        isUploading = false; 
-    }
+      const data = await file.arrayBuffer(); const wb = read(data);
+      const sheet = wb.Sheets[wb.SheetNames[0]]; const raw = utils.sheet_to_json(sheet);
+      const batch = writeBatch(db); let c=0;
+      raw.forEach(r => { const nR={}; Object.keys(r).forEach(k=>nR[k.toLowerCase().trim()]=r[k]); const u = safeString(nR.username||nR.user); if(u) { const role = safeString(nR.role).toLowerCase()==='admin'?'admin':'staff'; const stores = safeString(nR.makho||nR.storeid)?[safeString(nR.makho||nR.storeid)]:myStores; batch.set(doc(db,'users',u.toLowerCase()), { username: u, username_idx:u.toLowerCase(), pass: safeString(nR.pass||nR.password), name: nR.name?safeString(nR.name):u, role, storeIds: stores }, {merge:true}); c++; } });
+      await batch.commit(); alert(`✅ Đồng bộ ${c} tài khoản!`); countAuthorizedUsers();
+    } catch(e){alert(e.message);} finally{isUploading=false;}
   }
 
-  // 2. QUẢN LÝ CHECKLIST (THÊM/SỬA/XÓA)
-  
-  // Hàm đưa dữ liệu lên form để sửa
-  function startEdit(index, item) {
-      editingIndex = index;
-      newTime = item.time;
-      newTaskTitle = item.title;
-      isImportant = item.isImportant || false;
-  }
-
-  // Hàm hủy bỏ chế độ sửa
-  function cancelEdit() {
-      editingIndex = -1;
-      newTaskTitle = '';
-      isImportant = false;
-      newTime = '08:00';
-  }
-
-  // Hàm Lưu (Dùng chung cho cả Thêm Mới và Cập Nhật)
+  function startEdit(i, item) { editingIndex=i;
+    newTime=item.time; newTaskTitle=item.title; isImportant=item.isImportant||false; }
+  function cancelEdit() { editingIndex=-1; newTaskTitle=''; isImportant=false; newTime='08:00'; }
   async function saveTemplateTask() {
-    if (!newTaskTitle.trim()) return;
-
-    // Lấy danh sách các kho cần cập nhật (kho mà admin đang quản lý)
-    const storesToUpdate = myStores.length > 0 ? myStores : [];
-    
-    storesToUpdate.forEach(sId => {
-        // A. Cập nhật vào Template (Mẫu cho ngày mai)
-        taskTemplate.update(curr => {
-            const up = { ...$taskTemplate }; // Tạo bản sao để đảm bảo reactivity
-            if (!up[activeType]) up[activeType] = [];
-            
-            const newItem = { 
-                title: newTaskTitle, 
-                time: newTime,
-                isImportant: isImportant 
-            };
-
-            if (editingIndex >= 0) {
-                // Nếu đang ở chế độ Sửa: Ghi đè vào vị trí cũ
-                up[activeType][editingIndex] = newItem;
-            } else {
-                // Nếu đang ở chế độ Thêm mới: Thêm vào cuối danh sách
-                up[activeType].push(newItem);
-            }
-            
-            // Sắp xếp lại danh sách theo giờ để hiển thị đẹp
-            up[activeType].sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
-            
-            // Lưu lên Firestore
-            setDoc(doc(db, 'settings', `template_${sId}`), up);
-            return up;
-        });
-
-        // B. Nếu là THÊM MỚI -> Tạo ngay task cho hôm nay để thấy liền
-        if (editingIndex === -1) {
-            addDoc(collection(db, 'tasks'), { 
-                type: activeType, 
-                title: newTaskTitle, 
-                timeSlot: newTime, 
-                completed: false, 
-                createdBy: 'Admin', 
-                date: getTodayStr(), 
-                storeId: sId, 
-                isImportant: isImportant, 
-                timestamp: serverTimestamp() 
-            });
-        }
-    });
-    
-    // Thông báo
-    if (editingIndex !== -1) {
-        alert("✅ Đã cập nhật mẫu công việc (Sẽ áp dụng cho ngày mai)!");
+      if(!newTaskTitle.trim()) return;
+      myStores.forEach(sId => { taskTemplate.update(curr => { const up={...$taskTemplate}; if(!up[activeType]) up[activeType]=[]; const item={title:newTaskTitle, time:newTime, isImportant}; if(editingIndex>=0) up[activeType][editingIndex]=item; else up[activeType].push(item); up[activeType].sort((a,b)=>(a.time||"00:00").localeCompare(b.time||"00:00")); setDoc(doc(db,'settings',`template_${sId}`), up); return up; }); if(editingIndex===-1) addDoc(collection(db,'tasks'),{type:activeType, title:newTaskTitle, timeSlot:newTime, completed:false, createdBy:'Admin', date:getTodayStr(), storeId:sId, isImportant, timestamp:serverTimestamp()}); });
+      if(editingIndex!==-1) alert("✅ Đã cập nhật!"); cancelEdit();
+  }
+  function removeTemplateTask(i) { if(!confirm("Xóa mẫu?")) return;
+    taskTemplate.update(curr => { const up={...curr}; up[activeType].splice(i,1); myStores.forEach(sId => setDoc(doc(db,'settings',`template_${sId}`), up)); return up; }); if(editingIndex===i) cancelEdit();
     }
 
-    cancelEdit(); // Reset form
+  async function handleScheduleExcel(event) {
+      const file = event.target.files[0]; if(!file) return; event.target.value = null;
+    try { const data = await file.arrayBuffer(); const wb = read(data); const ws = wb.Sheets[wb.SheetNames[0]]; const json = utils.sheet_to_json(ws);
+    let count = 0; let newStaff = []; json.forEach(row => { let name = '', gender = 'Nữ'; Object.keys(row).forEach(key => { let k = key.toLowerCase(); if(k.includes('tên')||k.includes('nhân viên')||k.includes('name')) name=row[key]; if(k.includes('giới')||k.includes('nữ')||k.includes('gender')) gender=row[key]; }); if(name) { newStaff.push({ id: String(count+1), name, gender: String(gender).toLowerCase().includes('nam')?'Nam':'Nữ' }); count++; } });
+    scheduleStaffList = newStaff; await saveStaffList(); alert(`✅ Đã tải ${count} nhân sự!`); } catch(e) { alert("Lỗi đọc file: " + e.message);
+    }
+  }
+
+  async function handleGenerateSchedule() {
+      if(scheduleStaffList.length === 0) return alert("Chưa có nhân viên!");
+      const inputs = { c1: shiftInputs[0].qty, c2: shiftInputs[1].qty, c3: shiftInputs[2].qty, c4: shiftInputs[3].qty, c5: shiftInputs[4].qty, c6: shiftInputs[5].qty, gh: ghQty };
+      try {
+          const targetStore = myStores[0];
+          if (!targetStore) throw new Error("Lỗi kho!");
+          const computedShifts = calculateShiftModes(inputs, scheduleStaffList.length);
+          let prevScheduleData = null;
+          let prevMonth = scheduleMonth - 1; let prevYear = scheduleYear; if(prevMonth === 0) { prevMonth = 12; prevYear--; }
+          const prevSnap = await getDoc(doc(db, 'stores', targetStore, 'schedules', `${prevYear}-${String(prevMonth).padStart(2,'0')}`));
+          if(prevSnap.exists()) prevScheduleData = prevSnap.data();
+          const result = generateMonthlySchedule(scheduleStaffList, computedShifts, roleConfig, scheduleMonth, scheduleYear, prevScheduleData);
+          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`;
+          await setDoc(doc(db, 'stores', targetStore, 'schedules', scheduleId), { config: { shiftInputs, roleConfig, computed: computedShifts }, data: result.schedule, stats: result.staffStats.map(s=>({id:s.id, name:s.name, ...s.stats})), endOffset: result.endOffset, updatedAt: serverTimestamp(), updatedBy: $currentUser.username });
+          await saveShiftConfig(true);
+          alert(`✅ Đã tạo lịch T${scheduleMonth} thành công!`); dispatch('close');
+      } catch(e) { alert("Lỗi: " + e.message); }
   }
   
-  // Hàm xóa mẫu công việc
-  function removeTemplateTask(index) {
-    if (!confirm('CẢNH BÁO: Hành động này chỉ xóa trong MẪU (cho ngày mai trở đi).\nCông việc của ngày hôm nay vẫn giữ nguyên.\n\nBạn có chắc chắn muốn xóa?')) return;
-    
-    taskTemplate.update(curr => {
-        const up = { ...curr }; 
-        up[activeType].splice(index, 1); // Xóa phần tử tại index
-        
-        // Cập nhật lại cho tất cả các kho
-        myStores.forEach(sId => {
-            setDoc(doc(db, 'settings', `template_${sId}`), up);
-        });
-        return up;
-    });
-
-    // Nếu đang sửa đúng cái việc vừa xóa thì hủy chế độ sửa
-    if (editingIndex === index) cancelEdit();
-  }
+  function startTour() { showAdminTour = true; }
 </script>
 
 <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-  <div class="bg-white w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-popIn">
+  <div class="bg-white w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-popIn relative">
     
-    <div class="p-4 border-b flex items-center gap-2 bg-slate-50">
+    <div class="p-4 border-b flex items-center gap-2 bg-slate-50 admin-header">
       <span class="material-icons-round text-orange-500 text-3xl">settings</span>
-      <div class="flex-1">
+      <div class="flex-1 flex items-center gap-2">
           <h3 class="text-lg font-bold text-slate-800">
-              {isSuperAdmin ? 'SUPER ADMIN DASHBOARD' : `Quản Lý Kho: ${myStores.join(', ')}`}
+              {isSuperAdmin ? 'SUPER ADMIN' : `Quản Lý Kho: ${myStores.join(', ')}`}
           </h3>
-          {#if isSuperAdmin}
-            <p class="text-xs text-purple-600 font-bold">Quản trị viên cấp cao</p>
-          {/if}
+          <button id="btn-help-admin" class="w-6 h-6 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors" title="Xem hướng dẫn Admin" on:click={startTour}>
+              <span class="material-icons-round text-sm">help</span>
+          </button>
       </div>
+      <button class="p-2 hover:bg-gray-200 rounded-full" on:click={() => dispatch('close')}><span class="material-icons-round">close</span></button>
     </div>
     
     <div class="p-4 overflow-y-auto flex-1 bg-slate-50">
-        
         {#if isSuperAdmin}
-            <div class="flex flex-wrap gap-2 mb-4 border-b border-gray-200 pb-2">
-                <button 
-                    class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='store'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" 
-                    on:click={()=>saTab='store'}
-                >
-                    1. Quản lý Kho
-                </button>
-                <button 
-                    class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='account'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" 
-                    on:click={()=>saTab='account'}
-                >
-                    2. Cấp Admin Mới
-                </button>
-                <button 
-                    class="px-4 py-2 rounded-lg text-sm font-bold transition-all {saTab==='user_manage'?'bg-indigo-600 text-white shadow-lg':'bg-white text-gray-600 border'}" 
-                    on:click={()=>saTab='user_manage'}
-                >
-                    3. Danh Sách User ({allUsers.length})
-                </button>
-            </div>
-
-            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 min-h-[300px]">
-                
-                {#if saTab === 'store'}
-                    <h4 class="text-sm font-bold text-gray-500 uppercase mb-3">Thêm Kho Mới</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
-                        <input type="text" bind:value={newStoreId} class="p-2 border rounded uppercase font-mono" placeholder="Mã (VD: 908)">
-                        <input type="text" bind:value={newStoreName} class="p-2 border rounded" placeholder="Tên hiển thị">
-                        <button class="bg-green-600 text-white rounded font-bold hover:bg-green-700" on:click={createStore}>Thêm</button>
+            <div class="flex flex-wrap gap-2 mb-4 border-b pb-2"><button class="btn-tab {saTab==='store'?'active':''}" on:click={()=>saTab='store'}>1. Kho</button><button class="btn-tab {saTab==='account'?'active':''}" on:click={()=>saTab='account'}>2. Admin</button><button class="btn-tab {saTab==='user_manage'?'active':''}" on:click={()=>saTab='user_manage'}>3. User</button></div>
+            {#if saTab === 'store'}
+                <div class="section-box">
+                    <h4 class="title-label">Thêm Kho</h4>
+                    <div class="flex gap-2">
+                        <label for="new-store-id" class="sr-only">Mã Kho</label>
+                        <input id="new-store-id" class="input-std uppercase" placeholder="Mã" bind:value={newStoreId}>
+                        <label for="new-store-name" class="sr-only">Tên Kho</label>
+                        <input id="new-store-name" class="input-std" placeholder="Tên" bind:value={newStoreName}>
+                        <button class="btn-primary bg-green-600" on:click={createStore}>Thêm</button>
                     </div>
-                    <div class="mt-4 border-t pt-2">
-                        <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Kho hiện có:</h4>
-                        <div class="max-h-60 overflow-y-auto border rounded bg-gray-50">
-                            <table class="w-full text-sm text-left">
-                                <thead class="bg-gray-100 text-gray-600 font-bold sticky top-0">
-                                    <tr>
-                                        <th class="p-2">Mã</th>
-                                        <th class="p-2">Tên</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y">
-                                    {#each $storeList as s}
-                                        <tr class="hover:bg-white">
-                                            <td class="p-2 font-mono font-bold text-indigo-700">{s.id}</td>
-                                            <td class="p-2">{s.name}</td>
-                                        </tr>
-                                    {/each}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                {:else if saTab === 'account'}
-                    <h4 class="text-sm font-bold text-gray-500 uppercase mb-3">Tạo Tài Khoản Admin</h4>
-                    <div class="space-y-3 max-w-md mx-auto">
-                        <input type="text" bind:value={newAdminUser} class="w-full p-2 border rounded" placeholder="Tên đăng nhập (VD: linh-3031)">
-                        <input type="text" bind:value={newAdminPass} class="w-full p-2 border rounded" placeholder="Mật khẩu">
-                        
-                        <p class="text-xs font-bold text-gray-500">Chọn kho quản lý:</p>
-                        <div class="max-h-48 overflow-y-auto border rounded p-2 bg-slate-50 grid grid-cols-2 gap-2">
-                            {#each $storeList as s}
-                                <label class="flex items-center gap-2 p-2 bg-white border rounded cursor-pointer hover:bg-indigo-50">
-                                    <input type="checkbox" bind:group={selectedStoresForAdmin} value={s.id} class="accent-indigo-600 w-4 h-4">
-                                    <span class="text-xs font-bold text-gray-700">{s.name}</span>
-                                </label>
-                            {/each}
-                        </div>
-                        <button class="w-full py-2 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 shadow-md" on:click={createAdminAccount}>Tạo User Admin</button>
-                    </div>
-
-                {:else if saTab === 'user_manage'}
-                    
-                    {#if isEditingUser}
-                        <div class="mb-4 bg-yellow-50 p-4 rounded border border-yellow-200 animate-popIn">
-                            <h4 class="font-bold text-yellow-800 mb-2">Đang chỉnh sửa quyền: <span class="text-black">{editingUser.username}</span></h4>
-                            <p class="text-xs text-yellow-600 mb-2">Tick chọn các kho mà user này được phép truy cập:</p>
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 max-h-40 overflow-y-auto p-1 border rounded bg-white">
-                                {#each $storeList as s}
-                                    <label class="flex items-center gap-2 bg-white p-2 rounded cursor-pointer hover:bg-gray-50">
-                                        <input type="checkbox" bind:group={editSelectedStores} value={s.id} class="accent-indigo-600">
-                                        <span class="text-xs font-bold">{s.name}</span>
-                                    </label>
-                                {/each}
-                            </div>
-                            <div class="flex gap-2">
-                                <button class="px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold shadow-sm" on:click={saveEditUser}>Lưu Cập Nhật</button>
-                                <button class="px-4 py-2 bg-gray-400 text-white rounded text-sm font-bold shadow-sm" on:click={()=>isEditingUser=false}>Hủy</button>
-                            </div>
-                        </div>
-                    {/if}
-
-                    <div class="overflow-x-auto border rounded bg-white shadow-sm max-h-[500px]">
-                        <table class="w-full text-sm text-left relative">
-                            <thead class="bg-gray-100 text-gray-600 uppercase text-xs font-bold sticky top-0 z-10 shadow-sm">
-                                <tr>
-                                    <th class="p-3">User</th>
-                                    <th class="p-3">Role</th>
-                                    <th class="p-3">Kho phụ trách</th>
-                                    <th class="p-3 text-center">Hành động</th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y">
-                                {#each allUsers as user}
-                                    <tr class="hover:bg-gray-50 transition-colors">
-                                        <td class="p-3 font-bold text-indigo-700">{user.username}</td>
-                                        <td class="p-3">
-                                            <span class="px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider {user.role==='admin'?'bg-purple-100 text-purple-700':'bg-gray-100 text-gray-600'}">
-                                                {user.role}
-                                            </span>
-                                        </td>
-                                        <td class="p-3">
-                                            {#if user.role === 'super_admin'}
-                                                <span class="text-gray-400 italic text-xs">Full Access</span>
-                                            {:else}
-                                                <div class="flex flex-wrap gap-1">
-                                                    {#if user.storeIds && user.storeIds.length > 0}
-                                                        {#each user.storeIds as sid}
-                                                            <span class="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border border-orange-200">{sid}</span>
-                                                        {/each}
-                                                    {:else}
-                                                        <span class="text-red-400 italic text-xs">Chưa gán kho</span>
-                                                    {/if}
-                                                </div>
-                                            {/if}
-                                        </td>
-                                        <td class="p-3 flex justify-center gap-2">
-                                            {#if user.role !== 'super_admin'}
-                                                <button class="p-1.5 text-blue-500 bg-blue-50 hover:bg-blue-100 rounded transition-colors" title="Sửa quyền kho" on:click={()=>openEditUser(user)}>
-                                                    <span class="material-icons-round text-base">edit</span>
-                                                </button>
-                                                <button class="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded transition-colors" title="Xóa user" on:click={()=>deleteUser(user.id)}>
-                                                    <span class="material-icons-round text-base">delete</span>
-                                                </button>
-                                            {/if}
-                                        </td>
-                                    </tr>
-                                {/each}
-                            </tbody>
-                        </table>
-                    </div>
-                {/if}
-            </div>
-
+                    <div class="mt-2 h-40 overflow-y-auto border rounded bg-white p-2">{#each $storeList as s}<div class="text-sm border-b py-1"><b>{s.id}</b> - {s.name}</div>{/each}</div>
+                </div>
+            {:else if saTab === 'account'}
+                <div class="section-box">
+                    <h4 class="title-label">Cấp Admin</h4>
+                    <label for="new-admin-user" class="sr-only">Username</label>
+                    <input id="new-admin-user" class="input-std w-full mb-2" placeholder="User" bind:value={newAdminUser}>
+                    <label for="new-admin-pass" class="sr-only">Password</label>
+                    <input id="new-admin-pass" class="input-std w-full mb-2" placeholder="Pass" bind:value={newAdminPass}>
+                    <div class="h-32 overflow-y-auto border p-2 mb-2 bg-white grid grid-cols-2">{#each $storeList as s}<label class="flex gap-2"><input type="checkbox" bind:group={selectedStoresForAdmin} value={s.id}>{s.name}</label>{/each}</div>
+                    <button class="btn-primary w-full" on:click={createAdminAccount}>Tạo</button>
+                </div>
+            {:else}
+                <div class="section-box h-96 overflow-y-auto bg-white"><table class="w-full text-sm"><thead><tr><th>User</th><th>Role</th><th>Kho</th><th>Act</th></tr></thead><tbody>{#each allUsers as u}<tr class="border-b hover:bg-gray-50"><td class="p-2 font-bold">{u.username}</td><td class="p-2">{u.role}</td><td class="p-2">{u.storeIds?.join(', ')}</td><td class="p-2">{#if u.role!=='super_admin'}<button class="text-blue-500" on:click={()=>openEditUser(u)}>Sửa</button> <button class="text-red-500" on:click={()=>deleteUser(u.id)}>Xóa</button>{/if}</td></tr>{/each}</tbody></table>{#if isEditingUser}<div class="fixed inset-0 bg-black/50 flex items-center justify-center"><div class="bg-white p-4 rounded"><h4>Sửa {editingUser.username}</h4><div class="h-40 overflow-y-auto border p-2 my-2">{#each $storeList as s}<label class="block"><input type="checkbox" bind:group={editSelectedStores} value={s.id}>{s.name}</label>{/each}</div><button class="btn-primary" on:click={saveEditUser}>Lưu</button> <button class="btn-std ml-2" on:click={()=>isEditingUser=false}>Hủy</button></div></div>{/if}</div>
+            {/if}
         {:else}
-            
-            <div class="mb-6 border-b pb-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                <h4 class="text-sm font-bold text-slate-700 uppercase mb-3 flex items-center gap-2">
-                    <span class="material-icons-round text-blue-500">group_add</span>
-                    1. Cấp quyền nhân sự
-                </h4>
-                
-                <label for="excel-upload-btn" class="flex flex-col items-center justify-center gap-2 w-full p-6 bg-blue-50 border-2 border-dashed border-blue-300 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors text-blue-700 font-bold relative group">
-                    <span class="material-icons-round text-4xl group-hover:scale-110 transition-transform">upload_file</span> 
-                    <span>{isUploading ? 'Đang tải lên...' : 'Bấm để chọn file Excel danh sách'}</span>
-                    <input id="excel-upload-btn" type="file" class="hidden" accept=".xlsx, .xls" on:change={handleExcelUpload} disabled={isUploading} />
-                </label>
-                
-                <div class="mt-3 text-xs text-gray-500 bg-gray-50 p-2 rounded border">
-                    <p><b>Yêu cầu file Excel:</b> Cần có các cột <code>username</code>, <code>pass</code>.</p>
-                    <p>Tùy chọn: <code>name</code> (Tên hiển thị), <code>role</code> (nhập 'admin' để cấp quyền quản lý), <code>makho</code> (nếu muốn gán kho khác).</p>
+            <div id="section-upload" class="mb-6 border-b pb-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                <div class="flex justify-between items-center mb-3">
+                    <h4 class="header-icon text-blue-600"><span class="material-icons-round">group_add</span> 1. Cấp quyền nhân sự (App Login)</h4>
+                    <span class="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-lg border border-blue-200">Đã cấp: {authorizedUserCount} User</span>
                 </div>
+                <label class="flex flex-col items-center justify-center gap-2 w-full p-6 bg-blue-50 border-2 border-dashed border-blue-300 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors text-blue-700 font-bold">
+                    <span class="material-icons-round text-4xl">upload_file</span> 
+                    <span>{isUploading?'Đang tải...':'Chọn file Excel danh sách'}</span>
+                    <input type="file" class="hidden" accept=".xlsx" on:change={handleExcelUpload}>
+                </label>
+                <div class="mt-2 text-[10px] text-gray-400 italic pl-2">* File Excel cần có cột: <code>username</code>, <code>pass</code>.</div>
             </div>
 
-            <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                <h4 class="text-sm font-bold text-slate-700 uppercase mb-3 flex items-center gap-2">
-                    <span class="material-icons-round text-orange-500">playlist_add_check</span> 
-                    2. Cấu hình việc mẫu
-                </h4>
-                
-                <div class="flex gap-2 mb-3">
-                    <select bind:value={activeType} class="w-full p-2 border rounded bg-gray-50 font-medium focus:ring-2 focus:ring-orange-200 outline-none" on:change={cancelEdit}>
-                        <option value="warehouse">📦 Kho</option>
-                        <option value="cashier">💰 Thu Ngân</option>
-                    </select>
-                </div>
-
+            <div id="section-template" class="mb-6 border-b pb-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                <h4 class="header-icon text-orange-500"><span class="material-icons-round">playlist_add_check</span> 2. Cấu hình việc mẫu</h4>
+                <div class="flex gap-2 mb-3"><select bind:value={activeType} class="w-full p-2 border rounded bg-gray-50 font-medium outline-none focus:ring-2 focus:ring-orange-200" on:change={cancelEdit} aria-label="Chọn loại việc"><option value="warehouse">📦 Kho</option><option value="cashier">💰 Thu Ngân</option></select></div>
                 <div class="flex flex-col gap-2 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                     <div class="flex gap-2">
-                        <input type="text" bind:value={newTime} class="w-24 text-center p-2 border rounded font-mono" placeholder="08:00">
-                        <input type="text" bind:value={newTaskTitle} class="flex-1 p-2 border rounded" placeholder="Tên công việc..." on:keydown={(e)=>e.key==='Enter'&&saveTemplateTask()}>
+                        <label for="task-time" class="sr-only">Giờ thực hiện</label>
+                        <input id="task-time" type="text" bind:value={newTime} class="w-24 text-center p-2 border rounded font-mono" placeholder="08:00">
+                        <label for="task-title" class="sr-only">Tên công việc</label>
+                        <input id="task-title" type="text" bind:value={newTaskTitle} class="flex-1 p-2 border rounded" placeholder="Tên công việc..." on:keydown={(e)=>e.key==='Enter'&&saveTemplateTask()}>
                     </div>
-                    
                     <div class="flex justify-between items-center">
-                        <label class="flex items-center gap-2 cursor-pointer select-none bg-white px-3 py-1.5 rounded border hover:bg-red-50 transition-colors">
-                            <input type="checkbox" bind:checked={isImportant} class="w-4 h-4 accent-red-500 cursor-pointer">
-                            <span class="text-sm font-bold {isImportant ? 'text-red-600' : 'text-gray-500'}">
-                                Công việc quan trọng {isImportant ? '⭐' : ''}
-                            </span>
-                        </label>
-                        
-                        <div class="flex gap-2">
-                            {#if editingIndex >= 0}
-                                <button class="px-3 py-1 bg-gray-300 text-gray-700 rounded text-sm font-bold hover:bg-gray-400" on:click={cancelEdit}>Hủy</button>
-                            {/if}
-                            <button 
-                                class="px-4 py-1 rounded text-sm font-bold text-white shadow-md transition-all {editingIndex >= 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600'}" 
-                                on:click={saveTemplateTask}
-                            >
-                                {editingIndex >= 0 ? 'Lưu Sửa' : 'Thêm Mới'}
-                            </button>
-                        </div>
+                        <label class="flex items-center gap-2 cursor-pointer select-none bg-white px-3 py-1.5 rounded border hover:bg-red-50"><input type="checkbox" bind:checked={isImportant} class="w-4 h-4 accent-red-500 cursor-pointer"><span class="text-sm {isImportant ? 'font-bold text-red-600' : 'text-gray-500'}">Quan trọng {isImportant ? '⭐' : ''}</span></label>
+                        <div class="flex gap-2">{#if editingIndex >= 0}<button class="px-3 py-1 bg-gray-300 text-gray-700 rounded text-sm font-bold hover:bg-gray-400" on:click={cancelEdit}>Hủy</button>{/if}<button class="px-4 py-1 rounded text-sm font-bold text-white shadow-md {editingIndex >= 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600'}" on:click={saveTemplateTask}>{editingIndex >= 0 ? 'Lưu Sửa' : 'Thêm Mới'}</button></div>
                     </div>
                 </div>
+                <div class="border rounded-lg overflow-hidden bg-white flex flex-col"><ul class="divide-y overflow-y-auto max-h-[40vh]">{#if $taskTemplate[activeType]}{#each $taskTemplate[activeType] as item, i}<li class="flex justify-between p-3 text-sm items-center hover:bg-blue-50 transition-colors group {editingIndex === i ? 'bg-blue-100' : ''}"><div class="flex items-center gap-2 flex-1 mr-2"><b class="bg-gray-200 px-1.5 py-0.5 rounded text-xs text-gray-700 font-mono">{item.time}</b><span class="{item.isImportant ? 'font-bold text-red-600' : 'text-gray-700'}">{item.isImportant ? '⭐ ' : ''}{item.title}</span></div><div class="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><button class="p-1.5 text-blue-500 bg-white border rounded shadow-sm" on:click={()=>startEdit(i, item)}>🖊️</button><button class="p-1.5 text-red-500 bg-white border rounded shadow-sm" on:click={()=>removeTemplateTask(i)}>🗑️</button></div></li>{/each}{/if}</ul></div>
+            </div>
+
+            <div id="section-schedule" class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-6">
+                <div id="section-schedule-header" class="flex justify-between items-center mb-3">
+                    <h4 class="header-icon text-pink-600"><span class="material-icons-round">calendar_month</span> 3. Phân Ca Tự Động</h4>
+                </div>
                 
-                <div class="border rounded-lg overflow-hidden bg-white flex flex-col">
-                    <div class="bg-gray-100 p-2 text-xs font-bold text-gray-500 flex justify-between border-b">
-                        <span>DANH SÁCH ({$taskTemplate[activeType]?.length || 0})</span>
-                        <span>Thao tác</span>
-                    </div>
+                <div class="space-y-4">
+                    <div id="sch-step-1" class="bg-white p-3 rounded-lg border shadow-sm"><div class="flex justify-between items-center"><span class="text-sm font-bold text-gray-700">Nhân sự sẵn sàng: <span class="text-lg text-blue-600 font-mono">{scheduleStaffList.length}</span></span><label class="cursor-pointer bg-blue-50 text-blue-700 text-xs font-bold px-3 py-2 rounded hover:bg-blue-100 flex items-center gap-1 border border-blue-200"><span class="material-icons-round text-sm">upload_file</span> Upload Excel<input type="file" class="hidden" accept=".xlsx" on:change={handleScheduleExcel}></label></div>{#if scheduleStaffList.length===0}<p class="text-[10px] text-gray-400 mt-1 italic">* File: Cột Tên nhân viên, Giới tính.</p>{/if}</div>
                     
-                    <ul class="divide-y overflow-y-auto max-h-[60vh] overscroll-contain">
-                        {#if $taskTemplate[activeType]}
-                            {#each $taskTemplate[activeType] as item, i}
-                            <li class="flex justify-between p-3 text-sm items-center hover:bg-blue-50 transition-colors group {editingIndex === i ? 'bg-blue-100' : ''}">
-                                <div class="flex items-center gap-2 overflow-hidden flex-1 mr-2">
-                                    <b class="bg-gray-200 px-1.5 py-0.5 rounded text-xs text-gray-700 font-mono flex-shrink-0">{item.time}</b> 
-                                    <span class="truncate block {item.isImportant ? 'font-bold text-red-600' : 'text-gray-700'}">
-                                        {item.isImportant ? '⭐ ' : ''}{item.title}
-                                    </span>
-                                </div>
-                                
-                                <div class="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                    <button class="p-1.5 text-blue-500 bg-white hover:bg-blue-100 rounded border border-gray-200 shadow-sm" title="Sửa" on:click={()=>startEdit(i, item)}>
-                                        <span class="material-icons-round text-base">edit</span>
-                                    </button>
-                                    <button class="p-1.5 text-red-500 bg-white hover:bg-red-100 rounded border border-gray-200 shadow-sm" title="Xóa" on:click={()=>removeTemplateTask(i)}>
-                                        <span class="material-icons-round text-base">delete</span>
-                                    </button>
-                                </div>
-                            </li>
-                            {/each}
-                        {/if}
-                    </ul>
+                    <div id="sch-step-2" class="bg-white rounded-lg border shadow-sm overflow-hidden"><table class="w-full text-sm text-left"><thead class="bg-gray-100 text-gray-600 font-bold text-xs uppercase"><tr><th class="p-3 border-b">Tên Ca</th><th class="p-3 border-b w-32 text-center">Khung Giờ</th><th class="p-3 border-b w-24 text-center">Số Lượng</th></tr></thead><tbody class="divide-y">{#each shiftInputs as shift}<tr class="hover:bg-gray-50"><td class="p-2 pl-3 font-bold text-gray-700 align-middle"><span class="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-[10px] mr-2 border">{shift.id.toUpperCase()}</span>{shift.label}</td><td class="p-2 align-middle"><input type="text" bind:value={shift.time} class="w-full border-b border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-center font-mono text-xs py-1 text-gray-600" aria-label={`Thời gian ${shift.label}`}></td><td class="p-2 align-middle text-center pr-3"><div class="flex items-center justify-center gap-1"><input type="number" bind:value={shift.qty} class="w-14 border rounded p-1 text-center font-bold text-indigo-600 bg-indigo-50 outline-none focus:ring-1 focus:ring-indigo-500" aria-label={`Số lượng ${shift.label}`}><span class="text-[10px] text-gray-400">NS</span></div></td></tr>{/each}</tbody></table></div>
+                    
+                    <div id="sch-step-3" class="grid grid-cols-3 gap-3">
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-3 flex flex-col items-center shadow-sm"><span class="material-icons-round text-red-500 mb-1">local_shipping</span><label for="gh-qty" class="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-1">Giao Hàng</label><input id="gh-qty" type="number" bind:value={ghQty} class="w-16 border border-red-300 rounded p-1 text-center font-bold text-red-800 bg-white outline-none focus:ring-2 focus:ring-red-400"></div>
+                        <div class="bg-purple-50 border border-purple-200 rounded-lg p-3 flex flex-col items-center shadow-sm"><span class="material-icons-round text-purple-500 mb-1">point_of_sale</span><label for="tn-qty" class="text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">Thu Ngân</label><input id="tn-qty" type="number" bind:value={roleConfig.tn} class="w-16 border border-purple-300 rounded p-1 text-center font-bold text-purple-800 bg-white outline-none focus:ring-2 focus:ring-purple-400"></div>
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-3 flex flex-col items-center shadow-sm"><span class="material-icons-round text-green-500 mb-1">inventory_2</span><label for="kho-qty" class="text-[10px] font-bold text-green-700 uppercase tracking-wider mb-1">Kho</label><input id="kho-qty" type="number" bind:value={roleConfig.kho} class="w-16 border border-green-300 rounded p-1 text-center font-bold text-green-800 bg-white outline-none focus:ring-2 focus:ring-green-400"></div>
+                    </div>
+                     
+                    <div id="sch-step-4" class="flex items-center gap-3 mt-2">
+                        <button id="btn-save-config" class="px-4 py-2 bg-blue-500 text-white rounded-lg font-bold shadow-sm hover:bg-blue-600 transition-colors flex items-center gap-2" on:click={()=>saveShiftConfig(false)}><span class="material-icons-round text-sm">save</span> Lưu Cài Đặt</button>
+                        <div class="flex-1 flex items-center gap-2 bg-gray-100 px-3 py-2 rounded-lg border border-gray-200"><span class="text-xs font-bold text-gray-500">Tháng:</span><input type="number" bind:value={scheduleMonth} class="w-8 bg-transparent text-center font-bold outline-none" aria-label="Tháng"><span class="text-gray-400">/</span><input type="number" bind:value={scheduleYear} class="w-12 bg-transparent text-center font-bold outline-none" aria-label="Năm"></div>
+                        <button class="flex-[2] bg-pink-600 text-white py-2.5 rounded-lg font-bold hover:bg-pink-700 shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2" on:click={handleGenerateSchedule} disabled={scheduleStaffList.length===0}><span class="material-icons-round">auto_awesome</span> TẠO LỊCH TỰ ĐỘNG</button>
+                    </div>
                 </div>
             </div>
         {/if}
     </div>
-
-    <div class="p-4 border-t bg-slate-50">
-      <button class="w-full py-3 rounded-xl font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 transition-colors" on:click={() => dispatch('close')}>Đóng</button>
-    </div>
+    <div class="p-4 border-t bg-slate-50"><button class="w-full py-3 rounded-xl font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 transition-colors" on:click={()=>dispatch('close')}>Đóng Cài Đặt</button></div>
   </div>
+  
+  {#if showAdminTour}
+      <TourGuide steps={adminSteps} on:complete={() => { showAdminTour = false; localStorage.setItem(adminTourKey, 'true'); }} />
+  {/if}
 </div>
 
 <style>
     .animate-popIn { animation: popIn 0.2s ease-out; } 
     @keyframes popIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .btn-tab { @apply px-4 py-2 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 transition-colors; }
+    .btn-tab.active { @apply bg-indigo-600 text-white shadow-md border-transparent; }
+    .section-box { @apply bg-white p-4 rounded-xl border border-gray-200 shadow-sm; }
+    .title-label { @apply text-sm font-bold text-gray-500 uppercase mb-3; }
+    .header-icon { @apply text-sm font-bold uppercase mb-3 flex items-center gap-2; }
+    .input-std { @apply p-2 border rounded outline-none focus:ring-2 focus:ring-indigo-100 transition-all; }
+    .btn-primary { @apply px-4 py-2 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 shadow-sm transition-transform active:scale-95; }
+    .btn-std { @apply px-3 py-2 bg-white border rounded text-gray-700 font-bold hover:bg-gray-50; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 </style>
