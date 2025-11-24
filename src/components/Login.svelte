@@ -18,14 +18,12 @@
       const demoStoreId = 'DEMO';
       const batch = writeBatch(db);
       
-      // 1. Kiểm tra xem đã có dữ liệu chưa
-      const checkRef = doc(db, 'settings', `template_${demoStoreId}`);
-      const checkSnap = await getDoc(checkRef);
-      if (checkSnap.exists()) return; // Đã có thì thôi
+      // --- THAY ĐỔI QUAN TRỌNG: BỎ QUA KIỂM TRA TỒN TẠI ---
+      // Trước đây: if (checkSnap.exists()) return;
+      // Bây giờ: Luôn chạy để ghi đè dữ liệu cũ bằng dữ liệu xoay ca mới
+      console.log("♻️ Đang buộc tạo lại dữ liệu Demo (Force Reset)...");
 
-      console.log("⏳ Đang khởi tạo dữ liệu Demo Chất Lượng Cao...");
-
-      // 2. Tạo 10 Nhân Sự Ảo
+      // 1. Tạo 10 Nhân Sự Ảo
       const demoStaff = [
           { u: 'nv_a', n: 'Nguyễn Văn An', g: 'Nam' }, { u: 'nv_b', n: 'Trần Thị Bình', g: 'Nữ' },
           { u: 'nv_c', n: 'Lê Văn Cường', g: 'Nam' }, { u: 'nv_d', n: 'Phạm Thị Dung', g: 'Nữ' },
@@ -49,7 +47,7 @@
           updatedAt: serverTimestamp()
       });
 
-      // 3. Tạo Việc Mẫu (Template)
+      // 2. Tạo Việc Mẫu (Template)
       batch.set(doc(db, 'settings', `template_${demoStoreId}`), {
           warehouse: [
               { time: '08:00', title: 'Kiểm tra hàng nhập đầu ngày', isImportant: true },
@@ -62,7 +60,7 @@
           ]
       });
 
-      // 4. Tạo Task Thực Tế
+      // 3. Tạo Task Thực Tế
       const today = getTodayStr();
       const tasks = [
           { type: 'warehouse', time: '08:00', title: 'Kiểm tra hàng nhập đầu ngày', imp: true, comp: true },
@@ -82,20 +80,28 @@
           });
       });
 
-      // 5. TẠO LỊCH PHÂN CA THẬT (3 Tháng liên tiếp)
-      // Sử dụng chính thuật toán generateMonthlySchedule để lịch Demo nhìn xịn như thật
+      // 4. TẠO LỊCH PHÂN CA THẬT (CA XOAY VÒNG - ROTATING SHIFTS)
       const demoStaffList = demoStaff.map(s => ({ id: s.u, name: s.n, gender: s.g }));
       
-      // Cấu hình giả lập
-      const demoInputs = { c1: 1, c2: 3, c3: 2, c4: 2, c5: 3, c6: 1, gh: 1 }; // Tổng ~13 slots cho 10 người
+      // Cấu hình giả lập tăng độ khó để ép xoay ca
+      const demoInputs = { c1: 1, c2: 2, c3: 2, c4: 2, c5: 2, c6: 1, gh: 1 }; 
       const computedShifts = calculateShiftModes(demoInputs, demoStaffList.length);
-      const demoRoleConfig = { tn: 2, kho: 2 };
+      const demoRoleConfig = { tn: 3, kho: 3 }; 
 
       const now = new Date();
-      let prevScheduleData = null; // Dữ liệu tháng trước để nối
+      
+      // LOGIC MỚI: Random chỉ số tích lũy ban đầu để phá vỡ thế cân bằng tĩnh
+      let prevScheduleData = {
+          endOffset: Math.floor(Math.random() * demoStaffList.length), 
+          stats: demoStaffList.map(s => ({
+              id: s.id,
+              totalHours: Math.floor(Math.random() * 40), // Random 0-40h ban đầu
+              gh: Math.floor(Math.random() * 5),
+              tn: Math.floor(Math.random() * 5),
+              kho: Math.floor(Math.random() * 5)
+          }))
+      };
 
-      // Tạo ngược từ T-2 đến T (Để tháng T là mới nhất)
-      // Logic loop: i=2 (T-2), i=1 (T-1), i=0 (T)
       const monthsToGen = [];
       for (let i = 2; i >= 0; i--) {
           const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -108,21 +114,19 @@
               computedShifts, 
               demoRoleConfig, 
               t.m, t.y, 
-              prevScheduleData // Nối tiếp tháng trước
+              prevScheduleData
           );
-
-          const mStr = `${t.y}-${String(t.m).padStart(2, '0')}`;
           
-          // Lưu lịch vào batch
+          const mStr = `${t.y}-${String(t.m).padStart(2, '0')}`;
           const schedDoc = doc(db, 'stores', demoStoreId, 'schedules', mStr);
           batch.set(schedDoc, {
               config: { 
                   shiftInputs: [
                       { id: 'c1', label: 'Ca 1', time: '08:00-09:00', qty: 1 },
-                      { id: 'c2', label: 'Ca 2', time: '09:00-12:00', qty: 3 },
+                      { id: 'c2', label: 'Ca 2', time: '09:00-12:00', qty: 2 },
                       { id: 'c3', label: 'Ca 3', time: '12:00-15:00', qty: 2 },
                       { id: 'c4', label: 'Ca 4', time: '15:00-18:00', qty: 2 },
-                      { id: 'c5', label: 'Ca 5', time: '18:00-21:00', qty: 3 },
+                      { id: 'c5', label: 'Ca 5', time: '18:00-21:00', qty: 2 },
                       { id: 'c6', label: 'Ca 6', time: '21:00-21:30', qty: 1 }
                   ],
                   roleConfig: demoRoleConfig, 
@@ -135,21 +139,19 @@
               updatedBy: 'System'
           });
 
-          // Cập nhật prevData cho vòng lặp sau
           prevScheduleData = {
               endOffset: result.endOffset,
               stats: result.staffStats.map(s => ({id: s.id, ...s.stats}))
           };
       }
       
-      // Lưu config Demo để lần sau load lại
       batch.set(doc(db, 'settings', `shift_config_${demoStoreId}`), {
           shiftInputs: [
               { id: 'c1', label: 'Ca 1 (Sáng)', time: '08:00 - 09:00', qty: 1 },
-              { id: 'c2', label: 'Ca 2 (Sáng)', time: '09:00 - 12:00', qty: 3 },
+              { id: 'c2', label: 'Ca 2 (Sáng)', time: '09:00 - 12:00', qty: 2 },
               { id: 'c3', label: 'Ca 3 (Trưa)', time: '12:00 - 15:00', qty: 2 },
               { id: 'c4', label: 'Ca 4 (Chiều)', time: '15:00 - 18:00', qty: 2 },
-              { id: 'c5', label: 'Ca 5 (Tối)', time: '18:00 - 21:00', qty: 3 },
+              { id: 'c5', label: 'Ca 5 (Tối)', time: '18:00 - 21:00', qty: 2 },
               { id: 'c6', label: 'Ca 6 (Đêm)', time: '21:00 - 21:30', qty: 1 }
           ],
           roleConfig: demoRoleConfig,
@@ -158,25 +160,22 @@
       });
 
       await batch.commit();
-      console.log("✅ Đã bơm dữ liệu Demo Xịn thành công!");
+      console.log("✅ Force Reset: Đã ghi đè dữ liệu Demo mới!");
   }
 
   // --- LOGIN HANDLER ---
   async function handleLogin() {
-    isLoading = true; errorMsg = 'Đang kiểm tra...';
+    isLoading = true;
+    errorMsg = 'Đang kiểm tra...';
     const cleanU = safeString(username).toLowerCase();
     const cleanP = safeString(password);
 
-    // XỬ LÝ ĐĂNG NHẬP DEMO
     if (cleanU === 'demo' && cleanP === '123456') {
         try {
-            await seedDemoData();
-            
-            // CẤP QUYỀN ADMIN CHO DEMO (Để trải nghiệm full tính năng)
+            await seedDemoData(); // Luôn chạy hàm này để reset
             const demoUser = {
                 username: 'demo', name: 'Quản Lý Demo',
-                role: 'admin', // Role thật để mở khóa tính năng
-                storeIds: ['DEMO'], storeId: 'DEMO'
+                role: 'admin', storeIds: ['DEMO'], storeId: 'DEMO'
             };
             setUser(demoUser);
             return; 
@@ -188,15 +187,16 @@
         }
     }
 
-    // LOGIN THƯỜNG
     if (cleanU === 'setup' && cleanP === 'Linh30!0') {
         try {
             await setDoc(doc(db, 'users', 'admin'), {
                 username: 'admin', username_idx: 'admin', pass: 'Linh30!0', name: 'Super Admin', 
                 role: 'super_admin', storeIds: [], createdAt: serverTimestamp()
             });
-            alert("✅ Đã tạo User: admin / Linh30!0"); username = 'admin'; password = '123456'; isSuperAdminLogin = true; handleLogin(); return;
-        } catch (e) { alert(e.message); isLoading = false; return; }
+            alert("✅ Đã tạo User: admin / Linh30!0"); username = 'admin'; password = '123456';
+            isSuperAdminLogin = true; handleLogin(); return;
+        } catch (e) { alert(e.message); isLoading = false; return;
+        }
     }
 
     try {
@@ -223,7 +223,6 @@
 
       if (foundUser) setUser(foundUser);
       else errorMsg = isSuperAdminLogin ? 'Bạn không có quyền Super Admin!' : 'Sai mật khẩu hoặc Tài khoản chưa được gán kho!';
-
     } catch (err) { console.error(err); errorMsg = err.message; } 
     finally { isLoading = false; }
   }
@@ -242,20 +241,22 @@
       </div>
 
       <div class="input-wrapper">
-        <span class="material-icons-round input-icon">person</span>
-        <input class="input-field" type="text" bind:value={username} placeholder="Tên đăng nhập" required>
+        <label for="username-field" class="sr-only">Tên đăng nhập</label>
+        <span class="material-icons-round input-icon" aria-hidden="true">person</span>
+        <input id="username-field" class="input-field" type="text" bind:value={username} placeholder="Tên đăng nhập" required>
       </div>
 
       <div class="input-wrapper">
-        <span class="material-icons-round input-icon">lock</span>
-        <input class="input-field" type={showPassword?'text':'password'} bind:value={password} placeholder="Mật khẩu" required style="padding-right:40px!important">
-        <button type="button" class="eye-icon" on:click={()=>showPassword=!showPassword}>
+        <label for="password-field" class="sr-only">Mật khẩu</label>
+        <span class="material-icons-round input-icon" aria-hidden="true">lock</span>
+        <input id="password-field" class="input-field" type={showPassword?'text':'password'} bind:value={password} placeholder="Mật khẩu" required style="padding-right:40px!important">
+        <button type="button" class="eye-icon" on:click={()=>showPassword=!showPassword} aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}>
             <span class="material-icons-round text-gray-400">{showPassword?'visibility':'visibility_off'}</span>
         </button>
       </div>
       
       <button type="submit" class="btn-grad" disabled={isLoading}>{isLoading?'...':(isSuperAdminLogin?'LOGIN ADMIN':'VÀO KHO')}</button>
-      <p class="error-msg">{errorMsg}</p>
+      <p class="error-msg" role="alert">{errorMsg}</p>
       
       <div class="mt-4 text-xs text-gray-400">
           TK Demo: <b>demo</b> / <b>123456</b> (Full Quyền)
@@ -279,4 +280,5 @@
   .btn-grad { width: 100%; padding: 12px; border: none; border-radius: 10px; background: linear-gradient(to right, #667eea, #764ba2); color: white; font-weight: 700; cursor: pointer; font-size: 1rem; margin-top: 10px; }
   .btn-grad:disabled { opacity: 0.7; cursor: not-allowed; }
   .error-msg { color: #ff4757; margin-top: 10px; font-size: 0.9rem; font-weight: bold; min-height: 20px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 </style>
