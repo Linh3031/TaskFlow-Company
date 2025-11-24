@@ -10,17 +10,24 @@
 
   onMount(() => {
     window.addEventListener('beforeinstallprompt', (e) => {
+      // Ngăn trình duyệt hiển thị popup mặc định xấu xí
       e.preventDefault();
+      // Lưu sự kiện lại để dùng sau khi bấm nút
       deferredPrompt = e;
+      // Lúc này mới chính thức hiện nút (cho người dùng thường)
       showInstallBtn = true;
+      console.log("✅ PWA Ready: beforeinstallprompt fired");
     });
 
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
     const isInStandaloneMode = ('standalone' in window.navigator) && (window.navigator.standalone);
+    
+    // Logic cho iOS (Luôn hiện nếu chưa cài, vì iOS không có beforeinstallprompt)
     if (isIos && !isInStandaloneMode) {
       showInstallBtn = true;
     }
     
+    // Logic cho Admin: Luôn hiện nút để test, nhưng cần xử lý khi bấm
     if ($currentUser?.role?.includes('admin')) {
       showInstallBtn = true;
     }
@@ -28,15 +35,27 @@
 
   function handleInstall() {
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+    
     if (isIos) {
+      // 1. Xử lý iOS: Hiện hướng dẫn thủ công
       dispatch('openIosGuide');
     } else if (deferredPrompt) {
+      // 2. Xử lý Android chuẩn: Gọi prompt hệ thống
       deferredPrompt.prompt();
       deferredPrompt.userChoice.then((choiceResult) => {
-        if (choiceResult.outcome === 'accepted') console.log('Accepted');
+        if (choiceResult.outcome === 'accepted') {
+            console.log('User accepted the install prompt');
+        } else {
+            console.log('User dismissed the install prompt');
+        }
         deferredPrompt = null;
         showInstallBtn = false;
       });
+    } else {
+      // 3. FALLBACK QUAN TRỌNG (Khi nút hiện nhưng trình duyệt chưa sẵn sàng)
+      // Đây là trường hợp bạn gặp phải: Bấm vào không thấy gì.
+      alert("⚠️ Trình duyệt chưa gửi yêu cầu cài đặt.\n\nNguyên nhân:\n1. App đã được cài rồi.\n2. Hãy thử tải lại trang và đợi 3-5 giây.\n3. Hoặc dùng menu 'Thêm vào màn hình chính' (Install App) trên trình duyệt.");
+      console.warn("handleInstall called but deferredPrompt is null");
     }
   }
 

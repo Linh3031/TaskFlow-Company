@@ -22,7 +22,7 @@
 
   // TOUR GUIDE
   let showScheduleTour = false;
-  const scheduleTourKey = 'taskflow_shift_tour_v6_final'; // Force New Version
+  const scheduleTourKey = 'taskflow_shift_tour_v6_final'; 
   
   const scheduleSteps = [
       { target: '#sch-month-picker', title: '1. Chọn Thời Gian', content: 'Xem lại lịch sử hoặc tạo lịch tương lai.' },
@@ -30,7 +30,6 @@
       { target: '#sch-table-header', title: '3. Bảng Phân Ca', content: 'Theo dõi lịch làm việc chi tiết của toàn bộ nhân viên.' },
       { target: '#sch-stats-col', title: '4. Thống Kê Nhanh', content: 'Xem tổng giờ công và số ca (GH/TN/Kho) trong tháng hiện tại.' },
       { target: '#sch-first-staff', title: '5. Xem Lịch Cá Nhân', content: 'Bấm vào tên nhân viên để xem lịch riêng dạng tháng trên điện thoại.' },
-      // BƯỚC 6 ĐÃ SỬA ID TARGET VÀ NỘI DUNG
       { 
           target: '#tour-target-cell', 
           title: '6. Chỉnh Sửa Ca', 
@@ -250,10 +249,13 @@
             <div class="p-4 bg-gray-50 grid grid-cols-7 gap-2">
                 <div class="col-span-7 grid grid-cols-7 mb-2 text-center text-xs font-bold text-gray-400 uppercase"><span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span class="text-red-500">CN</span></div>
                 {#each selectedStaff.days as day}
-                    <div class="aspect-square rounded-lg flex flex-col items-center justify-center border shadow-sm relative {getShiftColor(day.shift)}">
-                        <span class="text-[10px] absolute top-1 left-1 opacity-50 font-bold">{day.day}</span>
-                        <span class="font-bold text-sm">{day.shift}</span>
-                        {#if day.role}<span class="text-[9px] font-bold bg-black/10 px-1 rounded mt-0.5">{day.role}</span>{/if}
+                    <div class="aspect-square rounded-lg flex flex-col p-1 border shadow-sm {getShiftColor(day.shift)}">
+                        <span class="text-[10px] opacity-50 font-bold leading-none">{day.day}</span>
+                        
+                        <div class="flex-1 flex items-center justify-center flex-col">
+                            <span class="font-bold text-sm leading-none">{day.shift}</span>
+                            {#if day.role}<span class="text-[8px] font-bold bg-black/10 px-1 rounded mt-0.5">{day.role}</span>{/if}
+                        </div>
                     </div>
                 {/each}
             </div>

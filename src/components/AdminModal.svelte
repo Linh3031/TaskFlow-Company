@@ -38,15 +38,26 @@
   let scheduleMonth = new Date().getMonth() + 1;
   let scheduleYear = new Date().getFullYear();
 
+  // LOGIC MỚI: Tự động nhảy năm khi tăng giảm tháng
+  $: {
+      if (scheduleMonth > 12) {
+          scheduleMonth = 1;
+          scheduleYear++;
+      } else if (scheduleMonth < 1) {
+          scheduleMonth = 12;
+          scheduleYear--;
+      }
+  }
+
   // TOUR GUIDE
   let showAdminTour = false;
-  const adminTourKey = 'taskflow_admin_tour_seen_v7'; // Bump version
+  const adminTourKey = 'taskflow_admin_tour_seen_v7';
   const adminSteps = [
       { target: '.admin-header', title: 'Khu Vực Quản Trị', content: 'Nơi cấu hình toàn bộ hoạt động cho kho.' },
       { target: '#section-upload', title: '1. Cấp Quyền App', content: 'Upload danh sách nhân viên để tạo tài khoản đăng nhập.' },
       { target: '#section-template', title: '2. Việc Mẫu', content: 'Tạo các đầu việc checklist cố định hàng ngày.' },
-      // Sửa lại target ID vào header để hiển thị đẹp hơn
       { target: '#section-schedule-header', title: '3. Phân Ca Tự Động', content: 'Upload nhân sự riêng, cấu hình định biên và tạo lịch công bằng tại đây.' },
+      { target: '#btn-sync-name', title: 'Mới: Cập Nhật Tên', content: 'Dùng tính năng này khi bạn đổi tên nhân viên cho ngắn gọn mà KHÔNG muốn làm mất lịch đã chia.' },
       { target: '#btn-help-admin', title: 'Hỗ Trợ', content: 'Bấm nút này để xem lại hướng dẫn bất cứ lúc nào.' }
   ];
 
@@ -128,8 +139,51 @@
     }
   }
 
+  async function syncStaffNamesToSchedule() {
+    if(scheduleStaffList.length === 0) return alert("Chưa có danh sách nhân viên để đồng bộ!");
+    try {
+        const targetStore = myStores[0];
+        if (!targetStore) throw new Error("Lỗi kho!");
+        const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`;
+        const scheduleRef = doc(db, 'stores', targetStore, 'schedules', scheduleId);
+        const snap = await getDoc(scheduleRef);
+        
+        if (!snap.exists()) return alert("Chưa có lịch của tháng này để cập nhật!");
+        
+        const scheduleData = snap.data();
+        let updatedCount = 0;
+        const updatedStats = scheduleData.stats.map(stat => {
+            const newInfo = scheduleStaffList.find(s => s.id === stat.id);
+            if (newInfo && newInfo.name !== stat.name) {
+                updatedCount++;
+                return { ...stat, name: newInfo.name };
+            }
+            return stat;
+        });
+        const updatedData = { ...scheduleData.data };
+        Object.keys(updatedData).forEach(day => {
+            updatedData[day] = updatedData[day].map(assign => {
+                 const newInfo = scheduleStaffList.find(s => s.id === assign.staffId);
+                 if (newInfo) return { ...assign, name: newInfo.name };
+                 return assign;
+            });
+        });
+        await updateDoc(scheduleRef, {
+            stats: updatedStats,
+            data: updatedData,
+            updatedBy: $currentUser.username + ' (Sync Name)'
+        });
+        alert(`✅ Đã cập nhật tên hiển thị mới cho lịch tháng ${scheduleMonth}!`);
+        dispatch('close');
+    } catch(e) {
+        alert("Lỗi đồng bộ: " + e.message);
+    }
+  }
+
   async function handleGenerateSchedule() {
       if(scheduleStaffList.length === 0) return alert("Chưa có nhân viên!");
+      if (!confirm(`⚠️ LƯU Ý QUAN TRỌNG:\n\nViệc "Tạo Lịch Tự Động" sẽ XÓA SẠCH lịch cũ và chia lại từ đầu tháng.\n\nNếu bạn chỉ muốn đổi tên nhân viên, hãy bấm "Hủy" và chọn nút màu Xanh Lá (Cập nhật tên).\n\nBạn có chắc chắn muốn chia lại lịch từ đầu không?`)) return;
+
       const inputs = { c1: shiftInputs[0].qty, c2: shiftInputs[1].qty, c3: shiftInputs[2].qty, c4: shiftInputs[3].qty, c5: shiftInputs[4].qty, c6: shiftInputs[5].qty, gh: ghQty };
       try {
           const targetStore = myStores[0];
@@ -168,8 +222,8 @@
     
     <div class="p-4 overflow-y-auto flex-1 bg-slate-50">
         {#if isSuperAdmin}
-            <div class="flex flex-wrap gap-2 mb-4 border-b pb-2"><button class="btn-tab {saTab==='store'?'active':''}" on:click={()=>saTab='store'}>1. Kho</button><button class="btn-tab {saTab==='account'?'active':''}" on:click={()=>saTab='account'}>2. Admin</button><button class="btn-tab {saTab==='user_manage'?'active':''}" on:click={()=>saTab='user_manage'}>3. User</button></div>
-            {#if saTab === 'store'}
+           <div class="flex flex-wrap gap-2 mb-4 border-b pb-2"><button class="btn-tab {saTab==='store'?'active':''}" on:click={()=>saTab='store'}>1. Kho</button><button class="btn-tab {saTab==='account'?'active':''}" on:click={()=>saTab='account'}>2. Admin</button><button class="btn-tab {saTab==='user_manage'?'active':''}" on:click={()=>saTab='user_manage'}>3. User</button></div>
+           {#if saTab === 'store'}
                 <div class="section-box">
                     <h4 class="title-label">Thêm Kho</h4>
                     <div class="flex gap-2">
@@ -243,9 +297,22 @@
                     </div>
                      
                     <div id="sch-step-4" class="flex items-center gap-3 mt-2">
-                        <button id="btn-save-config" class="px-4 py-2 bg-blue-500 text-white rounded-lg font-bold shadow-sm hover:bg-blue-600 transition-colors flex items-center gap-2" on:click={()=>saveShiftConfig(false)}><span class="material-icons-round text-sm">save</span> Lưu Cài Đặt</button>
-                        <div class="flex-1 flex items-center gap-2 bg-gray-100 px-3 py-2 rounded-lg border border-gray-200"><span class="text-xs font-bold text-gray-500">Tháng:</span><input type="number" bind:value={scheduleMonth} class="w-8 bg-transparent text-center font-bold outline-none" aria-label="Tháng"><span class="text-gray-400">/</span><input type="number" bind:value={scheduleYear} class="w-12 bg-transparent text-center font-bold outline-none" aria-label="Năm"></div>
-                        <button class="flex-[2] bg-pink-600 text-white py-2.5 rounded-lg font-bold hover:bg-pink-700 shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2" on:click={handleGenerateSchedule} disabled={scheduleStaffList.length===0}><span class="material-icons-round">auto_awesome</span> TẠO LỊCH TỰ ĐỘNG</button>
+                        <button id="btn-sync-name" class="px-3 py-2.5 bg-green-100 text-green-700 rounded-lg font-bold shadow-sm hover:bg-green-200 transition-colors flex items-center gap-1 border border-green-300" on:click={syncStaffNamesToSchedule} title="Chỉ cập nhật lại tên hiển thị, không chia lại ca">
+                            <span class="material-icons-round text-sm">sync_alt</span>
+                            <span class="text-xs">Cập nhật tên (Giữ lịch)</span>
+                        </button>
+
+                        <div class="flex-1 flex items-center gap-2 bg-gray-100 px-3 py-2 rounded-lg border border-gray-200">
+                            <span class="text-xs font-bold text-gray-500">Tháng:</span>
+                            <input type="number" bind:value={scheduleMonth} class="w-8 bg-transparent text-center font-bold outline-none" aria-label="Tháng" min="1" max="12">
+                            <span class="text-gray-400">/</span>
+                            <input type="number" bind:value={scheduleYear} class="w-12 bg-transparent text-center font-bold outline-none" aria-label="Năm">
+                        </div>
+                        
+                        <button class="flex-[1.5] bg-pink-600 text-white py-2.5 rounded-lg font-bold hover:bg-pink-700 shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-xs sm:text-sm" on:click={handleGenerateSchedule} disabled={scheduleStaffList.length===0}><span class="material-icons-round">auto_awesome</span> TẠO LỊCH (RESET)</button>
+                    </div>
+                    <div class="flex justify-start">
+                         <button id="btn-save-config" class="text-xs font-bold text-blue-500 hover:underline flex items-center gap-1" on:click={()=>saveShiftConfig(false)}><span class="material-icons-round text-sm">save</span> Lưu Cấu Hình Ca (Không tạo lịch)</button>
                     </div>
                 </div>
             </div>
