@@ -249,13 +249,17 @@
             <div class="p-4 bg-gray-50 grid grid-cols-7 gap-2">
                 <div class="col-span-7 grid grid-cols-7 mb-2 text-center text-xs font-bold text-gray-400 uppercase"><span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span class="text-red-500">CN</span></div>
                 {#each selectedStaff.days as day}
-                    <div class="aspect-square rounded-lg flex flex-col p-1 border shadow-sm {getShiftColor(day.shift)}">
-                        <span class="text-[10px] opacity-50 font-bold leading-none">{day.day}</span>
+                    <div class="relative aspect-square rounded-xl flex flex-col items-center justify-center shadow-sm transition-all border border-gray-100 overflow-hidden {getShiftColor(day.shift)}">
                         
-                        <div class="flex-1 flex items-center justify-center flex-col">
-                            <span class="font-bold text-sm leading-none">{day.shift}</span>
-                            {#if day.role}<span class="text-[8px] font-bold bg-black/10 px-1 rounded mt-0.5">{day.role}</span>{/if}
-                        </div>
+                        <span class="absolute top-1 left-1.5 text-[10px] font-bold opacity-60 leading-none">{day.day}</span>
+                        
+                        <span class="font-bold text-sm sm:text-base drop-shadow-sm">{day.shift}</span>
+                        
+                        {#if day.role}
+                            <span class="text-[8px] font-extrabold px-1.5 py-0.5 rounded mt-0.5 backdrop-blur-sm bg-white/30 shadow-sm">
+                                {day.role}
+                            </span>
+                        {/if}
                     </div>
                 {/each}
             </div>
