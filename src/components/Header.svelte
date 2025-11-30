@@ -1,9 +1,10 @@
 <script>
-  // Version 7.0 - Change Password Feature (User Self-Service)
-  import { createEventDispatcher, onMount } from 'svelte';
+  // Version 10.1 - Fix Dropdown Click Outside
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { currentUser, setUser } from '../lib/stores';
   import { db } from '../lib/firebase';
-  import { doc, updateDoc } from 'firebase/firestore';
+  import { doc, updateDoc, collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+  import NotificationDropdown from './NotificationDropdown.svelte';
 
   const dispatch = createEventDispatcher();
   
@@ -68,40 +69,67 @@
 
       changePassLoading = true;
       try {
-          // Cập nhật trên Firebase
-          await updateDoc(doc(db, 'users', $currentUser.username), {
-              pass: newPass
-          });
-
-          // Cập nhật Local Store
+          await updateDoc(doc(db, 'users', $currentUser.username), { pass: newPass });
           const updatedUser = { ...$currentUser, pass: newPass };
           setUser(updatedUser);
-
           alert("✅ Đổi mật khẩu thành công!");
           showProfileModal = false;
           oldPass = ''; newPass = '';
-      } catch (e) {
-          alert("Lỗi: " + e.message);
-      } finally {
-          changePassLoading = false;
+      } catch (e) { alert("Lỗi: " + e.message); } finally { changePassLoading = false; }
+  }
+
+  // --- LOGIC THÔNG BÁO ---
+  let notifications = [];
+  let unreadCount = 0;
+  let showNotifDropdown = false;
+  let unsubNotif = () => {};
+  
+  // BIẾN THAM CHIẾU DOM (ĐỂ CHECK CLICK OUTSIDE)
+  let notifContainer; 
+
+  // Hàm xử lý khi click chuột bất kỳ đâu trên màn hình
+  function handleWindowClick(event) {
+      // Nếu đang mở menu VÀ click ra ngoài container (nút chuông + menu)
+      if (showNotifDropdown && notifContainer && !notifContainer.contains(event.target)) {
+          showNotifDropdown = false;
       }
   }
+
+  // Lắng nghe thông báo Realtime
+  $: if ($currentUser) {
+      const q = query(
+          collection(db, 'notifications'), 
+          where('toUser', '==', $currentUser.username),
+          orderBy('createdAt', 'desc'),
+          limit(20)
+      );
+      unsubNotif = onSnapshot(q, (snapshot) => {
+          notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+          unreadCount = notifications.filter(n => !n.isRead).length;
+      });
+  }
+
+  onDestroy(() => {
+      unsubNotif();
+  });
 </script>
 
+<svelte:window on:click={handleWindowClick} />
+
 <header class="app-header bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10 shrink-0 sticky top-0">
-  <button class="flex items-center gap-3 hover:bg-gray-50 p-1 rounded-lg transition-colors text-left" on:click={() => showProfileModal = true}>
-    <div class="w-9 h-9 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold text-sm border border-indigo-200 shadow-sm">
+  <button class="flex items-center gap-3 hover:bg-gray-50 p-1 rounded-lg transition-colors text-left max-w-[50%]" on:click={() => showProfileModal = true}>
+    <div class="w-9 h-9 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold text-sm border border-indigo-200 shadow-sm shrink-0">
       {$currentUser?.name?.charAt(0).toUpperCase() || 'U'}
     </div>
-    <div class="flex flex-col justify-center">
-      <span class="font-bold text-gray-800 text-sm leading-tight">{$currentUser?.name || 'User'}</span>
+    <div class="flex flex-col justify-center overflow-hidden">
+      <span class="font-bold text-gray-800 text-sm leading-tight truncate w-full">{$currentUser?.name || 'User'}</span>
       <span class="text-[10px] font-bold text-green-600 flex items-center gap-1">
         <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Online
       </span>
     </div>
   </button>
   
-  <div class="flex items-center gap-2">
+  <div class="flex items-center gap-2 relative">
     {#if showInstallBtn}
       <button 
         id="btn-install"
@@ -122,6 +150,25 @@
       <span class="material-icons-round text-xl">help_outline</span>
     </button>
 
+    <div class="relative" bind:this={notifContainer}>
+        <button 
+            id="btn-notif"
+            class="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-slate-50 rounded-full transition-all {unreadCount > 0 ? 'animate-wiggle' : ''}" 
+            on:click={() => showNotifDropdown = !showNotifDropdown} 
+            title="Thông báo"
+        >
+            <span class="material-icons-round text-xl">notifications</span>
+            {#if unreadCount > 0}
+                <span class="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+            {/if}
+        </button>
+        {#if showNotifDropdown}
+            <NotificationDropdown {notifications} on:close={() => showNotifDropdown = false} />
+        {/if}
+    </div>
+
     {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
       <button 
         id="btn-admin"
@@ -132,14 +179,6 @@
         <span class="material-icons-round text-xl">settings</span>
       </button>
     {/if}
-    
-    <button 
-      class="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" 
-      on:click={handleLogout} 
-      title="Đăng xuất"
-    >
-      <span class="material-icons-round text-xl">logout</span>
-    </button>
   </div>
 </header>
 
@@ -155,16 +194,21 @@
         </div>
         
         <div class="space-y-3">
-            <div>
-                <label class="text-xs font-bold text-slate-500 uppercase">Mật khẩu cũ</label>
-                <input type="password" bind:value={oldPass} class="w-full mt-1 p-2 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 text-sm">
+            <div class="pt-2 border-t border-dashed border-slate-200">
+                <h4 class="text-xs font-bold text-slate-400 uppercase mb-2">Đổi mật khẩu</h4>
+                <div>
+                    <input type="password" bind:value={oldPass} placeholder="Mật khẩu cũ" class="w-full mb-2 p-2 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 text-sm">
+                </div>
+                <div>
+                    <input type="password" bind:value={newPass} placeholder="Mật khẩu mới (6+ ký tự)" class="w-full mb-2 p-2 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 text-sm">
+                </div>
+                <button class="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl shadow hover:bg-indigo-700 disabled:opacity-50 text-sm" on:click={handleChangePassword} disabled={changePassLoading}>
+                    {changePassLoading ? 'Đang lưu...' : 'Xác nhận đổi'}
+                </button>
             </div>
-            <div>
-                <label class="text-xs font-bold text-slate-500 uppercase">Mật khẩu mới</label>
-                <input type="password" bind:value={newPass} class="w-full mt-1 p-2 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 text-sm">
-            </div>
-            <button class="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 mt-2 disabled:opacity-50" on:click={handleChangePassword} disabled={changePassLoading}>
-                {changePassLoading ? 'Đang lưu...' : 'Đổi Mật Khẩu'}
+
+            <button class="w-full py-2 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 flex items-center justify-center gap-2 mt-4 text-sm" on:click={handleLogout}>
+                <span class="material-icons-round text-lg">logout</span> Đăng Xuất
             </button>
         </div>
     </div>
@@ -174,4 +218,6 @@
 <style>
     .animate-popIn { animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); } 
     @keyframes popIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+    @keyframes wiggle { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(10deg); } 75% { transform: rotate(-10deg); } }
+    .animate-wiggle { animation: wiggle 0.5s ease-in-out infinite; }
 </style>

@@ -1,5 +1,5 @@
 <script>
-  // Version 6.0 - Priority Sorting (Important First)
+  // Version 10.0 - Fix "activeTab not defined" by moving logic to Script
   import { createEventDispatcher } from 'svelte';
   import { currentTasks, currentUser } from '../lib/stores';
   import { formatDateTime } from '../lib/utils';
@@ -10,43 +10,58 @@
   $: myStores = $currentUser?.storeIds || [];
   $: showStoreBadge = myStores.length > 1;
 
+  // 1. Lọc theo Tab
   $: filteredTasks = $currentTasks.filter(t => t.type === activeTab);
   
-  // LOGIC SẮP XẾP MỚI
-  $: sortedTasks = filteredTasks.sort((a, b) => {
-      // 1. Sắp theo khung giờ trước
+  // 2. Sắp xếp (Copy mảng để tránh lỗi mutation)
+  $: sortedTasks = [...filteredTasks].sort((a, b) => {
       const timeA = a.timeSlot || "00:00";
       const timeB = b.timeSlot || "00:00";
       if (timeA !== timeB) return timeA.localeCompare(timeB);
       
-      // 2. Ưu tiên việc Quan Trọng (isImportant = true) lên đầu trong cùng khung giờ
-      // true = 1, false = 0 -> b - a để true lên trước
       const impA = a.isImportant ? 1 : 0;
       const impB = b.isImportant ? 1 : 0;
       if (impA !== impB) return impB - impA;
 
-      // 3. Sắp theo Mã Kho (nếu quản lý nhiều kho)
       const storeA = a.storeId || "";
       const storeB = b.storeId || "";
       if (storeA !== storeB) return storeA.localeCompare(storeB);
       
-      // 4. Cuối cùng là việc chưa làm lên trước
       return a.completed - b.completed;
   });
 
-  function shouldShowHeader(task, index, allTasks) {
-    if (activeTab === 'handover') return false;
-    const prevTask = allTasks[index - 1];
-    const currTime = task.timeSlot || "Khác";
-    const prevTime = prevTask?.timeSlot || "Khác";
-    return index === 0 || currTime !== prevTime;
-  }
+  // 3. XỬ LÝ DỮ LIỆU HIỂN THỊ (QUAN TRỌNG: TÍNH TOÁN TRƯỚC TẠI ĐÂY)
+  // Tạo ra một danh sách mới, đã tính sẵn header và format text
+  $: finalTasks = sortedTasks.map((task, index, array) => {
+      // Logic kiểm tra header
+      let showHeader = false;
+      if (activeTab !== 'handover') {
+          const prevTask = array[index - 1];
+          const currTime = task.timeSlot || "Khác";
+          const prevTime = prevTask?.timeSlot || "Khác";
+          showHeader = index === 0 || currTime !== prevTime;
+      }
+
+      // Logic tách chuỗi @tag
+      const rawTitle = task.title || "";
+      const regex = /@([a-zA-Z0-9_]+)/g;
+      const matches = rawTitle.match(regex) || [];
+      const mainText = rawTitle.replace(regex, '').trim();
+
+      // Trả về object đã xử lý
+      return {
+          ...task,
+          showHeader: showHeader, // Cờ hiển thị header
+          displayTitle: mainText, // Tên công việc sạch
+          displayTags: matches    // Danh sách tag
+      };
+  });
 </script>
 
 <div class="flex-1 overflow-y-auto pb-20 w-full px-1">
-  {#each sortedTasks as task, index (task.id)}
+  {#each finalTasks as task (task.id)}
     
-    {#if shouldShowHeader(task, index, sortedTasks)}
+    {#if task.showHeader}
       <div class="flex items-center gap-2 bg-cyan-50 text-cyan-800 px-4 py-2 rounded-lg mt-4 mb-2 font-bold text-sm shadow-sm border border-cyan-100">
         <span class="material-icons-round text-base">schedule</span> 
         {task.timeSlot || "Khác"}
@@ -68,7 +83,7 @@
       </div>
 
       <div class="flex-1 text-left">
-        <div class="text-sm leading-snug {task.isImportant ? 'font-bold text-red-800' : 'font-semibold text-gray-800'}">
+        <div class="text-sm leading-snug">
             {#if showStoreBadge && task.storeId}
                 <span class="inline-block bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded mr-1 font-bold tracking-wider align-middle border border-indigo-200 font-mono">
                     [{task.storeId}]
@@ -77,9 +92,16 @@
              {#if task.isImportant}
                 <span class="material-icons-round text-sm text-red-500 align-middle mr-1">star</span>
             {/if}
-            <span class:line-through={task.completed} class:text-gray-500={task.completed}>
-                {task.title}
+            
+            <span class="{task.isImportant ? 'font-bold text-red-800' : 'font-semibold text-gray-800'} {task.completed ? 'line-through text-gray-500' : ''}">
+                {task.displayTitle}
             </span>
+
+            {#if task.displayTags.length > 0}
+                <span class="ml-1 text-xs text-indigo-400 font-normal {task.completed ? 'text-gray-400 line-through' : ''}">
+                    - {task.displayTags.join(' ')}
+                </span>
+            {/if}
         </div>
         
         <div class="flex flex-wrap gap-2 mt-2">
@@ -108,7 +130,7 @@
     </button>
   {/each}
   
-  {#if sortedTasks.length === 0}
+  {#if finalTasks.length === 0}
     <div class="text-center py-10 text-gray-400 flex flex-col items-center">
         <span class="material-icons-round text-4xl mb-2 opacity-30">assignment_turned_in</span>
         <p class="text-sm">Chưa có công việc nào</p>
