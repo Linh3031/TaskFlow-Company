@@ -1,352 +1,409 @@
 <script>
+  // Version 6.1 - Demo Block Popup & Account List
   import { createEventDispatcher, onMount, tick } from 'svelte';
-  import { read, utils } from 'xlsx';
+  import { read, utils, writeFile } from 'xlsx';
   import { db } from '../lib/firebase';
-  import { 
-    collection, doc, setDoc, writeBatch, addDoc, serverTimestamp, 
-    onSnapshot, deleteDoc, updateDoc, query, where, getDocs, getDoc
-  } from 'firebase/firestore';
-  import { taskTemplate, currentUser, storeList } from '../lib/stores';
-  import { safeString, getTodayStr } from '../lib/utils';
-  import { generateMonthlySchedule, calculateShiftModes } from '../lib/scheduleLogic';
-  import TourGuide from './TourGuide.svelte';
+  import { doc, setDoc, serverTimestamp, getDoc, updateDoc, writeBatch, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
+  import { taskTemplate, currentUser } from '../lib/stores';
+  import { safeString } from '../lib/utils';
+  import { calculateCombosFromMatrix, generateMonthlySchedule } from '../lib/scheduleLogic';
+  import { optimizeSchedule } from '../lib/optimization';
+  import TourGuide from './TourGuide.svelte'; 
 
   const dispatch = createEventDispatcher();
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
-  $: myStoreId = $currentUser?.storeId;
   $: myStores = $currentUser?.storeIds || [];
-  let saTab = 'store';
-  let newStoreId='', newStoreName='', newAdminUser='', newAdminPass='', selectedStoresForAdmin=[], allUsers=[], isEditingUser=false, editingUser=null, editSelectedStores=[];
-  let activeType = 'warehouse';
-  let newTime = '08:00', newTaskTitle = '', isImportant = false, isUploading = false, editingIndex = -1;
-  let authorizedUserCount = 0;
+  
+  let targetStore = '';
+  $: if (myStores.length > 0 && !targetStore) { targetStore = myStores[0]; }
+  $: if (targetStore) { loadStoreData(); loadAccountList(); }
 
-  let scheduleStaffList = [];
-  let shiftInputs = [
-      { id: 'c1', label: 'Ca 1 (Sáng)', time: '08:00 - 09:00', qty: 6 },
-      { id: 'c2', label: 'Ca 2 (Sáng)', time: '09:00 - 12:00', qty: 15 },
-      { id: 'c3', label: 'Ca 3 (Trưa)', time: '12:00 - 15:00', qty: 12 },
-      { id: 'c4', label: 'Ca 4 (Chiều)', time: '15:00 - 18:00', qty: 12 },
-      { id: 'c5', label: 'Ca 5 (Tối)', time: '18:00 - 21:00', qty: 15 },
-      { id: 'c6', label: 'Ca 6 (Đêm)', time: '21:00 - 21:30', qty: 6 }
-  ];
-  let ghQty = 1;
-  let roleConfig = { tn: 4, kho: 4 };
-  let scheduleMonth = new Date().getMonth() + 1;
-  let scheduleYear = new Date().getFullYear();
+  $: isDemoMode = targetStore.includes('DEMO');
 
-  $: {
-      if (scheduleMonth > 12) {
-          scheduleMonth = 1;
-          scheduleYear++;
-      } else if (scheduleMonth < 1) {
-          scheduleMonth = 12;
-          scheduleYear--;
+  // --- HÀM CHẶN DEMO ---
+  function checkDemoAndBlock(e) {
+      if (isDemoMode) {
+          e.preventDefault(); // Chặn hành động mặc định (mở file picker)
+          e.stopPropagation();
+          alert("Tài khoản demo không có tính năng này, vui lòng liên hệ 3031 để được cấp quyền");
+          return true;
       }
+      return false;
   }
 
-  let showAdminTour = false;
-  const adminTourKey = 'taskflow_admin_tour_seen_v7';
-  const adminSteps = [
-      { target: '.admin-header', title: 'Khu Vực Quản Trị', content: 'Nơi cấu hình toàn bộ hoạt động cho kho.' },
-      { target: '#section-upload', title: '1. Cấp Quyền App', content: 'Upload danh sách nhân viên để tạo tài khoản đăng nhập.' },
-      { target: '#section-template', title: '2. Việc Mẫu', content: 'Tạo các đầu việc checklist cố định hàng ngày.' },
-      { target: '#section-schedule-header', title: '3. Phân Ca Tự Động', content: 'Upload nhân sự riêng, cấu hình định biên và tạo lịch công bằng tại đây.' },
-      { target: '#btn-sync-name', title: 'Mới: Cập Nhật Tên', content: 'Dùng tính năng này khi bạn đổi tên nhân viên cho ngắn gọn mà KHÔNG muốn làm mất lịch đã chia.' },
-      { target: '#btn-help-admin', title: 'Hỗ Trợ', content: 'Bấm nút này để xem lại hướng dẫn bất cứ lúc nào.' }
-  ];
-
-  onMount(async () => {
-    let unsubUsers = () => {};
-    if (isSuperAdmin) {
-        unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
-            const users = []; snap.forEach(d => users.push({ id: d.id, ...d.data() }));
-            allUsers = users.sort((a, b) => (a.role === 'admin' ? -1 : 1));
-        });
-    } else { countAuthorizedUsers(); }
-    await loadSavedData();
-
-    if (!localStorage.getItem(adminTourKey)) {
-        setTimeout(() => showAdminTour = true, 800);
-    }
-    return () => unsubUsers();
-  });
+  let activeSection = 'schedule'; 
+  let isLoading = false;
+  let showTour = false;
   
-  async function countAuthorizedUsers() { const targetStore = myStores[0]; if (!targetStore) return;
-    try { const q = query(collection(db, 'users'), where('storeIds', 'array-contains', targetStore)); const snap = await getDocs(q); authorizedUserCount = snap.size;
-    } catch (e) { console.error(e); } }
-  async function loadSavedData() { const targetStore = myStores[0]; if (!targetStore) return;
-    try { const configSnap = await getDoc(doc(db, 'settings', `shift_config_${targetStore}`)); if (configSnap.exists()) { const data = configSnap.data();
-    if (data.shiftInputs) shiftInputs = data.shiftInputs; if (data.roleConfig) roleConfig = data.roleConfig; if (data.ghQty !== undefined) ghQty = data.ghQty;
-    } const staffSnap = await getDoc(doc(db, 'settings', `staff_list_${targetStore}`)); if (staffSnap.exists() && staffSnap.data().staffList) { scheduleStaffList = staffSnap.data().staffList;
-    } } catch (e) { console.error(e); } }
-  async function saveShiftConfig(isSilent = false) { const targetStore = myStores[0];
-    if (!targetStore) return; try { await setDoc(doc(db, 'settings', `shift_config_${targetStore}`), { shiftInputs, roleConfig, ghQty, updatedAt: serverTimestamp(), updatedBy: $currentUser.username });
-    if (!isSilent) alert("✅ Đã lưu cấu hình!"); } catch (e) { if (!isSilent) alert("Lỗi: " + e.message);
-    } }
-  async function saveStaffList() { const targetStore = myStores[0]; if (!targetStore || scheduleStaffList.length === 0) return;
-    try { await setDoc(doc(db, 'settings', `staff_list_${targetStore}`), { staffList: scheduleStaffList, updatedAt: serverTimestamp() }); } catch (e) { console.error(e);
-    } }
+  // VARIABLES FOR ACCOUNTS TAB
+  let newAdminUser = ''; let newAdminPass = ''; let newAdminName = ''; let newAdminStore = '';
+  let accountList = [];
 
-  async function createStore() { if (!newStoreId || !newStoreName) return alert("Thiếu thông tin");
-    try { await setDoc(doc(db, 'stores', newStoreId.trim().toUpperCase()), { name: newStoreName.trim(), createdAt: serverTimestamp() }); alert("✅ Đã tạo kho!"); newStoreId=''; newStoreName='';
-    } catch(e){ alert(e.message); } }
-  async function createAdminAccount() { if (!newAdminUser || !newAdminPass || selectedStoresForAdmin.length===0) return alert("Thiếu thông tin");
-    try { await setDoc(doc(db, 'users', newAdminUser.trim().toLowerCase()), { username: newAdminUser.trim().toLowerCase(), username_idx: newAdminUser.trim().toLowerCase(), pass: newAdminPass, name: newAdminUser, role: 'admin', storeIds: selectedStoresForAdmin, createdAt: serverTimestamp() });
-    alert("✅ Đã tạo Admin!"); newAdminUser=''; newAdminPass=''; selectedStoresForAdmin=[]; } catch(e){ alert(e.message);
-    } }
-  async function deleteUser(uid) { if(confirm("Xóa user?")) try { await deleteDoc(doc(db,'users',uid)); } catch(e){ alert(e.message);
-    } }
-  function openEditUser(user) { editingUser=user; editSelectedStores=user.storeIds?[...user.storeIds]:[]; isEditingUser=true; }
-  async function saveEditUser() { if(!editingUser) return;
-    try{ await updateDoc(doc(db,'users',editingUser.id), {storeIds:editSelectedStores}); alert("✅ Xong!"); isEditingUser=false; editingUser=null; }catch(e){alert(e.message);} }
+  // ... (Các cấu hình Tour, Matrix, Schedule giữ nguyên) ...
+  const matrixSteps = [{ target: '#store-select-container', title: '1. Chọn Kho', content: 'Xác định kho bạn đang muốn thao tác cấu hình.' }, { target: '#btn-download-schedule-sample', title: '2. Tải Mẫu DS', content: 'Tải file Excel mẫu: Ho_Ten, Gioi_Tinh, Ma_Kho.' }, { target: '#btn-import-staff', title: '3. Import Nhân Sự', content: 'Upload danh sách để nạp nhân viên vào hệ thống phân ca.' }, { target: '#matrix-table', title: '4. Định Mức', content: 'Nhập số lượng nhân sự cần thiết cho từng ca.' }, { target: '#btn-calculate', title: '5. Tính Toán', content: 'Quy đổi định mức ra Combo.' }, { target: '#btn-preview', title: '6. Xem Trước', content: 'Tạo và tối ưu lịch.' }];
+  const templateSteps = [{ target: '#store-select-container', title: '1. Chọn Kho', content: 'Chọn kho để áp dụng mẫu công việc này.' }, { target: '#dept-select-container', title: '2. Chọn Bộ Phận', content: 'Chọn bộ phận muốn tạo việc mẫu.' }, { target: '#template-form', title: '3. Nhập Thông Tin', content: 'Điền giờ và tên công việc.' }, { target: '#btn-save-template', title: '4. Lưu Lại', content: 'Thêm vào danh sách.' }];
+  const accountSteps = [{ target: '#super-admin-area', title: '1. Khu Vực Super Admin', content: 'Chỉ Super Admin mới thấy khu vực này.' }, { target: '#btn-download-account-sample', title: '2. Tải Mẫu Cấp Quyền', content: 'File mẫu có 4 cột: username, pass, ma_kho, role.' }, { target: '#btn-upload-accounts', title: '3. Upload & Cấp Quyền', content: 'Hệ thống sẽ tạo tài khoản đăng nhập dựa trên file Excel.' }];
+  let currentSteps = matrixSteps;
+  function startAdminTour() { if (activeSection === 'schedule') currentSteps = matrixSteps; else if (activeSection === 'template') currentSteps = templateSteps; else currentSteps = accountSteps; showTour = true; }
 
-  async function handleExcelUpload(event) {
-    const file = event.target.files[0];
-    if(!file) return; event.target.value=null; isUploading=true;
-    try {
-      const data = await file.arrayBuffer(); const wb = read(data);
-      const sheet = wb.Sheets[wb.SheetNames[0]]; const raw = utils.sheet_to_json(sheet);
-      const batch = writeBatch(db); let c=0;
-      raw.forEach(r => { const nR={}; Object.keys(r).forEach(k=>nR[k.toLowerCase().trim()]=r[k]); const u = safeString(nR.username||nR.user); if(u) { const role = safeString(nR.role).toLowerCase()==='admin'?'admin':'staff'; const stores = safeString(nR.makho||nR.storeid)?[safeString(nR.makho||nR.storeid)]:myStores; batch.set(doc(db,'users',u.toLowerCase()), { username: u, username_idx:u.toLowerCase(), pass: safeString(nR.pass||nR.password), name: nR.name?safeString(nR.name):u, role, storeIds: stores }, {merge:true}); c++; } });
-      await batch.commit(); alert(`✅ Đồng bộ ${c} tài khoản!`); countAuthorizedUsers();
-    } catch(e){alert(e.message);} finally{isUploading=false;}
-  }
+  let previewScheduleData = null; let previewStats = []; let originalResult = null; let optimizationLogs = []; 
+  let scheduleMonth = new Date().getMonth() + 1; let scheduleYear = new Date().getFullYear();
+  let scheduleStaffList = []; let staffStats = { total: 0, male: 0, female: 0 };
   
-  function startEdit(i, item) { editingIndex=i;
-    newTime=item.time; newTaskTitle=item.title; isImportant=item.isImportant||false; }
-  function cancelEdit() { editingIndex=-1; newTaskTitle=''; isImportant=false; newTime='08:00'; }
-  async function saveTemplateTask() {
-      if(!newTaskTitle.trim()) return;
-      myStores.forEach(sId => { taskTemplate.update(curr => { const up={...$taskTemplate}; if(!up[activeType]) up[activeType]=[]; const item={title:newTaskTitle, time:newTime, isImportant}; if(editingIndex>=0) up[activeType][editingIndex]=item; else up[activeType].push(item); up[activeType].sort((a,b)=>(a.time||"00:00").localeCompare(b.time||"00:00")); setDoc(doc(db,'settings',`template_${sId}`), up); return up; }); if(editingIndex===-1) addDoc(collection(db,'tasks'),{type:activeType, title:newTaskTitle, timeSlot:newTime, completed:false, createdBy:'Admin', date:getTodayStr(), storeId:sId, isImportant, timestamp:serverTimestamp()}); });
-      if(editingIndex!==-1) alert("✅ Đã cập nhật!"); cancelEdit();
-  }
-  function removeTemplateTask(i) { if(!confirm("Xóa mẫu?")) return;
-    taskTemplate.update(curr => { const up={...curr}; up[activeType].splice(i,1); myStores.forEach(sId => setDoc(doc(db,'settings',`template_${sId}`), up)); return up; }); if(editingIndex===i) cancelEdit();
-    }
+  $: { if (scheduleStaffList && scheduleStaffList.length > 0) { try { staffStats = { total: scheduleStaffList.length, male: scheduleStaffList.filter(s => String(s.gender || '').trim().toLowerCase() === 'nam').length, female: scheduleStaffList.filter(s => String(s.gender || '').trim().toLowerCase() !== 'nam').length }; } catch (e) { staffStats = { total: scheduleStaffList.length, male: 0, female: 0 }; } } else { staffStats = { total: 0, male: 0, female: 0 }; } }
+  
+  const defaultMatrix = { c1: { kho: 0, tn: 0, tv: 0, gh: 0 }, c2: { kho: 0, tn: 0, tv: 0, gh: 0 }, c3: { kho: 0, tn: 0, tv: 0, gh: 0 }, c4: { kho: 0, tn: 0, tv: 0, gh: 0 }, c5: { kho: 0, tn: 0, tv: 0, gh: 0 }, c6: { kho: 0, tn: 0, tv: 0, gh: 0 } };
+  let shiftMatrix = JSON.parse(JSON.stringify(defaultMatrix));
+  let suggestedCombos = [];
+  $: totalCombos = suggestedCombos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
+  let comboTotalsMap = {};
+  $: { const map = {}; comboCols.forEach(code => { const items = suggestedCombos.filter(c => c.code === code); map[code] = items.reduce((sum, c) => sum + (parseInt(c.qty) || 0), 0); }); comboTotalsMap = map; }
+  const shiftCols = [ { id: 'c1', label: 'C1 (08-09h)' }, { id: 'c2', label: 'C2 (09-12h)' }, { id: 'c3', label: 'C3 (12-15h)' }, { id: 'c4', label: 'C4 (15-18h)' }, { id: 'c5', label: 'C5 (18-21h)' }, { id: 'c6', label: 'C6 (21-21h30)' } ];
+  const roleRows = [ { id: 'kho', label: 'Kho', color: 'text-orange-600 bg-orange-50 border-orange-100' }, { id: 'tn', label: 'Thu Ngân', color: 'text-purple-600 bg-purple-50 border-purple-100' }, { id: 'gh', label: 'Giao Hàng', color: 'text-blue-600 bg-blue-50 border-blue-100' }, { id: 'tv', label: 'Tư Vấn', color: 'text-gray-600 bg-gray-50 border-gray-200' } ];
+  const comboCols = ['123', '456', '23', '45', '2-5', '2345'];
+  let activeTemplateType = 'warehouse'; let newTemplateTime = '08:00'; let newTemplateTitle = ''; let newTemplateImportant = false; let selectedDays = [0, 1, 2, 3, 4, 5, 6]; let editingTemplateIndex = -1;
+  const weekDays = [{ val: 1, label: 'T2' }, { val: 2, label: 'T3' }, { val: 3, label: 'T4' }, { val: 4, label: 'T5' }, { val: 5, label: 'T6' }, { val: 6, label: 'T7' }, { val: 0, label: 'CN' }];
 
-  async function handleScheduleExcel(event) {
-      const file = event.target.files[0]; if(!file) return; event.target.value = null;
-    try { const data = await file.arrayBuffer(); const wb = read(data); const ws = wb.Sheets[wb.SheetNames[0]]; const json = utils.sheet_to_json(ws);
-    let count = 0; let newStaff = []; json.forEach(row => { let name = '', gender = 'Nữ'; Object.keys(row).forEach(key => { let k = key.toLowerCase(); if(k.includes('tên')||k.includes('nhân viên')||k.includes('name')) name=row[key]; if(k.includes('giới')||k.includes('nữ')||k.includes('gender')) gender=row[key]; }); if(name) { newStaff.push({ id: String(count+1), name, gender: String(gender).toLowerCase().includes('nam')?'Nam':'Nữ' }); count++; } });
-    scheduleStaffList = newStaff; await saveStaffList(); alert(`✅ Đã tải ${count} nhân sự!`); } catch(e) { alert("Lỗi đọc file: " + e.message);
-    }
-  }
+  // ... (Logic cũ giữ nguyên)
+  async function loadStoreData() { if (!targetStore) return; scheduleStaffList = []; shiftMatrix = JSON.parse(JSON.stringify(defaultMatrix)); suggestedCombos = []; previewScheduleData = null; try { const staffSnap = await getDoc(doc(db, 'settings', `staff_list_${targetStore}`)); if (staffSnap.exists()) scheduleStaffList = staffSnap.data().staffList || []; const configSnap = await getDoc(doc(db, 'settings', `shift_matrix_${targetStore}`)); if (configSnap.exists()) { const loaded = configSnap.data().matrix; shiftMatrix = { ...defaultMatrix, ...loaded }; setTimeout(() => { if(getGrandTotal(shiftMatrix) > 0) handleCalculateCombos(false); }, 200); } } catch (e) { console.error(e); } }
+  function matchRoleCode(uiLabel) { if (!uiLabel) return 'TV'; const cleanLabel = uiLabel.trim(); if (cleanLabel === 'Giao Hàng') return 'GH'; if (cleanLabel === 'Tư Vấn') return 'TV'; return cleanLabel; }
+  function getComboQty(roleLabel, comboCode, sourceArray) { const targetRole = matchRoleCode(roleLabel); const found = sourceArray.find(c => { let cRole = c.role || 'TV'; if (cRole === 'TN') cRole = 'Thu Ngân'; return c.code === comboCode && cRole === targetRole; }); return found ? found.qty : 0; }
+  function updateComboQty(roleLabel, comboCode, newQty) { const targetRole = matchRoleCode(roleLabel); const qtyVal = parseInt(newQty) || 0; const idx = suggestedCombos.findIndex(c => { let cRole = c.role || 'TV'; if (cRole === 'TN') cRole = 'Thu Ngân'; return c.code === comboCode && cRole === targetRole; }); if (idx >= 0) { suggestedCombos[idx].qty = qtyVal; } else if (qtyVal > 0) { suggestedCombos.push({ code: comboCode, role: targetRole, label: `${roleLabel} ${comboCode}`, qty: qtyVal }); } suggestedCombos = [...suggestedCombos]; }
+  function getRoleTotal(roleId, matrix) { return Object.values(matrix).reduce((sum, s) => sum + (parseInt(s[roleId])||0), 0); }
+  function getShiftTotal(shiftId, matrix) { const s = matrix[shiftId] || {}; return (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0); }
+  function getGrandTotal(matrix) { return Object.values(matrix).reduce((sum, s) => sum + (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0), 0); }
+  function handleMatrixChange() { shiftMatrix = shiftMatrix; }
+  async function handleCalculateCombos(save = true) { if(save) isLoading = true; try { const cleanMatrix = JSON.parse(JSON.stringify(shiftMatrix)); Object.keys(cleanMatrix).forEach(key => { if(cleanMatrix[key]) { ['kho', 'tn', 'tv', 'gh'].forEach(role => { let raw = cleanMatrix[key][role]; let val = parseInt(raw); if (isNaN(val)) val = 0; cleanMatrix[key][role] = val; }); } }); shiftMatrix = cleanMatrix; if(save) { await setDoc(doc(db, 'settings', `shift_matrix_${targetStore}`), { matrix: shiftMatrix, updatedAt: serverTimestamp(), updatedBy: $currentUser.username }); } suggestedCombos = []; await tick(); const result = calculateCombosFromMatrix(shiftMatrix); suggestedCombos = result; const currentTotal = suggestedCombos.reduce((sum, c) => sum + (c.qty || 0), 0); if (currentTotal === 0 && getGrandTotal(shiftMatrix) > 0 && save) alert("⚠️ Kết quả tính toán bằng 0! Kiểm tra lại định mức."); } catch (e) { alert("Lỗi tính toán: " + e.message); } finally { if(save) isLoading = false; } }
+  async function handleGeneratePreview() { if (totalCombos === 0) return alert("Chưa có combo nào!"); if (scheduleStaffList.length === 0) return alert("Chưa có nhân viên!"); isLoading = true; try { let prevMonth = scheduleMonth - 1, prevYear = scheduleYear; if(prevMonth === 0) { prevMonth = 12; prevYear--; } let prevScheduleData = null; const prevSnap = await getDoc(doc(db, 'stores', targetStore, 'schedules', `${prevYear}-${String(prevMonth).padStart(2,'0')}`)); if(prevSnap.exists()) prevScheduleData = prevSnap.data(); const result = generateMonthlySchedule(scheduleStaffList, suggestedCombos, scheduleMonth, scheduleYear, prevScheduleData); originalResult = JSON.parse(JSON.stringify(result)); previewScheduleData = result.schedule; previewStats = result.staffStats; optimizationLogs = []; await tick(); setTimeout(() => { const previewEl = document.getElementById('preview-schedule-container'); if(previewEl) previewEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100); } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false; } }
+  function handleOptimize() { if (!previewScheduleData) return; const beforeOptimizeJSON = JSON.stringify(previewScheduleData); isLoading = true; setTimeout(() => { const optResult = optimizeSchedule(previewScheduleData, scheduleStaffList); const afterOptimizeJSON = JSON.stringify(optResult.optimizedSchedule); if (beforeOptimizeJSON === afterOptimizeJSON) { alert("✅ Lịch hiện tại đã tối ưu! Không tìm thấy điểm cần điều chỉnh."); isLoading = false; return; } previewScheduleData = optResult.optimizedSchedule; const newRoleStats = {}; optResult.finalStats.forEach(s => newRoleStats[s.id] = s.roles); previewStats = previewStats.map(s => { if (newRoleStats[s.id]) { return { ...s, ...newRoleStats[s.id] }; } return s; }); optimizationLogs = optResult.changesLog; isLoading = false; }, 200); }
+  function handleResetPreview() { if (originalResult) { previewScheduleData = JSON.parse(JSON.stringify(originalResult.schedule)); previewStats = JSON.parse(JSON.stringify(originalResult.staffStats)); optimizationLogs = []; } }
+  async function handleApplySchedule() { if (!previewScheduleData) return; if (!confirm(`⚠️ XÁC NHẬN ÁP DỤNG LỊCH THÁNG ${scheduleMonth}/${scheduleYear}?`)) return; isLoading = true; try { const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`; await setDoc(doc(db, 'stores', targetStore, 'schedules', scheduleId), { config: { matrix: shiftMatrix, approvedCombos: suggestedCombos }, data: previewScheduleData, stats: previewStats, endOffset: originalResult.endOffset, updatedAt: serverTimestamp(), updatedBy: $currentUser.username }); alert("✅ Đã áp dụng lịch thành công!"); dispatch('close'); dispatch('switchTab', 'schedule'); } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false; } }
+  function getWeekday(day) { const date = new Date(scheduleYear, scheduleMonth - 1, day); return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()]; }
+  function toggleDay(d) { if (selectedDays.includes(d)) { if (selectedDays.length > 1) selectedDays = selectedDays.filter(x => x !== d); } else selectedDays = [...selectedDays, d]; }
+  async function saveTemplate() { taskTemplate.update(curr => { const up = { ...$taskTemplate }; if (!up[activeTemplateType]) up[activeTemplateType] = []; const newItem = { title: newTemplateTitle, time: newTemplateTime, isImportant: newTemplateImportant, days: selectedDays }; if (editingTemplateIndex >= 0) up[activeTemplateType][editingTemplateIndex] = newItem; else up[activeTemplateType].push(newItem); up[activeTemplateType].sort((a,b) => (a.time||"00:00").localeCompare(b.time||"00:00")); myStores.forEach(sid => setDoc(doc(db, 'settings', `template_${sid}`), up)); return up; }); newTemplateTitle = ''; newTemplateImportant = false; editingTemplateIndex = -1; selectedDays = [0,1,2,3,4,5,6]; }
+  function editTemplate(idx, item) { editingTemplateIndex = idx; newTemplateTitle = item.title; newTemplateTime = item.time; newTemplateImportant = item.isImportant || false; selectedDays = item.days || [0,1,2,3,4,5,6]; }
+  function deleteTemplate(idx) { if(!confirm("Xóa?")) return; taskTemplate.update(curr => { const up = {...curr}; up[activeTemplateType].splice(idx, 1); myStores.forEach(sid => setDoc(doc(db, 'settings', `template_${sid}`), up)); return up; }); if(editingTemplateIndex === idx) { editingTemplateIndex = -1; newTemplateTitle = ''; } }
+  
+  function downloadScheduleSample() { const wb = utils.book_new(); const wsData = [["Ho_Ten", "Gioi_Tinh", "Ma_Kho"], ["Nguyễn Văn A", "Nam", targetStore], ["Trần Thị B", "Nữ", targetStore]]; const ws = utils.aoa_to_sheet(wsData); utils.book_append_sheet(wb, ws, "DS_Nhan_Vien"); writeFile(wb, `Mau_Phan_Ca_${targetStore}.xlsx`); }
+  function downloadAccountSample() { const wb = utils.book_new(); const wsData = [["username", "pass", "ma_kho", "role"], [`nv1_${targetStore}`, "123456", targetStore, "staff"], [`quanly_${targetStore}`, "123456", targetStore, "admin"]]; const ws = utils.aoa_to_sheet(wsData); utils.book_append_sheet(wb, ws, "DS_Cap_Quyen"); writeFile(wb, `Mau_Tai_Khoan_${targetStore}.xlsx`); }
 
-  async function syncStaffNamesToSchedule() {
-    if(scheduleStaffList.length === 0) return alert("Chưa có danh sách nhân viên để đồng bộ!");
-    try {
-        const targetStore = myStores[0];
-        if (!targetStore) throw new Error("Lỗi kho!");
-        const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`;
-        const scheduleRef = doc(db, 'stores', targetStore, 'schedules', scheduleId);
-        const snap = await getDoc(scheduleRef);
-        
-        if (!snap.exists()) return alert("Chưa có lịch của tháng này để cập nhật!");
-        
-        const scheduleData = snap.data();
-        let updatedCount = 0;
-        
-        // LOGIC CẬP NHẬT: Thêm cả gender vào Stats
-        const updatedStats = scheduleData.stats.map(stat => {
-            const newInfo = scheduleStaffList.find(s => s.id === stat.id);
-            if (newInfo) {
-                updatedCount++;
-                return { ...stat, name: newInfo.name, gender: newInfo.gender }; // Update Gender too
-            }
-            return stat;
-        });
-
-        // LOGIC CẬP NHẬT: Thêm cả gender vào Data (ô lịch)
-        const updatedData = { ...scheduleData.data };
-        Object.keys(updatedData).forEach(day => {
-            updatedData[day] = updatedData[day].map(assign => {
-                 const newInfo = scheduleStaffList.find(s => s.id === assign.staffId);
-                 if (newInfo) return { ...assign, name: newInfo.name, gender: newInfo.gender }; // Update Gender too
-                 return assign;
-            });
-        });
-
-        await updateDoc(scheduleRef, {
-            stats: updatedStats,
-            data: updatedData,
-            updatedBy: $currentUser.username + ' (Sync Name+Gender)'
-        });
-        
-        alert(`✅ Đã cập nhật Tên & Giới tính cho lịch tháng ${scheduleMonth}!`);
-        dispatch('close');
-    } catch(e) {
-        alert("Lỗi đồng bộ: " + e.message);
-    }
-  }
-
-  async function handleGenerateSchedule() {
-      if(scheduleStaffList.length === 0) return alert("Chưa có nhân viên!");
-      if (!confirm(`⚠️ LƯU Ý QUAN TRỌNG:\n\nViệc "Tạo Lịch Tự Động" sẽ XÓA SẠCH lịch cũ và chia lại từ đầu tháng.\n\nNếu bạn chỉ muốn đổi tên nhân viên, hãy bấm "Hủy" và chọn nút màu Xanh Lá (Cập nhật tên).\n\nBạn có chắc chắn muốn chia lại lịch từ đầu không?`)) return;
-
-      const inputs = { c1: shiftInputs[0].qty, c2: shiftInputs[1].qty, c3: shiftInputs[2].qty, c4: shiftInputs[3].qty, c5: shiftInputs[4].qty, c6: shiftInputs[5].qty, gh: ghQty };
+  async function loadAccountList() {
+      if (!targetStore) return;
       try {
-          const targetStore = myStores[0];
-          if (!targetStore) throw new Error("Lỗi kho!");
-          const computedShifts = calculateShiftModes(inputs, scheduleStaffList.length);
-          let prevScheduleData = null;
-          let prevMonth = scheduleMonth - 1; let prevYear = scheduleYear; if(prevMonth === 0) { prevMonth = 12; prevYear--; }
-          const prevSnap = await getDoc(doc(db, 'stores', targetStore, 'schedules', `${prevYear}-${String(prevMonth).padStart(2,'0')}`));
-          if(prevSnap.exists()) prevScheduleData = prevSnap.data();
-          const result = generateMonthlySchedule(scheduleStaffList, computedShifts, roleConfig, scheduleMonth, scheduleYear, prevScheduleData);
-          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`;
-          
-          // LOGIC MỚI: Lưu kèm gender vào stats
-          await setDoc(doc(db, 'stores', targetStore, 'schedules', scheduleId), { 
-              config: { shiftInputs, roleConfig, computed: computedShifts }, 
-              data: result.schedule, 
-              // Quan trọng: Map thêm gender vào đây
-              stats: result.staffStats.map(s=>({id:s.id, name:s.name, gender:s.gender, ...s.stats})), 
-              endOffset: result.endOffset, 
-              updatedAt: serverTimestamp(), 
-              updatedBy: $currentUser.username 
-          });
-          
-          await saveShiftConfig(true);
-          alert(`✅ Đã tạo lịch T${scheduleMonth} thành công!`); dispatch('close');
-      } catch(e) { alert("Lỗi: " + e.message); }
+          const q = query(collection(db, 'users'), where('storeIds', 'array-contains', targetStore));
+          const snap = await getDocs(q);
+          const list = [];
+          snap.forEach(d => list.push({id: d.id, ...d.data()}));
+          accountList = list;
+      } catch (e) { console.error("Load accounts failed:", e); }
   }
-  
-  function startTour() { showAdminTour = true; }
+
+  async function deleteAccount(uid) {
+      if (isDemoMode) { alert("Tài khoản demo không có tính năng này, vui lòng liên hệ 3031 để được cấp quyền"); return; }
+      if (!confirm(`Xóa tài khoản ${uid}? Hành động này không thể hoàn tác.`)) return;
+      try {
+          await deleteDoc(doc(db, 'users', uid));
+          await loadAccountList(); 
+      } catch (e) { alert("Lỗi xóa: " + e.message); }
+  }
+
+  async function changeRole(uid, newRole) {
+      if (isDemoMode) { alert("Tài khoản demo không có tính năng này, vui lòng liên hệ 3031 để được cấp quyền"); return; }
+      if (!confirm(`Đổi quyền tài khoản ${uid} thành ${newRole}?`)) return;
+      try {
+          await updateDoc(doc(db, 'users', uid), { role: newRole });
+          await loadAccountList();
+      } catch (e) { alert("Lỗi đổi quyền: " + e.message); }
+  }
+
+  async function handleStaffUpload(e) {
+      const file = e.target.files[0]; if(!file) return; isLoading = true; 
+      setTimeout(async () => {
+          try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); let newStaff = []; let skipped = 0;
+              for(let i=0; i<json.length; i++) { const row = json[i]; let maKho = row['Ma_Kho'] || row['Mã Kho'] || row['ma_kho'] || ''; if (String(maKho).trim() !== String(targetStore)) { skipped++; continue; } let nameVal = row['Ho_Ten'] || row['Họ Tên'] || ''; if (!nameVal) Object.values(row).forEach(v => { if(v && typeof v === 'string' && v.trim().length > nameVal.length) nameVal = v.trim(); }); let genderVal = row['Gioi_Tinh'] || row['Giới Tính'] || 'Nữ'; if (String(genderVal).toLowerCase().includes('nam')) genderVal = 'Nam'; else genderVal = 'Nữ'; if(nameVal.length > 2) { newStaff.push({ id: String(newStaff.length + 1), name: safeString(nameVal), gender: genderVal }); } }
+              if(newStaff.length === 0) throw new Error(`Không tìm thấy nhân viên nào cho kho ${targetStore}! (Bỏ qua ${skipped} dòng khác kho)`);
+              scheduleStaffList = newStaff; await setDoc(doc(db, 'settings', `staff_list_${targetStore}`), { staffList: scheduleStaffList, updatedAt: serverTimestamp() }); 
+              alert(`✅ Đã cập nhật ${newStaff.length} nhân sự cho kho ${targetStore}!`);
+          } catch(err) { alert("Lỗi: " + err.message); } finally { isLoading = false; e.target.value = null; }
+      }, 100);
+  }
+
+  async function handleAccountUpload(e) {
+      const file = e.target.files[0]; if(!file) return; isLoading = true;
+      setTimeout(async () => {
+          try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); const batch = writeBatch(db); let count = 0;
+              for(let i=0; i<json.length; i++) { const row = json[i]; const u = row['username']; const p = row['pass']; const s = row['ma_kho'] || row['mã kho']; const r = row['role']; if (u && p && s && r) { const uid = safeString(u).toLowerCase(); const userRef = doc(db, 'users', uid); batch.set(userRef, { username: uid, username_idx: uid, pass: String(p), name: uid, role: safeString(r).toLowerCase(), storeId: String(s), storeIds: [String(s)], createdAt: serverTimestamp() }); count++; } }
+              if (count > 0) { await batch.commit(); alert(`✅ Đã tạo/cập nhật ${count} tài khoản thành công!`); await loadAccountList(); } else { alert("⚠️ Không tìm thấy dữ liệu hợp lệ (Cần đủ 4 cột: username, pass, ma_kho, role)"); }
+          } catch(err) { alert("Lỗi: " + err.message); } finally { isLoading = false; e.target.value = null; }
+      }, 100);
+  }
+
+  async function handleCreateAdmin() {
+      if (isDemoMode) { alert("Tài khoản demo không có tính năng này, vui lòng liên hệ 3031 để được cấp quyền"); return; }
+      if (!newAdminUser || !newAdminPass || !newAdminName || !newAdminStore) return alert("Vui lòng điền đủ thông tin!");
+      isLoading = true;
+      try {
+          const usernameClean = safeString(newAdminUser).toLowerCase();
+          await setDoc(doc(db, 'users', usernameClean), { username: usernameClean, username_idx: usernameClean, pass: newAdminPass, name: newAdminName, role: 'admin', storeId: newAdminStore, storeIds: [newAdminStore], createdAt: serverTimestamp() });
+          alert(`✅ Đã tạo tài khoản quản lý: ${usernameClean}`);
+          newAdminUser = ''; newAdminPass = ''; newAdminName = ''; newAdminStore = '';
+      } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false; }
+  }
 </script>
 
-<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-  <div class="bg-white w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-popIn relative">
-    
-    <div class="p-4 border-b flex items-center gap-2 bg-slate-50 admin-header">
-      <span class="material-icons-round text-orange-500 text-3xl">settings</span>
-      <div class="flex-1 flex items-center gap-2">
-          <h3 class="text-lg font-bold text-slate-800">
-              {isSuperAdmin ? 'SUPER ADMIN' : `Quản Lý Kho: ${myStores.join(', ')}`}
-          </h3>
-          <button id="btn-help-admin" class="w-6 h-6 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center hover:bg-purple-200 transition-colors" title="Xem hướng dẫn Admin" on:click={startTour}>
-              <span class="material-icons-round text-sm">help</span>
-          </button>
-      </div>
-      <button class="p-2 hover:bg-gray-200 rounded-full" on:click={() => dispatch('close')}><span class="material-icons-round">close</span></button>
+<div class="fixed inset-0 z-50 bg-slate-100 flex flex-col animate-fadeIn">
+    <div class="h-16 bg-white border-b border-slate-200 flex items-center justify-center lg:justify-between px-6 shrink-0 shadow-sm z-20">
+        <div class="flex items-center gap-6">
+            <button class="w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all text-slate-500 hover:text-indigo-600" on:click={() => dispatch('close')}>
+                <span class="material-icons-round">arrow_back</span>
+            </button>
+            <h2 class="text-xl font-bold text-slate-800 tracking-tight hidden lg:block">Quản Trị</h2>
+            
+            <div class="flex items-center gap-2">
+                <div id="store-select-container" class="relative">
+                    <select bind:value={targetStore} class="pl-3 pr-8 py-1.5 bg-indigo-50 border-indigo-100 text-indigo-700 font-bold rounded-lg text-sm outline-none appearance-none cursor-pointer hover:bg-indigo-100 transition-colors">
+                        {#each myStores as s}<option value={s}>{s}</option>{/each}
+                    </select>
+                    <span class="material-icons-round absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">expand_more</span>
+                </div>
+
+                <div class="flex bg-slate-100 p-1 rounded-lg ml-2">
+                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>
+                        Phân Ca
+                    </button>
+                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>
+                        Việc Mẫu
+                    </button>
+                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>
+                        Nhân Sự
+                    </button>
+                </div>
+                <button class="w-8 h-8 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100" on:click={startAdminTour} title="Hướng dẫn chức năng này">
+                    <span class="material-icons-round text-lg">help</span>
+                </button>
+            </div>
+        </div>
     </div>
-    
-    <div class="p-4 overflow-y-auto flex-1 bg-slate-50">
-        {#if isSuperAdmin}
-           <div class="flex flex-wrap gap-2 mb-4 border-b pb-2"><button class="btn-tab {saTab==='store'?'active':''}" on:click={()=>saTab='store'}>1. Kho</button><button class="btn-tab {saTab==='account'?'active':''}" on:click={()=>saTab='account'}>2. Admin</button><button class="btn-tab {saTab==='user_manage'?'active':''}" on:click={()=>saTab='user_manage'}>3. User</button></div>
-           {#if saTab === 'store'}
-                <div class="section-box">
-                    <h4 class="title-label">Thêm Kho</h4>
-                    <div class="flex gap-2">
-                        <label for="new-store-id" class="sr-only">Mã Kho</label>
-                        <input id="new-store-id" class="input-std uppercase" placeholder="Mã" bind:value={newStoreId}>
-                        <label for="new-store-name" class="sr-only">Tên Kho</label>
-                        <input id="new-store-name" class="input-std" placeholder="Tên" bind:value={newStoreName}>
-                        <button class="btn-primary bg-green-600" on:click={createStore}>Thêm</button>
-                    </div>
-                    <div class="mt-2 h-40 overflow-y-auto border rounded bg-white p-2">{#each $storeList as s}<div class="text-sm border-b py-1"><b>{s.id}</b> - {s.name}</div>{/each}</div>
-                </div>
-            {:else if saTab === 'account'}
-                <div class="section-box">
-                    <h4 class="title-label">Cấp Admin</h4>
-                    <label for="new-admin-user" class="sr-only">Username</label>
-                    <input id="new-admin-user" class="input-std w-full mb-2" placeholder="User" bind:value={newAdminUser}>
-                    <label for="new-admin-pass" class="sr-only">Password</label>
-                    <input id="new-admin-pass" class="input-std w-full mb-2" placeholder="Pass" bind:value={newAdminPass}>
-                    <div class="h-32 overflow-y-auto border p-2 mb-2 bg-white grid grid-cols-2">{#each $storeList as s}<label class="flex gap-2"><input type="checkbox" bind:group={selectedStoresForAdmin} value={s.id}>{s.name}</label>{/each}</div>
-                    <button class="btn-primary w-full" on:click={createAdminAccount}>Tạo</button>
-                </div>
-            {:else}
-                <div class="section-box h-96 overflow-y-auto bg-white"><table class="w-full text-sm"><thead><tr><th>User</th><th>Role</th><th>Kho</th><th>Act</th></tr></thead><tbody>{#each allUsers as u}<tr class="border-b hover:bg-gray-50"><td class="p-2 font-bold">{u.username}</td><td class="p-2">{u.role}</td><td class="p-2">{u.storeIds?.join(', ')}</td><td class="p-2">{#if u.role!=='super_admin'}<button class="text-blue-500" on:click={()=>openEditUser(u)}>Sửa</button> <button class="text-red-500" on:click={()=>deleteUser(u.id)}>Xóa</button>{/if}</td></tr>{/each}</tbody></table>{#if isEditingUser}<div class="fixed inset-0 bg-black/50 flex items-center justify-center"><div class="bg-white p-4 rounded"><h4>Sửa {editingUser.username}</h4><div class="h-40 overflow-y-auto border p-2 my-2">{#each $storeList as s}<label class="block"><input type="checkbox" bind:group={editSelectedStores} value={s.id}>{s.name}</label>{/each}</div><button class="btn-primary" on:click={saveEditUser}>Lưu</button> <button class="btn-std ml-2" on:click={()=>isEditingUser=false}>Hủy</button></div></div>{/if}</div>
-            {/if}
-        {:else}
-            <div id="section-upload" class="mb-6 border-b pb-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                <div class="flex justify-between items-center mb-3">
-                    <h4 class="header-icon text-blue-600"><span class="material-icons-round">group_add</span> 1. Cấp quyền nhân sự (App Login)</h4>
-                    <span class="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-1 rounded-lg border border-blue-200">Đã cấp: {authorizedUserCount} User</span>
-                </div>
-                <label class="flex flex-col items-center justify-center gap-2 w-full p-6 bg-blue-50 border-2 border-dashed border-blue-300 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors text-blue-700 font-bold">
-                    <span class="material-icons-round text-4xl">upload_file</span> 
-                    <span>{isUploading?'Đang tải...':'Chọn file Excel danh sách'}</span>
-                    <input type="file" class="hidden" accept=".xlsx" on:change={handleExcelUpload}>
-                </label>
-                <div class="mt-2 text-[10px] text-gray-400 italic pl-2">* File Excel cần có cột: <code>username</code>, <code>pass</code>.</div>
-            </div>
 
-            <div id="section-template" class="mb-6 border-b pb-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                <h4 class="header-icon text-orange-500"><span class="material-icons-round">playlist_add_check</span> 2. Cấu hình việc mẫu</h4>
-                <div class="flex gap-2 mb-3"><select bind:value={activeType} class="w-full p-2 border rounded bg-gray-50 font-medium outline-none focus:ring-2 focus:ring-orange-200" on:change={cancelEdit} aria-label="Chọn loại việc"><option value="warehouse">📦 Kho</option><option value="cashier">💰 Thu Ngân</option></select></div>
-                <div class="flex flex-col gap-2 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <div class="flex gap-2">
-                        <label for="task-time" class="sr-only">Giờ thực hiện</label>
-                        <input id="task-time" type="text" bind:value={newTime} class="w-24 text-center p-2 border rounded font-mono" placeholder="08:00">
-                        <label for="task-title" class="sr-only">Tên công việc</label>
-                        <input id="task-title" type="text" bind:value={newTaskTitle} class="flex-1 p-2 border rounded" placeholder="Tên công việc..." on:keydown={(e)=>e.key==='Enter'&&saveTemplateTask()}>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <label class="flex items-center gap-2 cursor-pointer select-none bg-white px-3 py-1.5 rounded border hover:bg-red-50"><input type="checkbox" bind:checked={isImportant} class="w-4 h-4 accent-red-500 cursor-pointer"><span class="text-sm {isImportant ? 'font-bold text-red-600' : 'text-gray-500'}">Quan trọng {isImportant ? '⭐' : ''}</span></label>
-                        <div class="flex gap-2">{#if editingIndex >= 0}<button class="px-3 py-1 bg-gray-300 text-gray-700 rounded text-sm font-bold hover:bg-gray-400" on:click={cancelEdit}>Hủy</button>{/if}<button class="px-4 py-1 rounded text-sm font-bold text-white shadow-md {editingIndex >= 0 ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600'}" on:click={saveTemplateTask}>{editingIndex >= 0 ? 'Lưu Sửa' : 'Thêm Mới'}</button></div>
-                    </div>
-                </div>
-                <div class="border rounded-lg overflow-hidden bg-white flex flex-col"><ul class="divide-y overflow-y-auto max-h-[40vh]">{#if $taskTemplate[activeType]}{#each $taskTemplate[activeType] as item, i}<li class="flex justify-between p-3 text-sm items-center hover:bg-blue-50 transition-colors group {editingIndex === i ? 'bg-blue-100' : ''}"><div class="flex items-center gap-2 flex-1 mr-2"><b class="bg-gray-200 px-1.5 py-0.5 rounded text-xs text-gray-700 font-mono">{item.time}</b><span class="{item.isImportant ? 'font-bold text-red-600' : 'text-gray-700'}">{item.isImportant ? '⭐ ' : ''}{item.title}</span></div><div class="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><button class="p-1.5 text-blue-500 bg-white border rounded shadow-sm" on:click={()=>startEdit(i, item)}>🖊️</button><button class="p-1.5 text-red-500 bg-white border rounded shadow-sm" on:click={()=>removeTemplateTask(i)}>🗑️</button></div></li>{/each}{/if}</ul></div>
-            </div>
-
-            <div id="section-schedule" class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-6">
-                <div id="section-schedule-header" class="flex justify-between items-center mb-3">
-                    <h4 class="header-icon text-pink-600"><span class="material-icons-round">calendar_month</span> 3. Phân Ca Tự Động</h4>
-                </div>
-                
-                <div class="space-y-4">
-                    <div id="sch-step-1" class="bg-white p-3 rounded-lg border shadow-sm"><div class="flex justify-between items-center"><span class="text-sm font-bold text-gray-700">Nhân sự sẵn sàng: <span class="text-lg text-blue-600 font-mono">{scheduleStaffList.length}</span></span><label class="cursor-pointer bg-blue-50 text-blue-700 text-xs font-bold px-3 py-2 rounded hover:bg-blue-100 flex items-center gap-1 border border-blue-200"><span class="material-icons-round text-sm">upload_file</span> Upload Excel<input type="file" class="hidden" accept=".xlsx" on:change={handleScheduleExcel}></label></div>{#if scheduleStaffList.length===0}<p class="text-[10px] text-gray-400 mt-1 italic">* File: Cột Tên nhân viên, Giới tính.</p>{/if}</div>
-                    
-                    <div id="sch-step-2" class="bg-white rounded-lg border shadow-sm overflow-hidden"><table class="w-full text-sm text-left"><thead class="bg-gray-100 text-gray-600 font-bold text-xs uppercase"><tr><th class="p-3 border-b">Tên Ca</th><th class="p-3 border-b w-32 text-center">Khung Giờ</th><th class="p-3 border-b w-24 text-center">Số Lượng</th></tr></thead><tbody class="divide-y">{#each shiftInputs as shift}<tr class="hover:bg-gray-50"><td class="p-2 pl-3 font-bold text-gray-700 align-middle"><span class="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-[10px] mr-2 border">{shift.id.toUpperCase()}</span>{shift.label}</td><td class="p-2 align-middle"><input type="text" bind:value={shift.time} class="w-full border-b border-gray-300 focus:border-indigo-500 outline-none bg-transparent text-center font-mono text-xs py-1 text-gray-600" aria-label={`Thời gian ${shift.label}`}></td><td class="p-2 align-middle text-center pr-3"><div class="flex items-center justify-center gap-1"><input type="number" bind:value={shift.qty} class="w-14 border rounded p-1 text-center font-bold text-indigo-600 bg-indigo-50 outline-none focus:ring-1 focus:ring-indigo-500" aria-label={`Số lượng ${shift.label}`}><span class="text-[10px] text-gray-400">NS</span></div></td></tr>{/each}</tbody></table></div>
-                    
-                    <div id="sch-step-3" class="grid grid-cols-3 gap-3">
-                        <div class="bg-red-50 border border-red-200 rounded-lg p-3 flex flex-col items-center shadow-sm"><span class="material-icons-round text-red-500 mb-1">local_shipping</span><label for="gh-qty" class="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-1">Giao Hàng</label><input id="gh-qty" type="number" bind:value={ghQty} class="w-16 border border-red-300 rounded p-1 text-center font-bold text-red-800 bg-white outline-none focus:ring-2 focus:ring-red-400"></div>
-                        <div class="bg-purple-50 border border-purple-200 rounded-lg p-3 flex flex-col items-center shadow-sm"><span class="material-icons-round text-purple-500 mb-1">point_of_sale</span><label for="tn-qty" class="text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">Thu Ngân</label><input id="tn-qty" type="number" bind:value={roleConfig.tn} class="w-16 border border-purple-300 rounded p-1 text-center font-bold text-purple-800 bg-white outline-none focus:ring-2 focus:ring-purple-400"></div>
-                        <div class="bg-green-50 border border-green-200 rounded-lg p-3 flex flex-col items-center shadow-sm"><span class="material-icons-round text-green-500 mb-1">inventory_2</span><label for="kho-qty" class="text-[10px] font-bold text-green-700 uppercase tracking-wider mb-1">Kho</label><input id="kho-qty" type="number" bind:value={roleConfig.kho} class="w-16 border border-green-300 rounded p-1 text-center font-bold text-green-800 bg-white outline-none focus:ring-2 focus:ring-green-400"></div>
-                    </div>
-                     
-                    <div id="sch-step-4" class="flex items-center gap-3 mt-2">
-                        <button id="btn-sync-name" class="px-3 py-2.5 bg-green-100 text-green-700 rounded-lg font-bold shadow-sm hover:bg-green-200 transition-colors flex items-center gap-1 border border-green-300" on:click={syncStaffNamesToSchedule} title="Chỉ cập nhật lại tên hiển thị, không chia lại ca">
-                            <span class="material-icons-round text-sm">sync_alt</span>
-                            <span class="text-xs">Cập nhật tên (Giữ lịch)</span>
-                        </button>
-
-                        <div class="flex-1 flex items-center gap-2 bg-gray-100 px-3 py-2 rounded-lg border border-gray-200">
-                            <span class="text-xs font-bold text-gray-500">Tháng:</span>
-                            <input type="number" bind:value={scheduleMonth} class="w-8 bg-transparent text-center font-bold outline-none" aria-label="Tháng" min="1" max="12">
-                            <span class="text-gray-400">/</span>
-                            <input type="number" bind:value={scheduleYear} class="w-12 bg-transparent text-center font-bold outline-none" aria-label="Năm">
+    <div class="flex-1 overflow-auto p-4 lg:p-6 relative">
+        {#if activeSection === 'schedule'}
+            <div class="flex flex-col gap-6 w-full pb-20">
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 shrink-0">
+                    <div id="tour-admin-matrix" class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-[480px]">
+                        <div class="p-4 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50">
+                            <div class="flex justify-between items-center">
+                                <div><h3 class="font-bold text-slate-800 text-lg">Định Mức Nhân Sự</h3></div>
+                                <div class="flex items-center gap-2">
+                                    <button id="btn-download-schedule-sample" class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100" on:click={checkDemoAndBlock(event) || downloadScheduleSample()}>
+                                        Tải Mẫu
+                                    </button>
+                                    <label id="btn-import-staff" class="btn-sm flex items-center gap-2 bg-white border border-indigo-100 text-indigo-600 px-3 py-2 rounded-lg text-xs font-bold shadow-sm hover:bg-indigo-50 cursor-pointer {isDemoMode ? 'opacity-50' : ''}" on:click={(e) => checkDemoAndBlock(e)}>
+                                        <span class="material-icons-round text-base">upload_file</span> Import
+                                        <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={(e) => handleStaffUpload(e)}>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-slate-200 shadow-sm w-fit">
+                                <button class="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded" on:click={()=>{if(scheduleMonth==1){scheduleMonth=12;scheduleYear--}else{scheduleMonth--}}}><span class="material-icons-round text-sm">chevron_left</span></button>
+                                <div class="flex items-center gap-1 font-bold text-slate-700 text-sm px-2"><span>T</span><input type="number" bind:value={scheduleMonth} class="w-8 text-center bg-transparent outline-none text-indigo-600"><span>/</span><input type="number" bind:value={scheduleYear} class="w-12 text-center bg-transparent outline-none text-indigo-600"></div>
+                                <button class="w-8 h-8 flex items-center justify-center hover:bg-slate-100 rounded" on:click={()=>{if(scheduleMonth==12){scheduleMonth=1;scheduleYear++}else{scheduleMonth++}}}><span class="material-icons-round text-sm">chevron_right</span></button>
+                            </div>
+                            {#if staffStats.total > 0}<div class="flex items-center gap-4 text-xs font-bold bg-green-50 text-green-800 px-3 py-2 rounded-lg border border-green-100"><span>Tổng: {staffStats.total}</span><span>Nam: {staffStats.male}</span><span>Nữ: {staffStats.female}</span></div>{/if}
                         </div>
-                        
-                        <button class="flex-[1.5] bg-pink-600 text-white py-2.5 rounded-lg font-bold hover:bg-pink-700 shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-xs sm:text-sm" on:click={handleGenerateSchedule} disabled={scheduleStaffList.length===0}><span class="material-icons-round">auto_awesome</span> TẠO LỊCH (RESET)</button>
+                        <div id="matrix-table" class="flex-1 overflow-auto p-4">
+                             <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200">
+                                <thead class="bg-slate-50 text-slate-500"><tr><th class="p-3 text-left font-bold border-b border-r border-slate-200">Bộ Phận</th>{#each shiftCols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[60px]"><div class="font-black text-slate-700">{col.id.toUpperCase()}</div></th>{/each}<th class="p-3 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700">Tổng</th></tr></thead>
+                                <tbody>
+                                    {#each roleRows as role}
+                                        <tr class="group hover:bg-slate-50/50 transition-colors">
+                                            <td class="p-3 font-bold border-r border-slate-100 {role.color} border-l-4">{role.label}</td>
+                                            {#each shiftCols as shift}
+                                                <td class="p-1 border-r border-slate-100 text-center"><input type="number" min="0" bind:value={shiftMatrix[shift.id][role.id]} on:input={handleMatrixChange} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-slate-700 bg-transparent transition-all"></td>
+                                            {/each}
+                                            <td class="p-3 text-center font-black text-slate-700 bg-slate-50 border-l border-slate-100">{getRoleTotal(role.id, shiftMatrix)}</td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                                <tfoot class="bg-slate-800 text-slate-300 font-bold">
+                                    <tr>
+                                        <td class="p-3 text-right text-xs uppercase tracking-wider">Tổng</td>
+                                         {#each shiftCols as shift}
+                                            <td class="p-3 text-center text-yellow-400 font-mono text-sm font-bold">{getShiftTotal(shift.id, shiftMatrix)}</td>
+                                         {/each}
+                                        <td class="p-3 text-center text-white text-sm font-bold bg-slate-900">{getGrandTotal(shiftMatrix)}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        <div class="p-4 border-t bg-white">
+                            <button id="btn-calculate" class="w-full py-3 bg-green-600 text-white font-bold rounded-xl shadow hover:bg-green-700 flex justify-center items-center gap-2" on:click={() => handleCalculateCombos(true)}><span class="material-icons-round">calculate</span> TÍNH TOÁN & QUY ĐỔI RA COMBO</button>
+                        </div>
                     </div>
-                    <div class="flex justify-start">
-                         <button id="btn-save-config" class="text-xs font-bold text-blue-500 hover:underline flex items-center gap-1" on:click={()=>saveShiftConfig(false)}><span class="material-icons-round text-sm">save</span> Lưu Cấu Hình Ca (Không tạo lịch)</button>
+                    
+                    <div id="combo-table" class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-[480px]">
+                        <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                             <div><h3 class="font-bold text-slate-800 text-lg">Combo Gợi Ý</h3><p class="text-xs text-slate-400">Kết quả tính toán</p></div>
+                        </div>
+                        <div class="flex-1 overflow-auto p-4">
+                             <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200">
+                                <thead class="bg-slate-50 text-slate-500"><tr><th class="p-3 text-left font-bold border-b border-r border-slate-200">Bộ Phận</th>{#each comboCols as code}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[60px]"><div class="font-black text-slate-700">{code}</div></th>{/each}</tr></thead>
+                                <tbody>
+                                    {#each roleRows as role}
+                                        <tr class="group hover:bg-slate-50/50 transition-colors">
+                                            <td class="p-3 font-bold border-r border-slate-100 {role.color} border-l-4">{role.label}</td>
+                                            {#each comboCols as code}
+                                                <td class="p-1 border-r border-slate-100 text-center"><input type="number" min="0" value={getComboQty(role.label, code, suggestedCombos)} on:change={(e) => updateComboQty(role.label, code, e.target.value)} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-indigo-600 bg-transparent transition-all"></td>
+                                            {/each}
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                                <tfoot class="bg-slate-800 text-slate-300 font-bold">
+                                    <tr>
+                                        <td class="p-3 text-right text-xs uppercase tracking-wider">Tổng</td>
+                                        {#each comboCols as code}
+                                            <td class="p-3 text-center text-white text-sm font-bold bg-slate-900 border-l border-slate-700">
+                                                {comboTotalsMap[code] || 0}
+                                            </td>
+                                        {/each}
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        <div class="p-4 bg-white border-t border-slate-100 flex gap-3">
+                             <button id="btn-preview" disabled={totalCombos===0} class="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-0.5 transition-all flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" on:click={handleGeneratePreview}><span class="material-icons-round">calendar_view_month</span><span>XEM TRƯỚC LỊCH</span></button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="preview-schedule-container" class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden animate-fadeIn scroll-mt-20">
+                    <div class="p-4 border-b border-slate-100 flex flex-wrap justify-between items-center bg-slate-50/50 gap-4">
+                        <div><h3 class="font-bold text-slate-800 text-lg">Xem Trước & Tối Ưu Lịch</h3><p class="text-xs text-slate-400">Kiểm tra kỹ trước khi Áp dụng</p></div>
+                        <div class="flex gap-3">
+                            <button id="btn-optimize" disabled={!previewScheduleData} class="px-4 py-2 bg-yellow-500 text-white font-bold rounded-lg shadow hover:bg-yellow-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" on:click={handleOptimize}><span class="material-icons-round text-sm">auto_fix_high</span> Tối Ưu</button>
+                            <button id="btn-reset" disabled={!previewScheduleData} class="px-4 py-2 bg-gray-500 text-white font-bold rounded-lg shadow hover:bg-gray-600 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" on:click={handleResetPreview}><span class="material-icons-round text-sm">restart_alt</span> Reset</button>
+                            <button id="btn-apply" disabled={!previewScheduleData} class="px-6 py-2 bg-green-600 text-white font-bold rounded-lg shadow hover:bg-green-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" on:click={handleApplySchedule}><span class="material-icons-round text-sm">check_circle</span> ÁP DỤNG</button>
+                        </div>
+                    </div>
+                    
+                    {#if !previewScheduleData}
+                        <div class="p-10 text-center text-gray-400 flex flex-col items-center">
+                            <span class="material-icons-round text-4xl mb-2 opacity-30">visibility_off</span>
+                            <p class="text-sm">Chưa có dữ liệu xem trước.</p>
+                        </div>
+                    {:else}
+                        {#if optimizationLogs.length > 0} <div class="bg-yellow-50 p-3 text-xs text-yellow-800 border-b border-yellow-100 max-h-32 overflow-y-auto"> <div class="font-bold mb-1">Đã thực hiện tối ưu:</div> {#each optimizationLogs as log}<div>• {log}</div>{/each} </div> {/if}
+                        <div class="flex-1 overflow-x-auto p-4 max-h-[600px]"> <table class="w-full text-xs text-center border-collapse min-w-[1000px]"> <thead class="sticky top-0 z-[60]"> <tr> <th class="p-2 border font-bold bg-white sticky left-0 z-[70] shadow-r">Nhân sự</th> {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d} <th class="p-1 border min-w-[30px] {['T7','CN'].includes(getWeekday(d))?'bg-amber-200':'bg-slate-100'} z-[60]">{d}<br><span class="text-[9px] font-normal">{getWeekday(d)}</span></th> {/each} <th class="p-2 border w-10 bg-slate-100 z-[60]">GH</th> <th class="p-2 border w-10 bg-slate-100 z-[60]">TN</th> <th class="p-2 border w-10 bg-slate-100 z-[60]">K</th> </tr> </thead> <tbody> {#each previewStats as staff} <tr> <td class="p-2 border font-bold text-left sticky left-0 bg-white z-[50] shadow-r {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}">{staff.name}</td> {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d} {@const assign = previewScheduleData[d].find(x => x.staffId === staff.id)} <td class="p-1 border {assign?.isChanged ? 'bg-yellow-100' : ''} {['T7','CN'].includes(getWeekday(d))?'bg-amber-50':''}"> {#if assign && assign.shift !== 'OFF'} <div class="font-bold text-[9px]">{assign.shift}</div> {#if assign.role && assign.role !== 'TV'}<div class="text-[8px] text-white rounded px-1 {assign.role==='Giao Hàng'?'bg-blue-600':(assign.role==='Thu Ngân'?'bg-purple-600':'bg-orange-500')}">{assign.role==='Giao Hàng'?'GH':(assign.role==='Thu Ngân'?'TN':'K')}</div>{/if} {/if} </td> {/each} <td class="p-2 border font-bold text-blue-600">{staff.gh||'-'}</td> <td class="p-2 border font-bold text-purple-600">{staff.tn||0}</td> <td class="p-2 border font-bold text-orange-600">{staff.kho||0}</td> </tr> {/each} </tbody> </table> </div>
+                    {/if}
+                </div>
+            </div>
+        {/if}
+        
+        {#if activeSection === 'template'}
+             <div class="flex flex-col lg:flex-row gap-6 h-full">
+                 <div class="w-full lg:w-[35%] bg-white p-5 rounded-2xl shadow-sm border border-slate-200 h-fit">
+                    <h4 class="font-bold text-slate-700 mb-4 flex items-center gap-2 text-lg border-b pb-2"><span class="material-icons-round text-orange-500 bg-orange-50 p-1 rounded-lg">edit_note</span> {editingTemplateIndex >= 0 ? 'Chỉnh Sửa' : 'Thêm Mới'}</h4>
+                    <div id="template-form" class="space-y-4">
+                        <div id="dept-select-container"><label for="dept-select" class="text-xs font-bold text-slate-500 uppercase">Bộ phận áp dụng</label><select id="dept-select" bind:value={activeTemplateType} class="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-100"><option value="warehouse">Kho</option><option value="cashier">Thu Ngân</option><option value="handover">Bàn Giao</option></select></div>
+                        <div class="flex gap-3">
+                            <div class="w-24"><label for="time-input" class="text-xs font-bold text-slate-500 uppercase">Giờ</label><input id="time-input" type="time" bind:value={newTemplateTime} class="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center font-bold"></div>
+                            <div class="flex-1"><label for="title-input" class="text-xs font-bold text-slate-500 uppercase">Tên công việc</label><input id="title-input" type="text" bind:value={newTemplateTitle} class="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-100" placeholder="VD: Kiểm quỹ..."></div>
+                        </div>
+                        <div id="weekdays-container"><label class="text-xs font-bold text-slate-500 uppercase mb-2 block">Lặp lại</label><div class="flex gap-1 flex-wrap">{#each weekDays as d}<button class="w-8 h-8 rounded-lg text-xs font-bold border transition-all {selectedDays.includes(d.val)?'bg-indigo-600 text-white border-indigo-600 shadow-md':'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}" on:click={() => toggleDay(d.val)}>{d.label}</button>{/each}</div></div>
+                        <label class="flex items-center gap-3 p-3 rounded-lg border border-red-100 bg-red-50 cursor-pointer hover:bg-red-100 transition-colors mt-1"><input type="checkbox" bind:checked={newTemplateImportant} class="w-5 h-5 accent-red-600 rounded"><span class="text-sm font-bold text-red-700">Đánh dấu Quan Trọng</span></label>
+                        <div class="flex gap-2 pt-2 border-t">{#if editingTemplateIndex >= 0}<button class="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200" on:click={()=>{editingTemplateIndex=-1;newTemplateTitle=''}}>Hủy</button>{/if}<button id="btn-save-template" class="flex-[2] py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-0.5 transition-all" on:click={saveTemplate}>{editingTemplateIndex >= 0?'Lưu':'Thêm Vào List'}</button></div>
+                    </div>
+                 </div>
+                 <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-full">
+                    <div class="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0"><span class="font-bold text-slate-700">Danh sách việc mẫu ({$taskTemplate[activeTemplateType]?.length || 0})</span></div>
+                    <div class="flex-1 overflow-y-auto p-3 space-y-2">
+                        {#each ($taskTemplate[activeTemplateType] || []) as item, i}
+                            <div class="flex items-start gap-4 p-4 rounded-xl border border-slate-100 bg-white hover:border-indigo-200 hover:shadow-sm transition-all group relative">
+                                <div class="font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg text-sm">{item.time}</div>
+                                <div class="flex-1"><div class="font-bold text-slate-800 text-base mb-1 {item.isImportant?'text-red-600':''}">{item.isImportant ? '★ ' : ''}{item.title}</div><div class="flex gap-1 flex-wrap">{#if !item.days || item.days.length===7}<span class="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded">Hàng ngày</span>{:else}{#each weekDays as d}{#if item.days.includes(d.val)}<span class="text-[10px] font-bold border border-slate-200 text-slate-500 px-1.5 py-0.5 rounded">{d.label}</span>{/if}{/each}{/if}</div></div>
+                                <div class="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2"><button class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 flex items-center justify-center" on:click={()=>editTemplate(i, item)}><span class="material-icons-round text-sm">edit</span></button><button class="w-8 h-8 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center" on:click={()=>deleteTemplate(i)}><span class="material-icons-round text-sm">delete</span></button></div>
+                            </div>
+                        {/each}
+                    </div>
+                 </div>
+            </div>
+        {/if}
+
+        {#if activeSection === 'accounts'}
+            <div class="flex flex-col lg:flex-row gap-6 w-full max-w-5xl mx-auto animate-fadeIn">
+                {#if isSuperAdmin}
+                    <div id="super-admin-area" class="flex-1 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <h3 class="font-bold text-lg text-slate-800 mb-4 flex items-center gap-2">
+                            <span class="material-icons-round text-purple-500 bg-purple-50 p-1.5 rounded-lg">admin_panel_settings</span> 
+                            Tạo Quản Lý Mới
+                        </h3>
+                        <div class="space-y-4">
+                            <div><label for="new-admin-user" class="text-xs font-bold text-slate-500 uppercase">Tên đăng nhập</label><input id="new-admin-user" type="text" bind:value={newAdminUser} class="w-full mt-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-200 font-bold" placeholder="VD: quanly1"></div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div><label for="new-admin-pass" class="text-xs font-bold text-slate-500 uppercase">Mật khẩu</label><input id="new-admin-pass" type="text" bind:value={newAdminPass} class="w-full mt-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-200" placeholder="******"></div>
+                                <div><label for="new-admin-store" class="text-xs font-bold text-slate-500 uppercase">Mã Kho Quản Lý</label><input id="new-admin-store" type="text" bind:value={newAdminStore} class="w-full mt-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-200 font-bold" placeholder="VD: 908"></div>
+                            </div>
+                            <div><label for="new-admin-name" class="text-xs font-bold text-slate-500 uppercase">Họ và tên</label><input id="new-admin-name" type="text" bind:value={newAdminName} class="w-full mt-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-200" placeholder="VD: Nguyễn Văn A"></div>
+                            <button id="btn-create-admin" class="w-full py-3 bg-purple-600 text-white font-bold rounded-xl shadow-lg hover:bg-purple-700 transition-all mt-2" on:click={handleCreateAdmin}>Tạo Tài Khoản Admin</button>
+                        </div>
+                    </div>
+                {/if}
+
+                <div class="flex-1 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+                            <span class="material-icons-round text-blue-500 bg-blue-50 p-1.5 rounded-lg">groups</span> 
+                            Cấp Quyền Nhân Viên
+                        </h3>
+                        <div class="flex gap-2">
+                            <button id="btn-download-account-sample" class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 flex items-center gap-1 transition-colors" on:click={checkDemoAndBlock(event) || downloadAccountSample()}>Tải Mẫu</button>
+                            <label id="btn-upload-accounts" class="text-xs font-bold text-white bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-700 flex items-center gap-1 transition-colors cursor-pointer shadow {isDemoMode ? 'opacity-50' : ''}" on:click={(e) => checkDemoAndBlock(e)}>
+                                <span class="material-icons-round text-sm">upload</span> Upload
+                                <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={handleAccountUpload}>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="flex-1 overflow-auto border border-slate-200 rounded-xl">
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-slate-50 text-slate-500 font-bold">
+                                <tr>
+                                    <th class="p-3">User</th>
+                                    <th class="p-3">Tên</th>
+                                    <th class="p-3">Quyền</th>
+                                    <th class="p-3 text-center">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                                {#each accountList as acc}
+                                    <tr class="hover:bg-slate-50">
+                                        <td class="p-3 font-bold text-slate-700">{acc.username}</td>
+                                        <td class="p-3 text-slate-600">{acc.name}</td>
+                                        <td class="p-3">
+                                            <select class="bg-transparent text-xs font-bold {acc.role==='admin'?'text-purple-600':'text-gray-500'} outline-none cursor-pointer" 
+                                                value={acc.role} on:change={(e) => changeRole(acc.id, e.target.value)}>
+                                                <option value="staff">Nhân viên</option>
+                                                <option value="admin">Quản lý</option>
+                                            </select>
+                                        </td>
+                                        <td class="p-3 text-center">
+                                            <button class="text-red-400 hover:text-red-600" on:click={() => deleteAccount(acc.id)}>
+                                                <span class="material-icons-round text-sm">delete</span>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                {/each}
+                                {#if accountList.length === 0}
+                                    <tr><td colspan="4" class="p-4 text-center text-gray-400 text-xs">Chưa có tài khoản nào thuộc kho {targetStore}.</td></tr>
+                                {/if}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         {/if}
     </div>
-    <div class="p-4 border-t bg-slate-50"><button class="w-full py-3 rounded-xl font-bold text-slate-700 bg-slate-200 hover:bg-slate-300 transition-colors" on:click={()=>dispatch('close')}>Đóng Cài Đặt</button></div>
-  </div>
-  
-  {#if showAdminTour}
-      <TourGuide steps={adminSteps} on:complete={() => { showAdminTour = false; localStorage.setItem(adminTourKey, 'true'); }} />
-  {/if}
+    {#if isLoading}<div class="absolute inset-0 bg-white/90 backdrop-blur-sm flex items-center justify-center z-[60]"><div class="animate-bounce font-bold text-indigo-900 text-lg">Đang xử lý dữ liệu...</div></div>{/if}
 </div>
 
-<style>
-    .animate-popIn { animation: popIn 0.2s ease-out; } 
-    @keyframes popIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-    .btn-tab { @apply px-4 py-2 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 transition-colors; }
-    .btn-tab.active { @apply bg-indigo-600 text-white shadow-md border-transparent; }
-    .section-box { @apply bg-white p-4 rounded-xl border border-gray-200 shadow-sm; }
-    .title-label { @apply text-sm font-bold text-gray-500 uppercase mb-3; }
-    .header-icon { @apply text-sm font-bold uppercase mb-3 flex items-center gap-2; }
-    .input-std { @apply p-2 border rounded outline-none focus:ring-2 focus:ring-indigo-100 transition-all; }
-    .btn-primary { @apply px-4 py-2 bg-indigo-600 text-white rounded font-bold hover:bg-indigo-700 shadow-sm transition-transform active:scale-95; }
-    .btn-std { @apply px-3 py-2 bg-white border rounded text-gray-700 font-bold hover:bg-gray-50; }
-    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
-</style>
+{#if showTour} <TourGuide steps={currentSteps} on:complete={() => showTour = false} /> {/if}
+<style>.animate-fadeIn { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); } @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }</style>

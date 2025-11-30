@@ -1,34 +1,39 @@
 <script>
+  // Version 6.0 - Priority Sorting (Important First)
   import { createEventDispatcher } from 'svelte';
   import { currentTasks, currentUser } from '../lib/stores';
   import { formatDateTime } from '../lib/utils';
+  
   export let activeTab = 'warehouse';
   const dispatch = createEventDispatcher();
 
-  // Kiểm tra xem User có quản lý nhiều kho không để hiện Badge
   $: myStores = $currentUser?.storeIds || [];
   $: showStoreBadge = myStores.length > 1;
 
-  // Lọc danh sách theo Tab hiện tại
   $: filteredTasks = $currentTasks.filter(t => t.type === activeTab);
   
-  // Sắp xếp danh sách
+  // LOGIC SẮP XẾP MỚI
   $: sortedTasks = filteredTasks.sort((a, b) => {
-      // 1. Ưu tiên sắp xếp theo giờ
+      // 1. Sắp theo khung giờ trước
       const timeA = a.timeSlot || "00:00";
       const timeB = b.timeSlot || "00:00";
       if (timeA !== timeB) return timeA.localeCompare(timeB);
       
-      // 2. Nếu cùng giờ, sắp xếp theo Mã kho (nếu có)
+      // 2. Ưu tiên việc Quan Trọng (isImportant = true) lên đầu trong cùng khung giờ
+      // true = 1, false = 0 -> b - a để true lên trước
+      const impA = a.isImportant ? 1 : 0;
+      const impB = b.isImportant ? 1 : 0;
+      if (impA !== impB) return impB - impA;
+
+      // 3. Sắp theo Mã Kho (nếu quản lý nhiều kho)
       const storeA = a.storeId || "";
       const storeB = b.storeId || "";
       if (storeA !== storeB) return storeA.localeCompare(storeB);
       
-      // 3. Cuối cùng sắp xếp theo trạng thái (Chưa xong lên trước)
+      // 4. Cuối cùng là việc chưa làm lên trước
       return a.completed - b.completed;
   });
 
-  // Hàm kiểm tra để hiển thị Header giờ (ví dụ: nhóm các việc 08:00 lại)
   function shouldShowHeader(task, index, allTasks) {
     if (activeTab === 'handover') return false;
     const prevTask = allTasks[index - 1];
@@ -64,17 +69,14 @@
 
       <div class="flex-1 text-left">
         <div class="text-sm leading-snug {task.isImportant ? 'font-bold text-red-800' : 'font-semibold text-gray-800'}">
-            
             {#if showStoreBadge && task.storeId}
                 <span class="inline-block bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded mr-1 font-bold tracking-wider align-middle border border-indigo-200 font-mono">
                     [{task.storeId}]
                 </span>
             {/if}
-
-            {#if task.isImportant}
+             {#if task.isImportant}
                 <span class="material-icons-round text-sm text-red-500 align-middle mr-1">star</span>
             {/if}
-
             <span class:line-through={task.completed} class:text-gray-500={task.completed}>
                 {task.title}
             </span>

@@ -1,14 +1,10 @@
 /* src/app.css */
-
-/* 1. QUAN TRỌNG: Nạp Tailwind CSS */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* 2. Font Icon (Giữ lại từ bước sửa lỗi trước) */
 @import url('https://fonts.googleapis.com/icon?family=Material+Icons+Round');
 
-/* 3. Cấu hình Font & Icon */
 .material-icons-round {
   font-family: 'Material Icons Round';
   font-weight: normal;
@@ -26,11 +22,16 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* 4. Global Reset (Tailwind đã lo phần lớn, chỉ thêm font chữ) */
 body { 
-  font-family: 'Nunito', sans-serif; 
-  background-color: #f4f7fc; /* Màu nền body cũ */
+  font-family: 'Nunito', sans-serif;
+  background-color: #f4f7fc;
 }
 
-/* Các class hỗ trợ ẩn hiện */
-.hidden { display: none !important; }
+/* FIX FONT INPUT TIME (BẮT BUỘC) */
+input[type="time"] {
+    font-family: 'Nunito', sans-serif !important;
+}
+
+/* Ẩn scrollbar */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

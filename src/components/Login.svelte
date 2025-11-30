@@ -1,11 +1,10 @@
 <script>
+  // Version 6.1 - Demo triggers Tour & Better Seed Data
   import { db } from '../lib/firebase';
   import { collection, getDocs, query, where, doc, setDoc, serverTimestamp, writeBatch, getDoc } from 'firebase/firestore';
   import { setUser } from '../lib/stores.js';
   import { safeString, getTodayStr } from '../lib/utils.js';
-  // Import logic thật để sinh dữ liệu Demo xịn
-  import { generateMonthlySchedule, calculateShiftModes } from '../lib/scheduleLogic';
-
+  
   let username = '';
   let password = '';
   let showPassword = false;
@@ -13,190 +12,84 @@
   let errorMsg = '';
   let isLoading = false;
 
-  // --- LOGIC SEED DATA (TẠO DỮ LIỆU DEMO NHƯ THẬT) ---
+  const tourKey = 'taskflow_v6_general_tour_seen';
+
+  // --- LOGIC SEED DEMO DATA (2 KHO) ---
   async function seedDemoData() {
-      const demoStoreId = 'DEMO';
       const batch = writeBatch(db);
-      
-      // --- THAY ĐỔI QUAN TRỌNG: BỎ QUA KIỂM TRA TỒN TẠI ---
-      // Trước đây: if (checkSnap.exists()) return;
-      // Bây giờ: Luôn chạy để ghi đè dữ liệu cũ bằng dữ liệu xoay ca mới
-      console.log("♻️ Đang buộc tạo lại dữ liệu Demo (Force Reset)...");
-
-      // 1. Tạo 10 Nhân Sự Ảo
-      const demoStaff = [
-          { u: 'nv_a', n: 'Nguyễn Văn An', g: 'Nam' }, { u: 'nv_b', n: 'Trần Thị Bình', g: 'Nữ' },
-          { u: 'nv_c', n: 'Lê Văn Cường', g: 'Nam' }, { u: 'nv_d', n: 'Phạm Thị Dung', g: 'Nữ' },
-          { u: 'nv_e', n: 'Hoàng Văn Em', g: 'Nam' }, { u: 'nv_f', n: 'Vũ Thị Hoa', g: 'Nữ' },
-          { u: 'nv_g', n: 'Đặng Văn Giang', g: 'Nam' }, { u: 'nv_h', n: 'Bùi Thị Huệ', g: 'Nữ' },
-          { u: 'nv_i', n: 'Ngô Văn Ích', g: 'Nam' }, { u: 'nv_k', n: 'Dương Thị Kim', g: 'Nữ' }
-      ];
-
-      // Tạo User Login giả
-      demoStaff.forEach(s => {
-          const userRef = doc(db, 'users', s.u);
-          batch.set(userRef, {
-              username: s.u, username_idx: s.u, pass: '123', name: s.n, gender: s.g,
-              role: 'staff', storeIds: [demoStoreId]
-          });
-      });
-
-      // Lưu danh sách nhân viên vào settings
-      batch.set(doc(db, 'settings', `staff_list_${demoStoreId}`), {
-          staffList: demoStaff.map(s => ({ id: s.u, name: s.n, gender: s.g })),
-          updatedAt: serverTimestamp()
-      });
-
-      // 2. Tạo Việc Mẫu (Template)
-      batch.set(doc(db, 'settings', `template_${demoStoreId}`), {
-          warehouse: [
-              { time: '08:00', title: 'Kiểm tra hàng nhập đầu ngày', isImportant: true },
-              { time: '17:00', title: 'Vệ sinh kho bãi & Sắp xếp kệ', isImportant: false }
-          ],
-          cashier: [
-              { time: '08:00', title: 'Kiểm quỹ đầu ca & Vệ sinh quầy', isImportant: true },
-              { time: '14:00', title: 'Nộp tiền doanh thu sáng', isImportant: false },
-              { time: '21:30', title: 'Chốt ca & In báo cáo', isImportant: true }
-          ]
-      });
-
-      // 3. Tạo Task Thực Tế
+      const demoStores = ['DEMO_1', 'DEMO_2'];
       const today = getTodayStr();
-      const tasks = [
-          { type: 'warehouse', time: '08:00', title: 'Kiểm tra hàng nhập đầu ngày', imp: true, comp: true },
-          { type: 'warehouse', time: '17:00', title: 'Vệ sinh kho bãi', imp: false, comp: false },
-          { type: 'cashier', time: '08:00', title: 'Kiểm quỹ đầu ca', imp: true, comp: true },
-          { type: 'cashier', time: '21:30', title: 'Chốt ca', imp: true, comp: false },
-          { type: 'handover', time: '22:00', title: 'Giao chìa khóa kho cho bảo vệ', imp: true, comp: false, deadline: new Date().toISOString() }
+
+      // 1. Tạo User Demo
+      batch.set(doc(db, 'users', 'demo'), {
+          username: 'demo', username_idx: 'demo', pass: '123456', 
+          name: 'Quản Lý Demo', role: 'admin', 
+          storeIds: demoStores, storeId: 'DEMO_1'
+      });
+
+      // 2. Tạo Dữ Liệu Cho DEMO_1 (Có sẵn nhân viên & Ma trận)
+      // a. Danh sách nhân viên (8 người)
+      const staffList1 = [
+          {id:'1', name:'Nguyễn Văn A', gender:'Nam'}, {id:'2', name:'Trần Thị B', gender:'Nữ'},
+          {id:'3', name:'Lê Văn C', gender:'Nam'}, {id:'4', name:'Phạm Thị D', gender:'Nữ'},
+          {id:'5', name:'Hoàng Văn E', gender:'Nam'}, {id:'6', name:'Vũ Thị F', gender:'Nữ'},
+          {id:'7', name:'Đặng Văn G', gender:'Nam'}, {id:'8', name:'Bùi Thị H', gender:'Nữ'}
       ];
+      batch.set(doc(db, 'settings', 'staff_list_DEMO_1'), { staffList: staffList1, updatedAt: serverTimestamp() });
 
-      tasks.forEach(t => {
-          const tRef = doc(collection(db, 'tasks'));
-          batch.set(tRef, {
-              type: t.type, title: t.title, timeSlot: t.time || '00:00', completed: t.comp,
-              isImportant: t.imp, createdBy: 'System', date: today, storeId: demoStoreId,
-              deadline: t.deadline || null, timestamp: serverTimestamp(),
-              completedBy: t.comp ? 'Nguyễn Văn An' : null, time: t.comp ? '08:15' : null
-          });
-      });
-
-      // 4. TẠO LỊCH PHÂN CA THẬT (CA XOAY VÒNG - ROTATING SHIFTS)
-      const demoStaffList = demoStaff.map(s => ({ id: s.u, name: s.n, gender: s.g }));
-      
-      // Cấu hình giả lập tăng độ khó để ép xoay ca
-      const demoInputs = { c1: 1, c2: 2, c3: 2, c4: 2, c5: 2, c6: 1, gh: 1 }; 
-      const computedShifts = calculateShiftModes(demoInputs, demoStaffList.length);
-      const demoRoleConfig = { tn: 3, kho: 3 }; 
-
-      const now = new Date();
-      
-      // LOGIC MỚI: Random chỉ số tích lũy ban đầu để phá vỡ thế cân bằng tĩnh
-      let prevScheduleData = {
-          endOffset: Math.floor(Math.random() * demoStaffList.length), 
-          stats: demoStaffList.map(s => ({
-              id: s.id,
-              totalHours: Math.floor(Math.random() * 40), // Random 0-40h ban đầu
-              gh: Math.floor(Math.random() * 5),
-              tn: Math.floor(Math.random() * 5),
-              kho: Math.floor(Math.random() * 5)
-          }))
+      // b. Ma trận phân ca mẫu (Cân bằng hơn)
+      // Tổng shift/ngày: Kho=6, TN=6. Tổng tháng 30 ngày = 180 ca.
+      // 180 ca / 8 người = 22.5 ca/người (Khá đều)
+      const matrix1 = {
+          c1: { kho: 1, tn: 1, tv: 0, gh: 0 },
+          c2: { kho: 1, tn: 1, tv: 0, gh: 0 }, 
+          c3: { kho: 1, tn: 1, tv: 0, gh: 0 },
+          c4: { kho: 1, tn: 1, tv: 0, gh: 0 },
+          c5: { kho: 1, tn: 1, tv: 0, gh: 0 },
+          c6: { kho: 1, tn: 1, tv: 0, gh: 0 }
       };
+      batch.set(doc(db, 'settings', 'shift_matrix_DEMO_1'), { matrix: matrix1, updatedAt: serverTimestamp() });
 
-      const monthsToGen = [];
-      for (let i = 2; i >= 0; i--) {
-          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          monthsToGen.push({ m: d.getMonth() + 1, y: d.getFullYear() });
-      }
-
-      for (const t of monthsToGen) {
-          const result = generateMonthlySchedule(
-              demoStaffList, 
-              computedShifts, 
-              demoRoleConfig, 
-              t.m, t.y, 
-              prevScheduleData
-          );
-          
-          const mStr = `${t.y}-${String(t.m).padStart(2, '0')}`;
-          const schedDoc = doc(db, 'stores', demoStoreId, 'schedules', mStr);
-          batch.set(schedDoc, {
-              config: { 
-                  shiftInputs: [
-                      { id: 'c1', label: 'Ca 1', time: '08:00-09:00', qty: 1 },
-                      { id: 'c2', label: 'Ca 2', time: '09:00-12:00', qty: 2 },
-                      { id: 'c3', label: 'Ca 3', time: '12:00-15:00', qty: 2 },
-                      { id: 'c4', label: 'Ca 4', time: '15:00-18:00', qty: 2 },
-                      { id: 'c5', label: 'Ca 5', time: '18:00-21:00', qty: 2 },
-                      { id: 'c6', label: 'Ca 6', time: '21:00-21:30', qty: 1 }
-                  ],
-                  roleConfig: demoRoleConfig, 
-                  computed: computedShifts 
-              },
-              data: result.schedule,
-              stats: result.staffStats.map(s => ({id: s.id, name: s.name, ...s.stats})),
-              endOffset: result.endOffset,
-              updatedAt: serverTimestamp(),
-              updatedBy: 'System'
-          });
-
-          prevScheduleData = {
-              endOffset: result.endOffset,
-              stats: result.staffStats.map(s => ({id: s.id, ...s.stats}))
-          };
-      }
-      
-      batch.set(doc(db, 'settings', `shift_config_${demoStoreId}`), {
-          shiftInputs: [
-              { id: 'c1', label: 'Ca 1 (Sáng)', time: '08:00 - 09:00', qty: 1 },
-              { id: 'c2', label: 'Ca 2 (Sáng)', time: '09:00 - 12:00', qty: 2 },
-              { id: 'c3', label: 'Ca 3 (Trưa)', time: '12:00 - 15:00', qty: 2 },
-              { id: 'c4', label: 'Ca 4 (Chiều)', time: '15:00 - 18:00', qty: 2 },
-              { id: 'c5', label: 'Ca 5 (Tối)', time: '18:00 - 21:00', qty: 2 },
-              { id: 'c6', label: 'Ca 6 (Đêm)', time: '21:00 - 21:30', qty: 1 }
-          ],
-          roleConfig: demoRoleConfig,
-          ghQty: 1,
-          updatedAt: serverTimestamp()
+      // c. Task mẫu
+      const tasks1 = [
+          { type: 'warehouse', title: '[DEMO] Nhập hàng kho', time: '08:00', isImportant: true },
+          { type: 'cashier', title: '[DEMO] Kiểm quỹ sáng', time: '08:00', isImportant: true }
+      ];
+      tasks1.forEach(t => {
+          const ref = doc(collection(db, 'tasks'));
+          batch.set(ref, { ...t, timeSlot: t.time, completed: false, date: today, storeId: 'DEMO_1', createdBy: 'System' });
       });
 
+      // 3. Tạo Dữ Liệu Cho DEMO_2 (Kho rỗng)
+      const staffList2 = [{id:'1', name:'NV Mới A', gender:'Nam'}, {id:'2', name:'NV Mới B', gender:'Nữ'}];
+      batch.set(doc(db, 'settings', 'staff_list_DEMO_2'), { staffList: staffList2, updatedAt: serverTimestamp() });
+      
       await batch.commit();
-      console.log("✅ Force Reset: Đã ghi đè dữ liệu Demo mới!");
+      console.log("✅ Demo Data Seeded!");
   }
 
-  // --- LOGIN HANDLER ---
   async function handleLogin() {
     isLoading = true;
     errorMsg = 'Đang kiểm tra...';
     const cleanU = safeString(username).toLowerCase();
     const cleanP = safeString(password);
 
-    if (cleanU === 'demo' && cleanP === '123456') {
-        try {
-            await seedDemoData(); // Luôn chạy hàm này để reset
-            const demoUser = {
-                username: 'demo', name: 'Quản Lý Demo',
-                role: 'admin', storeIds: ['DEMO'], storeId: 'DEMO'
-            };
-            setUser(demoUser);
-            return; 
-        } catch (e) {
-            console.error(e);
-            errorMsg = "Lỗi khởi tạo Demo: " + e.message;
-            isLoading = false;
-            return;
-        }
+    // MASTER KEY SETUP
+    if (cleanU === 'setup' && cleanP === 'Linh30!0') {
+        setUser({ username: 'setup', name: 'System Setup', role: 'super_admin', storeIds: ['908'], storeId: '908' });
+        return;
     }
 
-    if (cleanU === 'setup' && cleanP === 'Linh30!0') {
+    // DEMO LOGIC
+    if (cleanU === 'demo' && cleanP === '123456') {
         try {
-            await setDoc(doc(db, 'users', 'admin'), {
-                username: 'admin', username_idx: 'admin', pass: 'Linh30!0', name: 'Super Admin', 
-                role: 'super_admin', storeIds: [], createdAt: serverTimestamp()
-            });
-            alert("✅ Đã tạo User: admin / Linh30!0"); username = 'admin'; password = '123456';
-            isSuperAdminLogin = true; handleLogin(); return;
-        } catch (e) { alert(e.message); isLoading = false; return;
-        }
+            await seedDemoData();
+            // RESET TOUR GUIDE ĐỂ NGƯỜI DÙNG DEMO TRẢI NGHIỆM TỪ ĐẦU
+            localStorage.removeItem(tourKey);
+            
+            setUser({ username: 'demo', name: 'Quản Lý Demo', role: 'admin', storeIds: ['DEMO_1', 'DEMO_2'], storeId: 'DEMO_1' });
+            return;
+        } catch(e) { console.error(e); }
     }
 
     try {
@@ -214,17 +107,16 @@
             } else {
                 const stores = data.storeIds || (data.storeId ? [data.storeId] : []);
                 if (data.role !== 'super_admin' && stores.length > 0) {
-                    foundUser = data;
-                    foundUser.storeIds = stores;
+                    foundUser = data; foundUser.storeIds = stores;
                 }
             }
         }
       });
 
       if (foundUser) setUser(foundUser);
-      else errorMsg = isSuperAdminLogin ? 'Bạn không có quyền Super Admin!' : 'Sai mật khẩu hoặc Tài khoản chưa được gán kho!';
-    } catch (err) { console.error(err); errorMsg = err.message; } 
-    finally { isLoading = false; }
+      else errorMsg = isSuperAdminLogin ? 'Bạn không có quyền Super Admin hoặc sai mật khẩu!' : 'Sai mật khẩu hoặc Tài khoản chưa được gán kho!';
+
+    } catch (err) { errorMsg = err.message; } finally { isLoading = false; }
   }
 </script>
 
@@ -259,7 +151,7 @@
       <p class="error-msg" role="alert">{errorMsg}</p>
       
       <div class="mt-4 text-xs text-gray-400">
-          TK Demo: <b>demo</b> / <b>123456</b> (Full Quyền)
+          Demo: <b>demo</b> / <b>123456</b>
       </div>
     </form>
   </div>

@@ -1,15 +1,27 @@
 <script>
-  import { onMount, createEventDispatcher, onDestroy } from 'svelte';
+  import { onMount, createEventDispatcher, onDestroy, tick } from 'svelte';
   export let steps = []; 
   
   const dispatch = createEventDispatcher();
   let currentStepIndex = 0;
-  let styleString = 'opacity: 0;'; // Mặc định ẩn
-  let tooltipStyle = 'opacity: 0;'; // Mặc định ẩn
-  let arrowClass = ''; 
+  let styleString = 'opacity: 0;';
+  let tooltipStyle = 'opacity: 0;'; 
+  let arrowClass = '';
   let isMobile = false;
   let retryCount = 0;
-  const MAX_RETRIES = 5;
+  const MAX_RETRIES = 10; // Tăng số lần thử để chờ Tab chuyển xong
+
+  // Hàm xử lý logic trước khi hiện bước (Quan trọng)
+  async function runStepAction() {
+      const step = steps[currentStepIndex];
+      if (step && typeof step.action === 'function') {
+          await step.action(); // Chạy lệnh chuyển tab/mở modal
+          await tick(); // Chờ Svelte cập nhật DOM
+          // Chờ thêm một chút cho hiệu ứng CSS (nếu có)
+          await new Promise(r => setTimeout(r, 300)); 
+      }
+      calculatePosition();
+  }
 
   async function calculatePosition() {
     if (!steps || steps.length === 0) return;
@@ -18,35 +30,26 @@
     }
 
     const step = steps[currentStepIndex];
-    
-    // LOGIC MỚI: Thử tìm element, nếu không thấy thì thử lại (Retry)
     const el = document.querySelector(step.target);
     
     if (!el) {
         if (retryCount < MAX_RETRIES) {
             retryCount++;
-            setTimeout(calculatePosition, 100); // Thử lại sau 100ms
+            setTimeout(calculatePosition, 200); // Thử lại sau 200ms
             return;
         } else {
-            console.warn('TourGuide: Target not found after retries:', step.target);
-            // Nếu không tìm thấy, ẩn highlight đi để tránh hiển thị sai
+            console.warn('TourGuide: Target not found:', step.target);
+            // Fallback: Hiện giữa màn hình nếu không tìm thấy đích
             styleString = 'display: none;';
-            // Vẫn hiện tooltip nhưng ở giữa màn hình để người dùng đọc được
-            tooltipStyle = `
-                position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                width: 300px; z-index: 10000;
-            `;
+            tooltipStyle = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; z-index: 10000;`;
             return;
         }
     }
     
-    // Reset retry count khi đã tìm thấy
     retryCount = 0;
-
     const rect = el.getBoundingClientRect();
     isMobile = window.innerWidth < 640;
 
-    // 1. VẼ SPOTLIGHT (Fixed Position)
     styleString = `
         position: fixed;
         top: ${rect.top}px;
@@ -57,7 +60,6 @@
         opacity: 1;
     `;
 
-    // 2. TÍNH VỊ TRÍ TOOLTIP
     if (isMobile) {
         const isTargetInBottomHalf = rect.top > (window.innerHeight / 2);
         tooltipStyle = `
@@ -93,21 +95,20 @@
             : 'bottom-[-6px] left-1/2 -translate-x-1/2 border-b border-r';
     }
         
-    // Scroll vào tầm nhìn (Căn giữa)
     el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
   }
 
-  function nextStep() { currentStepIndex++; retryCount=0; calculatePosition(); }
-  function prevStep() { if (currentStepIndex > 0) { currentStepIndex--; retryCount=0; calculatePosition(); } }
+  function nextStep() { currentStepIndex++; retryCount=0; runStepAction(); }
+  function prevStep() { if (currentStepIndex > 0) { currentStepIndex--; retryCount=0; runStepAction(); } }
   function completeTour() { dispatch('complete'); }
   function skipTour() { dispatch('complete'); }
 
   onMount(() => {
-    setTimeout(calculatePosition, 500);
+    runStepAction(); // Chạy bước đầu tiên
     window.addEventListener('resize', calculatePosition);
     window.addEventListener('scroll', calculatePosition, { capture: true });
   });
-
+  
   onDestroy(() => {
     window.removeEventListener('resize', calculatePosition);
     window.removeEventListener('scroll', calculatePosition, { capture: true });
@@ -115,15 +116,9 @@
 </script>
 
 <div class="fixed inset-0 z-[9999] overflow-hidden pointer-events-none">
-    <div 
-        class="box-content rounded-lg border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.75)]"
-        style={styleString}
-    ></div>
+    <div class="box-content rounded-lg border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.75)]" style={styleString}></div>
 
-    <div 
-        class="bg-white p-5 rounded-xl shadow-2xl border border-gray-100 pointer-events-auto flex flex-col z-[10000]"
-        style={tooltipStyle}
-    >
+    <div class="bg-white p-5 rounded-xl shadow-2xl border border-gray-100 pointer-events-auto flex flex-col z-[10000]" style={tooltipStyle}>
         <div class="flex justify-between items-start mb-3">
             <h4 class="font-bold text-gray-800 text-lg">{steps[currentStepIndex]?.title}</h4>
             <button class="text-gray-400 hover:text-gray-600 p-1" on:click={skipTour} aria-label="Đóng">
@@ -132,7 +127,7 @@
         </div>
         
         <p class="text-sm text-gray-600 mb-5 leading-relaxed">
-            {steps[currentStepIndex]?.content}
+            {@html steps[currentStepIndex]?.content} 
         </p>
 
         <div class="flex justify-between items-center pt-3 border-t border-gray-100 mt-auto">
