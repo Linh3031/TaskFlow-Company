@@ -1,6 +1,9 @@
 <script>
+  // Version 7.0 - Change Password Feature (User Self-Service)
   import { createEventDispatcher, onMount } from 'svelte';
   import { currentUser, setUser } from '../lib/stores';
+  import { db } from '../lib/firebase';
+  import { doc, updateDoc } from 'firebase/firestore';
 
   const dispatch = createEventDispatcher();
   
@@ -13,18 +16,14 @@
       e.preventDefault();
       deferredPrompt = e;
       showInstallBtn = true;
-      console.log("✅ PWA Ready: Event fired");
     });
 
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
     const isInStandaloneMode = ('standalone' in window.navigator) && (window.navigator.standalone);
     
-    // iOS: Luôn hiện nếu chưa cài
     if (isIos && !isInStandaloneMode) {
       showInstallBtn = true;
     }
-    
-    // Admin: Luôn hiện nút để test bất chấp trạng thái
     if ($currentUser?.role?.includes('admin')) {
       showInstallBtn = true;
     }
@@ -32,36 +31,65 @@
 
   function handleInstall() {
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
-    
     if (isIos) {
       dispatch('openIosGuide');
     } else if (deferredPrompt) {
-      // TRƯỜNG HỢP 1: Trình duyệt cho phép cài (Lần đầu hoặc đã Clear cache)
       deferredPrompt.prompt();
       deferredPrompt.userChoice.then((choiceResult) => {
-        // Không ẩn nút ngay, để người dùng có thể bấm lại nếu lỡ tay hủy
         if (choiceResult.outcome === 'accepted') {
-            showInstallBtn = false; // Chỉ ẩn khi đã chấp nhận cài
+            showInstallBtn = false;
         }
-        deferredPrompt = null; // Sự kiện chỉ dùng được 1 lần, phải reload mới có lại
+        deferredPrompt = null;
       });
     } else {
-      // TRƯỜNG HỢP 2: Trình duyệt chặn (Do vừa xóa App hoặc Cache cũ)
-      // Thay vì báo lỗi, ta hướng dẫn cách "Ép cài"
-      if (confirm("⚠️ Trình duyệt đang chặn Popup cài đặt tự động (do bạn vừa xóa App).\n\nBạn có muốn xem cách cài đặt thủ công không?")) {
-          alert("👉 Hướng dẫn Cài lại:\n\n1. Bấm vào dấu 3 chấm (⋮) ở góc phải trên trình duyệt Chrome.\n2. Chọn dòng 'Cài đặt ứng dụng' (Install App) hoặc 'Thêm vào màn hình chính'.\n\n(Nếu không thấy, hãy Xóa lịch sử duyệt web và thử lại)");
+      if (confirm("⚠️ Trình duyệt chặn cài tự động. Xem hướng dẫn cài thủ công?")) {
+          alert("👉 Hướng dẫn: Bấm menu (⋮) -> Chọn 'Thêm vào màn hình chính' (Install App).");
       }
     }
   }
 
   function handleLogout() {
-    setUser(null);
-    window.location.reload();
+    if(confirm("Đăng xuất khỏi hệ thống?")) {
+        setUser(null);
+        window.location.reload();
+    }
+  }
+
+  // --- LOGIC ĐỔI MẬT KHẨU ---
+  let showProfileModal = false;
+  let oldPass = '';
+  let newPass = '';
+  let changePassLoading = false;
+
+  async function handleChangePassword() {
+      if (!oldPass || !newPass) return alert("Vui lòng nhập đầy đủ thông tin!");
+      if (oldPass !== $currentUser.pass) return alert("Mật khẩu cũ không chính xác!");
+      if (newPass.length < 6) return alert("Mật khẩu mới phải từ 6 ký tự trở lên!");
+
+      changePassLoading = true;
+      try {
+          // Cập nhật trên Firebase
+          await updateDoc(doc(db, 'users', $currentUser.username), {
+              pass: newPass
+          });
+
+          // Cập nhật Local Store
+          const updatedUser = { ...$currentUser, pass: newPass };
+          setUser(updatedUser);
+
+          alert("✅ Đổi mật khẩu thành công!");
+          showProfileModal = false;
+          oldPass = ''; newPass = '';
+      } catch (e) {
+          alert("Lỗi: " + e.message);
+      } finally {
+          changePassLoading = false;
+      }
   }
 </script>
 
 <header class="app-header bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10 shrink-0 sticky top-0">
-  <div class="flex items-center gap-3">
+  <button class="flex items-center gap-3 hover:bg-gray-50 p-1 rounded-lg transition-colors text-left" on:click={() => showProfileModal = true}>
     <div class="w-9 h-9 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold text-sm border border-indigo-200 shadow-sm">
       {$currentUser?.name?.charAt(0).toUpperCase() || 'U'}
     </div>
@@ -71,7 +99,7 @@
         <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Online
       </span>
     </div>
-  </div>
+  </button>
   
   <div class="flex items-center gap-2">
     {#if showInstallBtn}
@@ -114,3 +142,36 @@
     </button>
   </div>
 </header>
+
+{#if showProfileModal}
+<div class="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => showProfileModal = false}>
+    <div class="bg-white w-full max-w-xs rounded-2xl p-5 shadow-2xl animate-popIn" on:click|stopPropagation>
+        <div class="text-center mb-4">
+            <div class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-2 text-2xl font-bold border-2 border-indigo-200">
+                {$currentUser?.name?.charAt(0).toUpperCase()}
+            </div>
+            <h3 class="font-bold text-lg text-slate-800">{$currentUser?.name}</h3>
+            <p class="text-xs text-gray-500">{$currentUser?.username}</p>
+        </div>
+        
+        <div class="space-y-3">
+            <div>
+                <label class="text-xs font-bold text-slate-500 uppercase">Mật khẩu cũ</label>
+                <input type="password" bind:value={oldPass} class="w-full mt-1 p-2 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 text-sm">
+            </div>
+            <div>
+                <label class="text-xs font-bold text-slate-500 uppercase">Mật khẩu mới</label>
+                <input type="password" bind:value={newPass} class="w-full mt-1 p-2 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 text-sm">
+            </div>
+            <button class="w-full py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 mt-2 disabled:opacity-50" on:click={handleChangePassword} disabled={changePassLoading}>
+                {changePassLoading ? 'Đang lưu...' : 'Đổi Mật Khẩu'}
+            </button>
+        </div>
+    </div>
+</div>
+{/if}
+
+<style>
+    .animate-popIn { animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); } 
+    @keyframes popIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+</style>
