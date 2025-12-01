@@ -1,11 +1,13 @@
 <script>
-  // Version 11.0 - Simplified User Creation (Removed Name Input)
+  // Version 12.0 - Instant Task Creation & Renaming UI
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import { read, utils, writeFile } from 'xlsx';
   import { db } from '../lib/firebase';
-  import { doc, setDoc, serverTimestamp, getDoc, updateDoc, writeBatch, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
+  // UPDATE: Thêm addDoc để tạo task ngay lập tức
+  import { doc, setDoc, serverTimestamp, getDoc, updateDoc, writeBatch, collection, query, where, getDocs, deleteDoc, addDoc } from 'firebase/firestore';
   import { taskTemplate, currentUser } from '../lib/stores';
-  import { safeString } from '../lib/utils';
+  // UPDATE: Thêm getTodayStr để lấy ngày hiện tại
+  import { safeString, getTodayStr } from '../lib/utils';
   import { calculateCombosFromMatrix, generateMonthlySchedule } from '../lib/scheduleLogic';
   import { optimizeSchedule } from '../lib/optimization';
   import TourGuide from './TourGuide.svelte'; 
@@ -22,7 +24,8 @@
 
   function checkDemoAndBlock(e) {
       if (isDemoMode) {
-          e && e.preventDefault(); e && e.stopPropagation();
+          e && e.preventDefault();
+          e && e.stopPropagation();
           alert("Tài khoản demo không có tính năng này, vui lòng liên hệ 3031 để được cấp quyền");
           return true;
       }
@@ -33,19 +36,17 @@
   let isLoading = false;
   let showTour = false;
   
-  // BIẾN CHO TAB TÀI KHOẢN (ĐÃ BỎ newAdminName)
-  let newAdminUser = ''; 
+  // BIẾN CHO TAB TÀI KHOẢN
+  let newAdminUser = '';
   let newAdminPass = ''; 
   let newAdminStore = '';
   let accountList = [];
-
-  // BIẾN CHO MODAL THÊM 1 NGƯỜI (ĐÃ BỎ singleName)
+  // BIẾN CHO MODAL THÊM 1 NGƯỜI
   let showAddUserModal = false;
   let singleGender = 'Nữ';
   let singleUsername = '';
   let singlePass = '123456';
   let singleRole = 'staff';
-
   // Config Tour Steps
   const matrixSteps = [{ target: '#store-select-container', title: '1. Chọn Kho', content: 'Xác định kho bạn đang muốn thao tác cấu hình.' }, { target: '#btn-download-schedule-sample', title: '2. Tải Mẫu DS', content: 'Tải file Excel mẫu: Ho_Ten, Gioi_Tinh, Ma_Kho.' }, { target: '#btn-import-staff', title: '3. Import Nhân Sự', content: 'Upload danh sách để nạp nhân viên vào hệ thống phân ca.' }, { target: '#matrix-table', title: '4. Định Mức', content: 'Nhập số lượng nhân sự cần thiết cho từng ca.' }, { target: '#btn-calculate', title: '5. Tính Toán', content: 'Quy đổi định mức ra Combo.' }, { target: '#btn-preview', title: '6. Xem Trước', content: 'Tạo và tối ưu lịch.' }];
   const templateSteps = [{ target: '#store-select-container', title: '1. Chọn Kho', content: 'Chọn kho để áp dụng mẫu công việc này.' }, { target: '#dept-select-container', title: '2. Chọn Bộ Phận', content: 'Chọn bộ phận muốn tạo việc mẫu.' }, { target: '#template-form', title: '3. Nhập Thông Tin', content: 'Điền giờ và tên công việc.' }, { target: '#btn-save-template', title: '4. Lưu Lại', content: 'Thêm vào danh sách.' }];
@@ -55,8 +56,10 @@
   function startAdminTour() { if (activeSection === 'schedule') currentSteps = matrixSteps; else if (activeSection === 'template') currentSteps = templateSteps; else currentSteps = accountSteps; showTour = true; }
 
   // Logic Schedule Variables
-  let previewScheduleData = null; let previewStats = []; let originalResult = null; let optimizationLogs = []; 
-  let scheduleMonth = new Date().getMonth() + 1; let scheduleYear = new Date().getFullYear();
+  let previewScheduleData = null;
+  let previewStats = []; let originalResult = null; let optimizationLogs = []; 
+  let scheduleMonth = new Date().getMonth() + 1;
+  let scheduleYear = new Date().getFullYear();
   let scheduleStaffList = []; let staffStats = { total: 0, male: 0, female: 0 };
   $: { if (scheduleStaffList && scheduleStaffList.length > 0) { try { staffStats = { total: scheduleStaffList.length, male: scheduleStaffList.filter(s => String(s.gender || '').trim().toLowerCase() === 'nam').length, female: scheduleStaffList.filter(s => String(s.gender || '').trim().toLowerCase() !== 'nam').length }; } catch (e) { staffStats = { total: scheduleStaffList.length, male: 0, female: 0 }; } } else { staffStats = { total: 0, male: 0, female: 0 }; } }
   const defaultMatrix = { c1: { kho: 0, tn: 0, tv: 0, gh: 0 }, c2: { kho: 0, tn: 0, tv: 0, gh: 0 }, c3: { kho: 0, tn: 0, tv: 0, gh: 0 }, c4: { kho: 0, tn: 0, tv: 0, gh: 0 }, c5: { kho: 0, tn: 0, tv: 0, gh: 0 }, c6: { kho: 0, tn: 0, tv: 0, gh: 0 } };
@@ -68,9 +71,10 @@
   const shiftCols = [ { id: 'c1', label: 'C1 (08-09h)' }, { id: 'c2', label: 'C2 (09-12h)' }, { id: 'c3', label: 'C3 (12-15h)' }, { id: 'c4', label: 'C4 (15-18h)' }, { id: 'c5', label: 'C5 (18-21h)' }, { id: 'c6', label: 'C6 (21-21h30)' } ];
   const roleRows = [ { id: 'kho', label: 'Kho', color: 'text-orange-600 bg-orange-50 border-orange-100' }, { id: 'tn', label: 'Thu Ngân', color: 'text-purple-600 bg-purple-50 border-purple-100' }, { id: 'gh', label: 'Giao Hàng', color: 'text-blue-600 bg-blue-50 border-blue-100' }, { id: 'tv', label: 'Tư Vấn', color: 'text-gray-600 bg-gray-50 border-gray-200' } ];
   const comboCols = ['123', '456', '23', '45', '2-5', '2345'];
-  let activeTemplateType = 'warehouse'; let newTemplateTime = '08:00'; let newTemplateTitle = ''; let newTemplateImportant = false; let selectedDays = [0, 1, 2, 3, 4, 5, 6]; let editingTemplateIndex = -1;
+  let activeTemplateType = 'warehouse'; let newTemplateTime = '08:00';
+  let newTemplateTitle = ''; let newTemplateImportant = false; let selectedDays = [0, 1, 2, 3, 4, 5, 6];
+  let editingTemplateIndex = -1;
   const weekDays = [{ val: 1, label: 'T2' }, { val: 2, label: 'T3' }, { val: 3, label: 'T4' }, { val: 4, label: 'T5' }, { val: 5, label: 'T6' }, { val: 6, label: 'T7' }, { val: 0, label: 'CN' }];
-
   onMount(async () => { await loadStoreData(); });
 
   // Các hàm logic cũ (Giữ nguyên)
@@ -89,145 +93,71 @@
   async function handleApplySchedule() { if (!previewScheduleData) return; if (!confirm(`⚠️ XÁC NHẬN ÁP DỤNG LỊCH THÁNG ${scheduleMonth}/${scheduleYear}?`)) return; isLoading = true; try { const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`; await setDoc(doc(db, 'stores', targetStore, 'schedules', scheduleId), { config: { matrix: shiftMatrix, approvedCombos: suggestedCombos }, data: previewScheduleData, stats: previewStats, endOffset: originalResult.endOffset, updatedAt: serverTimestamp(), updatedBy: $currentUser.username }); alert("✅ Đã áp dụng lịch thành công!"); dispatch('close'); dispatch('switchTab', 'schedule'); } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false; } }
   function getWeekday(day) { const date = new Date(scheduleYear, scheduleMonth - 1, day); return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()]; }
   function toggleDay(d) { if (selectedDays.includes(d)) { if (selectedDays.length > 1) selectedDays = selectedDays.filter(x => x !== d); } else selectedDays = [...selectedDays, d]; }
-  async function saveTemplate() { taskTemplate.update(curr => { const up = { ...$taskTemplate }; if (!up[activeTemplateType]) up[activeTemplateType] = []; const newItem = { title: newTemplateTitle, time: newTemplateTime, isImportant: newTemplateImportant, days: selectedDays }; if (editingTemplateIndex >= 0) up[activeTemplateType][editingTemplateIndex] = newItem; else up[activeTemplateType].push(newItem); up[activeTemplateType].sort((a,b) => (a.time||"00:00").localeCompare(b.time||"00:00")); myStores.forEach(sid => setDoc(doc(db, 'settings', `template_${sid}`), up)); return up; }); newTemplateTitle = ''; newTemplateImportant = false; editingTemplateIndex = -1; selectedDays = [0,1,2,3,4,5,6]; }
+  
+  // --- HÀM SAVE TEMPLATE ĐƯỢC CẬP NHẬT LOGIC TẠO TASK NGAY ---
+  async function saveTemplate() {
+    const today = new Date();
+    const currentDay = today.getDay();
+    const isNew = editingTemplateIndex === -1;
+
+    // 1. Lưu vào Cấu hình (Template)
+    taskTemplate.update(curr => { 
+        const up = { ...$taskTemplate }; 
+        if (!up[activeTemplateType]) up[activeTemplateType] = []; 
+        const newItem = { title: newTemplateTitle, time: newTemplateTime, isImportant: newTemplateImportant, days: selectedDays }; 
+        if (editingTemplateIndex >= 0) up[activeTemplateType][editingTemplateIndex] = newItem; 
+        else up[activeTemplateType].push(newItem); 
+        
+        up[activeTemplateType].sort((a,b) => (a.time||"00:00").localeCompare(b.time||"00:00")); 
+        
+        // Lưu cho tất cả các kho của user
+        myStores.forEach(sid => setDoc(doc(db, 'settings', `template_${sid}`), up)); 
+        return up; 
+    });
+
+    // 2. LOGIC MỚI: Nếu đang Tạo Mới (không phải Sửa) và Ngày chọn trùng với Hôm nay -> Tạo Task ngay
+    if (isNew && selectedDays.includes(currentDay)) {
+        try {
+            const batchPromises = myStores.map(sid => {
+                return addDoc(collection(db, 'tasks'), {
+                    type: activeTemplateType,
+                    title: newTemplateTitle,
+                    timeSlot: newTemplateTime,
+                    completed: false,
+                    completedBy: null,
+                    time: null,
+                    note: '',
+                    createdBy: 'Admin',
+                    date: getTodayStr(),
+                    storeId: sid,
+                    isImportant: newTemplateImportant,
+                    timestamp: serverTimestamp()
+                });
+            });
+            await Promise.all(batchPromises);
+            // Không alert làm phiền, chỉ cần task hiện ra ngoài là được
+        } catch (e) {
+            console.error("Lỗi tạo task nhanh:", e);
+        }
+    }
+
+    newTemplateTitle = ''; newTemplateImportant = false; editingTemplateIndex = -1; selectedDays = [0,1,2,3,4,5,6];
+  }
+
   function editTemplate(idx, item) { editingTemplateIndex = idx; newTemplateTitle = item.title; newTemplateTime = item.time; newTemplateImportant = item.isImportant || false; selectedDays = item.days || [0,1,2,3,4,5,6]; }
   function deleteTemplate(idx) { if(!confirm("Xóa?")) return; taskTemplate.update(curr => { const up = {...curr}; up[activeTemplateType].splice(idx, 1); myStores.forEach(sid => setDoc(doc(db, 'settings', `template_${sid}`), up)); return up; }); if(editingTemplateIndex === idx) { editingTemplateIndex = -1; newTemplateTitle = ''; } }
   function downloadScheduleSample() { const wb = utils.book_new(); const wsData = [["Ho_Ten", "Gioi_Tinh", "Ma_Kho"], ["Nguyễn Văn A", "Nam", targetStore], ["Trần Thị B", "Nữ", targetStore]]; const ws = utils.aoa_to_sheet(wsData); utils.book_append_sheet(wb, ws, "DS_Nhan_Vien"); writeFile(wb, `Mau_Phan_Ca_${targetStore}.xlsx`); }
   function downloadAccountSample() { const wb = utils.book_new(); const wsData = [["username", "pass", "ma_kho", "role"], [`nv1_${targetStore}`, "123456", targetStore, "staff"], [`quanly_${targetStore}`, "123456", targetStore, "admin"]]; const ws = utils.aoa_to_sheet(wsData); utils.book_append_sheet(wb, ws, "DS_Cap_Quyen"); writeFile(wb, `Mau_Tai_Khoan_${targetStore}.xlsx`); }
 
-  async function loadAccountList() {
-      if (!targetStore) return;
-      try {
-          const q = query(collection(db, 'users'), where('storeIds', 'array-contains', targetStore));
-          const snap = await getDocs(q);
-          const list = [];
-          snap.forEach(d => list.push({id: d.id, ...d.data()}));
-          accountList = list;
-      } catch (e) { console.error("Load accounts failed:", e); }
-  }
+  async function loadAccountList() { if (!targetStore) return; try { const q = query(collection(db, 'users'), where('storeIds', 'array-contains', targetStore)); const snap = await getDocs(q); const list = []; snap.forEach(d => list.push({id: d.id, ...d.data()})); accountList = list; } catch (e) { console.error("Load accounts failed:", e); } }
+  async function deleteAccount(uid) { if (checkDemoAndBlock()) return; if (!confirm(`Xóa tài khoản ${uid}? Hành động này không thể hoàn tác.`)) return; try { await deleteDoc(doc(db, 'users', uid)); await loadAccountList(); } catch (e) { alert("Lỗi xóa: " + e.message); } }
+  async function changeRole(uid, newRole) { if (checkDemoAndBlock()) return; if (!confirm(`Đổi quyền tài khoản ${uid} thành ${newRole}?`)) return; try { await updateDoc(doc(db, 'users', uid), { role: newRole }); await loadAccountList(); } catch (e) { alert("Lỗi đổi quyền: " + e.message); } }
+  async function resetPassword(uid) { if (checkDemoAndBlock()) return; if (!confirm(`Xác nhận đặt lại mật khẩu cho ${uid} thành '123456'?`)) return; try { await updateDoc(doc(db, 'users', uid), { pass: '123456' }); alert(`✅ Đã reset mật khẩu cho ${uid}.`); } catch (e) { alert("Lỗi reset: " + e.message); } }
 
-  async function deleteAccount(uid) {
-      if (checkDemoAndBlock()) return;
-      if (!confirm(`Xóa tài khoản ${uid}? Hành động này không thể hoàn tác.`)) return;
-      try {
-          await deleteDoc(doc(db, 'users', uid));
-          await loadAccountList(); 
-      } catch (e) { alert("Lỗi xóa: " + e.message); }
-  }
-
-  async function changeRole(uid, newRole) {
-      if (checkDemoAndBlock()) return;
-      if (!confirm(`Đổi quyền tài khoản ${uid} thành ${newRole}?`)) return;
-      try {
-          await updateDoc(doc(db, 'users', uid), { role: newRole });
-          await loadAccountList();
-      } catch (e) { alert("Lỗi đổi quyền: " + e.message); }
-  }
-
-  async function resetPassword(uid) {
-      if (checkDemoAndBlock()) return;
-      if (!confirm(`Xác nhận đặt lại mật khẩu cho ${uid} thành '123456'?`)) return;
-      try {
-          await updateDoc(doc(db, 'users', uid), { pass: '123456' });
-          alert(`✅ Đã reset mật khẩu cho ${uid}.`);
-      } catch (e) { alert("Lỗi reset: " + e.message); }
-  }
-
-  // --- TẠO 1 USER THỦ CÔNG (SỬA LOGIC: BỎ TÊN, DÙNG USERNAME LÀM TÊN) ---
-  async function handleCreateSingleUser() {
-      if (checkDemoAndBlock()) return;
-      // Bỏ check singleName
-      if (!singleUsername || !singlePass) return alert("Vui lòng nhập đủ thông tin!");
-      
-      const uid = safeString(singleUsername).toLowerCase();
-      // Dùng uid làm name luôn
-      const nameToSave = uid;
-      
-      isLoading = true;
-      const batch = writeBatch(db);
-
-      try {
-          // 1. Tạo User Login
-          const userRef = doc(db, 'users', uid);
-          batch.set(userRef, {
-              username: uid, username_idx: uid,
-              pass: singlePass,
-              name: nameToSave, // Name = Username
-              gender: singleGender,
-              role: singleRole,
-              storeId: targetStore,
-              storeIds: [targetStore],
-              createdAt: serverTimestamp()
-          });
-
-          // 2. Thêm vào danh sách Lịch
-          const newStaffEntry = { id: String(scheduleStaffList.length + 1 + Date.now()%100), name: nameToSave, gender: singleGender };
-          const updatedStaffList = [...scheduleStaffList, newStaffEntry];
-          const staffListRef = doc(db, 'settings', `staff_list_${targetStore}`);
-          batch.set(staffListRef, { staffList: updatedStaffList, updatedAt: serverTimestamp() });
-
-          await batch.commit();
-          
-          alert(`✅ Đã thêm nhân viên: ${nameToSave}`);
-          showAddUserModal = false;
-          // Reset form
-          singleUsername = ''; singleRole = 'staff';
-          
-          await loadStoreData();
-          await loadAccountList();
-      } catch (e) {
-          alert("Lỗi tạo user: " + e.message);
-      } finally {
-          isLoading = false;
-      }
-  }
-
-  // --- TẠO ADMIN THỦ CÔNG (SỬA LOGIC: BỎ TÊN) ---
-  async function handleCreateAdmin() {
-      if (checkDemoAndBlock()) return;
-      // Bỏ check newAdminName
-      if (!newAdminUser || !newAdminPass || !newAdminStore) return alert("Vui lòng điền đủ thông tin!");
-      isLoading = true;
-      try {
-          const usernameClean = safeString(newAdminUser).toLowerCase();
-          // Dùng username làm name
-          const nameToSave = usernameClean;
-          
-          await setDoc(doc(db, 'users', usernameClean), { 
-              username: usernameClean, username_idx: usernameClean, 
-              pass: newAdminPass, 
-              name: nameToSave, // Name = Username
-              role: 'admin', 
-              storeId: newAdminStore, storeIds: [newAdminStore], 
-              createdAt: serverTimestamp() 
-          });
-          alert(`✅ Đã tạo tài khoản quản lý: ${usernameClean}`);
-          newAdminUser = ''; newAdminPass = ''; newAdminStore = '';
-      } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false; }
-  }
-
-  // Các hàm Upload giữ nguyên
-  async function handleStaffUpload(e) {
-      const file = e.target.files[0]; if(!file) return; isLoading = true; 
-      setTimeout(async () => {
-          try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); let newStaff = []; let skipped = 0;
-              for(let i=0; i<json.length; i++) { const row = json[i]; let maKho = row['Ma_Kho'] || row['Mã Kho'] || row['ma_kho'] || ''; if (String(maKho).trim() !== String(targetStore)) { skipped++; continue; } let nameVal = row['Ho_Ten'] || row['Họ Tên'] || ''; if (!nameVal) Object.values(row).forEach(v => { if(v && typeof v === 'string' && v.trim().length > nameVal.length) nameVal = v.trim(); }); let genderVal = row['Gioi_Tinh'] || row['Giới Tính'] || 'Nữ'; if (String(genderVal).toLowerCase().includes('nam')) genderVal = 'Nam'; else genderVal = 'Nữ'; if(nameVal.length > 2) { newStaff.push({ id: String(newStaff.length + 1), name: safeString(nameVal), gender: genderVal }); } }
-              if(newStaff.length === 0) throw new Error(`Không tìm thấy nhân viên nào cho kho ${targetStore}! (Bỏ qua ${skipped} dòng khác kho)`);
-              scheduleStaffList = newStaff; await setDoc(doc(db, 'settings', `staff_list_${targetStore}`), { staffList: scheduleStaffList, updatedAt: serverTimestamp() }); 
-              alert(`✅ Đã cập nhật ${newStaff.length} nhân sự cho kho ${targetStore}!`);
-          } catch(err) { alert("Lỗi: " + err.message); } finally { isLoading = false; e.target.value = null; }
-      }, 100);
-  }
-
-  async function handleAccountUpload(e) {
-      const file = e.target.files[0]; if(!file) return; isLoading = true;
-      setTimeout(async () => {
-          try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); const batch = writeBatch(db); let count = 0;
-              for(let i=0; i<json.length; i++) { const row = json[i]; const u = row['username']; const p = row['pass']; const s = row['ma_kho'] || row['mã kho']; const r = row['role']; if (u && p && s && r) { const uid = safeString(u).toLowerCase(); const userRef = doc(db, 'users', uid); batch.set(userRef, { username: uid, username_idx: uid, pass: String(p), name: uid, role: safeString(r).toLowerCase(), storeId: String(s), storeIds: [String(s)], createdAt: serverTimestamp() }); count++; } }
-              if (count > 0) { await batch.commit(); alert(`✅ Đã tạo/cập nhật ${count} tài khoản thành công!`); await loadAccountList(); } else { alert("⚠️ Không tìm thấy dữ liệu hợp lệ (Cần đủ 4 cột: username, pass, ma_kho, role)"); }
-          } catch(err) { alert("Lỗi: " + err.message); } finally { isLoading = false; e.target.value = null; }
-      }, 100);
-  }
+  async function handleCreateSingleUser() { if (checkDemoAndBlock()) return; if (!singleUsername || !singlePass) return alert("Vui lòng nhập đủ thông tin!"); const uid = safeString(singleUsername).toLowerCase(); const nameToSave = uid; isLoading = true; const batch = writeBatch(db); try { const userRef = doc(db, 'users', uid); batch.set(userRef, { username: uid, username_idx: uid, pass: singlePass, name: nameToSave, gender: singleGender, role: singleRole, storeId: targetStore, storeIds: [targetStore], createdAt: serverTimestamp() }); const newStaffEntry = { id: String(scheduleStaffList.length + 1 + Date.now()%100), name: nameToSave, gender: singleGender }; const updatedStaffList = [...scheduleStaffList, newStaffEntry]; const staffListRef = doc(db, 'settings', `staff_list_${targetStore}`); batch.set(staffListRef, { staffList: updatedStaffList, updatedAt: serverTimestamp() }); await batch.commit(); alert(`✅ Đã thêm nhân viên: ${nameToSave}`); showAddUserModal = false; singleUsername = ''; singleRole = 'staff'; await loadStoreData(); await loadAccountList(); } catch (e) { alert("Lỗi tạo user: " + e.message); } finally { isLoading = false; } }
+  async function handleCreateAdmin() { if (checkDemoAndBlock()) return; if (!newAdminUser || !newAdminPass || !newAdminStore) return alert("Vui lòng điền đủ thông tin!"); isLoading = true; try { const usernameClean = safeString(newAdminUser).toLowerCase(); const nameToSave = usernameClean; await setDoc(doc(db, 'users', usernameClean), { username: usernameClean, username_idx: usernameClean, pass: newAdminPass, name: nameToSave, role: 'admin', storeId: newAdminStore, storeIds: [newAdminStore], createdAt: serverTimestamp() }); alert(`✅ Đã tạo tài khoản quản lý: ${usernameClean}`); newAdminUser = ''; newAdminPass = ''; newAdminStore = ''; } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false; } }
+  async function handleStaffUpload(e) { const file = e.target.files[0]; if(!file) return; isLoading = true; setTimeout(async () => { try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); let newStaff = []; let skipped = 0; for(let i=0; i<json.length; i++) { const row = json[i]; let maKho = row['Ma_Kho'] || row['Mã Kho'] || row['ma_kho'] || ''; if (String(maKho).trim() !== String(targetStore)) { skipped++; continue; } let nameVal = row['Ho_Ten'] || row['Họ Tên'] || ''; if (!nameVal) Object.values(row).forEach(v => { if(v && typeof v === 'string' && v.trim().length > nameVal.length) nameVal = v.trim(); }); let genderVal = row['Gioi_Tinh'] || row['Giới Tính'] || 'Nữ'; if (String(genderVal).toLowerCase().includes('nam')) genderVal = 'Nam'; else genderVal = 'Nữ'; if(nameVal.length > 2) { newStaff.push({ id: String(newStaff.length + 1), name: safeString(nameVal), gender: genderVal }); } } if(newStaff.length === 0) throw new Error(`Không tìm thấy nhân viên nào cho kho ${targetStore}! (Bỏ qua ${skipped} dòng khác kho)`); scheduleStaffList = newStaff; await setDoc(doc(db, 'settings', `staff_list_${targetStore}`), { staffList: scheduleStaffList, updatedAt: serverTimestamp() }); alert(`✅ Đã cập nhật ${newStaff.length} nhân sự cho kho ${targetStore}!`); } catch(err) { alert("Lỗi: " + err.message); } finally { isLoading = false; e.target.value = null; } }, 100); }
+  async function handleAccountUpload(e) { const file = e.target.files[0]; if(!file) return; isLoading = true; setTimeout(async () => { try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); const batch = writeBatch(db); let count = 0; for(let i=0; i<json.length; i++) { const row = json[i]; const u = row['username']; const p = row['pass']; const s = row['ma_kho'] || row['mã kho']; const r = row['role']; if (u && p && s && r) { const uid = safeString(u).toLowerCase(); const userRef = doc(db, 'users', uid); batch.set(userRef, { username: uid, username_idx: uid, pass: String(p), name: uid, role: safeString(r).toLowerCase(), storeId: String(s), storeIds: [String(s)], createdAt: serverTimestamp() }); count++; } } if (count > 0) { await batch.commit(); alert(`✅ Đã tạo/cập nhật ${count} tài khoản thành công!`); await loadAccountList(); } else { alert("⚠️ Không tìm thấy dữ liệu hợp lệ (Cần đủ 4 cột: username, pass, ma_kho, role)"); } } catch(err) { alert("Lỗi: " + err.message); } finally { isLoading = false; e.target.value = null; } }, 100); }
 </script>
 
 <div class="fixed inset-0 z-50 bg-slate-100 flex flex-col animate-fadeIn">
@@ -237,7 +167,6 @@
                 <span class="material-icons-round">arrow_back</span>
             </button>
             <h2 class="text-xl font-bold text-slate-800 tracking-tight hidden lg:block">Quản Trị</h2>
-            
             <div class="flex items-center gap-2">
                 <div id="store-select-container" class="relative">
                     <select bind:value={targetStore} class="pl-3 pr-8 py-1.5 bg-indigo-50 border-indigo-100 text-indigo-700 font-bold rounded-lg text-sm outline-none appearance-none cursor-pointer hover:bg-indigo-100 transition-colors">
@@ -247,7 +176,7 @@
                 </div>
                 <div class="flex bg-slate-100 p-1 rounded-lg ml-2">
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>Phân Ca</button>
-                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Việc Mẫu</button>
+                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Tạo công việc</button>
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>Nhân Sự</button>
                 </div>
                 <button class="w-8 h-8 flex items-center justify-center bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100" on:click={startAdminTour} title="Hướng dẫn"><span class="material-icons-round text-lg">help</span></button>
@@ -298,7 +227,7 @@
                                          {#each shiftCols as shift}
                                             <td class="p-3 text-center text-yellow-400 font-mono text-sm font-bold">{getShiftTotal(shift.id, shiftMatrix)}</td>
                                          {/each}
-                                        <td class="p-3 text-center text-white text-sm font-bold bg-slate-900">{getGrandTotal(shiftMatrix)}</td>
+                                         <td class="p-3 text-center text-white text-sm font-bold bg-slate-900">{getGrandTotal(shiftMatrix)}</td>
                                     </tr>
                                 </tfoot>
                             </table>
@@ -381,7 +310,7 @@
                     </div>
                  </div>
                  <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-full">
-                    <div class="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0"><span class="font-bold text-slate-700">Danh sách việc mẫu ({$taskTemplate[activeTemplateType]?.length || 0})</span></div>
+                    <div class="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0"><span class="font-bold text-slate-700">Danh sách công việc ({$taskTemplate[activeTemplateType]?.length || 0})</span></div>
                     <div class="flex-1 overflow-y-auto p-3 space-y-2">
                         {#each ($taskTemplate[activeTemplateType] || []) as item, i}
                             <div class="flex items-start gap-4 p-4 rounded-xl border border-slate-100 bg-white hover:border-indigo-200 hover:shadow-sm transition-all group relative">
@@ -424,9 +353,7 @@
                             <button id="btn-add-single" class="text-xs font-bold text-green-600 bg-green-50 px-3 py-1.5 rounded-lg hover:bg-green-100 flex items-center gap-1 transition-colors" on:click={() => checkDemoAndBlock() || (showAddUserModal = true)}>
                                 <span class="material-icons-round text-sm">add</span> Thêm 1 NV
                             </button>
-                            
                             <button id="btn-download-account-sample" class="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg hover:bg-blue-100 flex items-center gap-1 transition-colors" on:click={checkDemoAndBlock(event) || downloadAccountSample()}>Tải Mẫu</button>
-                            
                             <label id="btn-upload-accounts" class="text-xs font-bold text-white bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-700 flex items-center gap-1 transition-colors cursor-pointer shadow {isDemoMode ? 'opacity-50' : ''}" on:click={(e) => checkDemoAndBlock(e)}>
                                 <span class="material-icons-round text-sm">upload</span> Upload
                                 <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={handleAccountUpload}>
@@ -448,8 +375,7 @@
                                     <tr class="hover:bg-slate-50">
                                         <td class="p-3 font-bold text-slate-700">{acc.username}</td>
                                         <td class="p-3">
-                                            <select class="bg-transparent text-xs font-bold {acc.role==='admin'?'text-purple-600':'text-gray-500'} outline-none cursor-pointer" 
-                                                value={acc.role} on:change={(e) => changeRole(acc.id, e.target.value)}>
+                                            <select class="bg-transparent text-xs font-bold {acc.role==='admin'?'text-purple-600':'text-gray-500'} outline-none cursor-pointer" value={acc.role} on:change={(e) => changeRole(acc.id, e.target.value)}>
                                                 <option value="staff">Nhân viên</option>
                                                 <option value="admin">Quản lý</option>
                                             </select>
