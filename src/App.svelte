@@ -1,10 +1,10 @@
 <script>
-  // Version 6.0 - Jump to Task Implementation
+  // Version 7.0 - Group Logic & History Log Support
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
-  import { collection, onSnapshot, query, where, doc, setDoc, writeBatch, updateDoc, serverTimestamp } from 'firebase/firestore';
+  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion } from 'firebase/firestore'; // Added arrayUnion
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList } from './lib/stores.js';
-  import { getTodayStr } from './lib/utils.js';
+  import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
 
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
@@ -24,7 +24,7 @@
   
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
-  const tourSteps = []; // (Giữ nguyên steps cũ)
+  const tourSteps = [];
 
   let unsubStores = () => {};
   let unsubTemplate = () => {};
@@ -49,6 +49,7 @@
           unsubTemplate = onSnapshot(doc(db, 'settings', `template_${myStores[0]}`), (docSnap) => {
               taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
           });
+          
           const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', 'in', myStores));
           unsubTasks = onSnapshot(q, (snapshot) => {
               const tasks = [];
@@ -58,47 +59,52 @@
       } else { currentTasks.set([]); }
   }
 
+  // UPDATE 1: Ghi log khi Hoàn tác (Undo)
   function handleTaskClick(event) {
     const task = event.detail;
     if (task.completed) {
-      if(confirm('Hoàn tác (Undo)?')) updateDoc(doc(db, 'tasks', task.id), { completed: false, completedBy: null, time: null, note: '' });
+      if(confirm('Hoàn tác (Undo)?')) {
+          const user = $currentUser.name || $currentUser.username;
+          const time = getCurrentTimeShort();
+          updateDoc(doc(db, 'tasks', task.id), { 
+              completed: false, 
+              // completedBy: null, // Không xóa người làm cũ để giữ dấu vết nếu cần (hoặc xóa tùy bạn)
+              // time: null,
+              history: arrayUnion({ action: 'undo', user, time, fullTime: new Date().toISOString() })
+          });
+      }
     } else {
       selectedTask = task; noteInput = ''; showTaskModal = true;
     }
   }
 
+  // UPDATE 2: Ghi log khi Hoàn thành (Done)
   function confirmComplete() {
     if (!selectedTask) return;
-    const now = new Date();
+    const user = $currentUser.name || $currentUser.username;
+    const time = getCurrentTimeShort();
+    
     updateDoc(doc(db, 'tasks', selectedTask.id), {
-      completed: true, completedBy: $currentUser.name || $currentUser.username, 
-      time: `${now.getHours()}:${now.getMinutes()<10?'0':''}${now.getMinutes()}`, note: noteInput
+      completed: true, 
+      completedBy: user, 
+      time: time, 
+      note: noteInput,
+      history: arrayUnion({ action: 'done', user, time, fullTime: new Date().toISOString() })
     });
     showTaskModal = false; selectedTask = null;
   }
 
-  // --- LOGIC NHẢY TỚI TASK ---
   async function handleJumpToTask(event) {
       const { taskId, tab } = event.detail;
-      
-      // 1. Chuyển đúng Tab
       if (tab) activeTab = tab;
-      
-      // 2. Chờ DOM render xong
       await tick();
-      
-      // 3. Tìm phần tử và scroll
       const el = document.getElementById("task-" + taskId);
       if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Hiệu ứng nháy để gây chú ý
           el.style.transition = "background-color 0.5s";
-          el.style.backgroundColor = "#fff9c4"; // Vàng nhạt
-          setTimeout(() => {
-              el.style.backgroundColor = ""; // Trả về cũ
-          }, 2000);
+          el.style.backgroundColor = "#fff9c4"; 
+          setTimeout(() => { el.style.backgroundColor = ""; }, 2000);
       } else {
-          // Trường hợp task nằm ở ngày khác hoặc không tồn tại
           alert("Không tìm thấy công việc này trong ngày hiện tại!");
       }
   }
@@ -121,7 +127,7 @@
           <div class="icon-box"><span class="material-icons-round">campaign</span></div><small>Bàn Giao</small>
         </button>
         <button id="tab-schedule" class="tab-btn {activeTab==='schedule'?'active':''}" on:click={() => activeTab='schedule'} style="--theme-color: #e91e63;">
-            <div class="icon-box"><span class="material-icons-round">calendar_month</span></div><small>Lịch Ca</small>
+          <div class="icon-box"><span class="material-icons-round">calendar_month</span></div><small>Lịch Ca</small>
         </button>
       </nav>
 
