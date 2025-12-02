@@ -1,5 +1,5 @@
 <script>
-  // Version 5.0 - Multi-Store Selection in Schedule View
+  // Version 37.0 - Shift Schedule (Added WE Ops Column & Font Fix)
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
@@ -19,54 +19,30 @@
   
   const QUICK_SHIFTS = ['OFF', '123', '456', '23', '45', '2345'];
   let tempEditingShift = null;
-  
-  // LOGIC ĐA KHO CHO LỊCH
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
-  
-  // Kho đang xem lịch (Mặc định kho đầu tiên)
   let selectedViewStore = '';
-  $: if (myStores.length > 0 && !selectedViewStore) {
-      selectedViewStore = myStores[0];
-  }
+  $: if (myStores.length > 0 && !selectedViewStore) { selectedViewStore = myStores[0]; }
 
-  // Load lại lịch khi: Tab active, Đổi kho, Đổi tháng
   let unsubscribe = () => {};
-  $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr) {
-      loadSchedule(currentMonthStr, selectedViewStore);
-  }
+  $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr) { loadSchedule(currentMonthStr, selectedViewStore); }
 
   async function loadSchedule(monthStr, storeId) {
-      scheduleData = null;
-      loading = true; 
-      errorMsg = '';
+      scheduleData = null; loading = true; errorMsg = '';
       if (unsubscribe) unsubscribe();
       try {
           const ref = doc(db, 'stores', storeId, 'schedules', monthStr);
           unsubscribe = onSnapshot(ref, (snap) => {
               loading = false;
-              if(snap.exists()) {
-                  scheduleData = snap.data();
-              } else {
-                  scheduleData = null; 
-              }
+              if(snap.exists()) { scheduleData = snap.data(); } 
+              else { scheduleData = null; }
           });
-      } catch (e) { 
-          loading = false; 
-          errorMsg = e.message;
-      }
+      } catch (e) { loading = false; errorMsg = e.message; }
   }
 
   function getShiftColor(code) {
-      if (code === 'OFF') return 'bg-slate-100 text-slate-400 border-slate-200 font-bold tracking-wider text-[10px]';
-      const map = {
-          '123': 'bg-green-50 text-green-700 border-green-100',
-          '456': 'bg-orange-50 text-orange-700 border-orange-100',
-          '23': 'bg-cyan-50 text-cyan-700 border-cyan-100',
-          '45': 'bg-blue-50 text-blue-700 border-blue-100',
-          '2-5': 'bg-pink-50 text-pink-700 border-pink-100',
-          '2345': 'bg-red-50 text-red-700 border-red-100'
-      };
+      if (code === 'OFF') return 'bg-red-600 text-white border-red-700 font-black tracking-wider text-[10px] shadow-sm';
+      const map = { '123': 'bg-green-50 text-green-700 border-green-100', '456': 'bg-orange-50 text-orange-700 border-orange-100', '23': 'bg-cyan-50 text-cyan-700 border-cyan-100', '45': 'bg-blue-50 text-blue-700 border-blue-100', '2-5': 'bg-pink-50 text-pink-700 border-pink-100', '2345': 'bg-red-50 text-red-700 border-red-100' };
       return map[code] || 'bg-white text-gray-800 border-gray-200';
   }
 
@@ -78,142 +54,33 @@
       return { text: role.charAt(0), class: 'bg-gray-500 text-white' };
   }
 
-  function getWeekday(day) { 
-      const date = new Date(viewYear, viewMonth - 1, day);
-      return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()];
-  }
-
-  function viewPersonalSchedule(staffId, staffName) { 
-      if(!scheduleData?.data) return;
-      let days = []; 
-      Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)).forEach(d => { 
-          const assign = scheduleData.data[d].find(x => x.staffId === staffId); 
-          if(assign) days.push({ day: d, weekday: getWeekday(d), ...assign }); 
-      });
-      const firstDayDate = new Date(viewYear, viewMonth - 1, 1);
-      let startDayIdx = firstDayDate.getDay(); 
-      if (startDayIdx === 0) startDayIdx = 6;
-      else startDayIdx = startDayIdx - 1;
-      let blankCells = Array(startDayIdx).fill(null);
-      const stat = scheduleData.stats.find(s => s.id === staffId) || { totalHours:0, gh:0, tn:0, kho:0 };
-      selectedStaff = { id: staffId, name: staffName, days, blankCells, stats: stat };
-  }
-
-  function openEditShift(day, staffId, assign) { 
-      if (!isAdmin) return;
-      const staffInfo = scheduleData.stats.find(s => s.id === staffId);
-      tempEditingShift = { 
-          day, staffId, 
-          name: assign.name, 
-          shift: assign.shift, 
-          role: assign.role || 'TV', 
-          isOFF: assign.shift === 'OFF',
-          gender: staffInfo ? staffInfo.gender : 'Nữ', 
-          originalRole: assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV'),
-          originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift
-      };
-      editingShift = JSON.parse(JSON.stringify(tempEditingShift));
-  }
-
-  function resetEditShift() { 
-      if (!editingShift) return;
-      editingShift.shift = editingShift.originalShift;
-      editingShift.role = editingShift.originalRole;
-      editingShift.isOFF = editingShift.shift === 'OFF';
-  }
-
-  async function saveShiftChange() {
-      if (!editingShift || !scheduleData) return;
-      if (editingShift.role === 'GH' && editingShift.gender !== 'Nam') {
-          if (!confirm(`⚠️ CẢNH BÁO: Nhân viên ${editingShift.name} là NỮ.\nVị trí Giao Hàng thường yêu cầu NAM.\n\nBạn có chắc chắn muốn gán không?`)) return;
-      }
-
-      const approvedCombos = scheduleData.config?.approvedCombos || [];
-      if (approvedCombos.length > 0 && !editingShift.isOFF) {
-          const dayKey = String(editingShift.day);
-          const currentDayAssignments = scheduleData.data[dayKey];
-          
-          let targetRoleCode = 'TV';
-          if (editingShift.role === 'GH') targetRoleCode = 'GH';
-          else if (editingShift.role === 'Thu Ngân') targetRoleCode = 'TN'; 
-          else if (editingShift.role === 'Kho') targetRoleCode = 'Kho';
-          
-          const comboConfig = approvedCombos.find(c => {
-               let cRole = c.role || 'TV';
-               if (cRole === 'Thu Ngân') cRole = 'TN'; 
-               return c.code === editingShift.shift && cRole === targetRoleCode;
-          });
-
-          const quota = comboConfig ? (parseInt(comboConfig.qty) || 0) : 0;
-          const currentCount = currentDayAssignments.filter(a => {
-              if (a.staffId === editingShift.staffId) return false;
-              let r = a.role || 'TV';
-              if (r === 'Giao Hàng') r = 'GH';
-              if (r === 'Thu Ngân') r = 'TN';
-              if (r === 'Kho') r = 'Kho';
-              return a.shift === editingShift.shift && r === targetRoleCode;
-          }).length;
-          
-          if (currentCount + 1 > quota) {
-                const msg = quota === 0 
-                    ? `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?`
-                    : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
-                if (!confirm(msg)) return;
-          }
-      }
-
-      const dayKey = String(editingShift.day);
-      const dayList = [...scheduleData.data[dayKey]];
-      const idx = dayList.findIndex(x => x.staffId === editingShift.staffId);
-      if (idx !== -1) {
-          const oldRole = dayList[idx].role || 'TV';
-          const newRole = editingShift.isOFF ? '' : (editingShift.role === 'TV' ? '' : editingShift.role);
-          const updatedAssignment = {
-              ...dayList[idx],
-              shift: editingShift.isOFF ? 'OFF' : editingShift.shift,
-              role: newRole
-          };
-          dayList[idx] = updatedAssignment;
-
-          const newStats = [...scheduleData.stats];
-          const statIdx = newStats.findIndex(s => s.id === editingShift.staffId);
-          if (statIdx !== -1) {
-              const s = newStats[statIdx];
-              let rOld = oldRole === 'Giao Hàng' ? 'gh' : (oldRole === 'Thu Ngân' ? 'tn' : (oldRole === 'Kho' ? 'kho' : ''));
-              if(rOld) s[rOld] = Math.max(0, (s[rOld]||0) - 1);
-              let rNew = newRole === 'Giao Hàng' ? 'gh' : (newRole === 'Thu Ngân' ? 'tn' : (newRole === 'Kho' ? 'kho' : ''));
-              if(rNew) s[rNew] = (s[rNew]||0) + 1;
-          }
-
-          try { 
-              await updateDoc(doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr), { 
-                  [`data.${dayKey}`]: dayList,
-                  stats: newStats
-              });
-              editingShift = null;
-          } catch (e) { alert("Lỗi: " + e.message); } 
-      }
-  }
-
-  function showDayStats(day) {
-      if (!scheduleData || !scheduleData.data[day]) return;
-      const dayData = scheduleData.data[day];
-      const roles = ['Kho', 'Thu Ngân', 'GH', 'TV'];
-      const matrix = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {}, 'TV': {} };
-      const activeShifts = new Set();
-      dayData.forEach(assign => { if (assign.shift !== 'OFF') activeShifts.add(assign.shift); });
-      const cols = Array.from(activeShifts).sort();
-      roles.forEach(r => { cols.forEach(c => matrix[r][c] = 0); matrix[r]['Total'] = 0; });
-      dayData.forEach(assign => {
-          if (assign.shift === 'OFF') return;
-          let r = assign.role || 'TV'; if (r === 'TN') r = 'Thu Ngân';
-          if (matrix[r]) { matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; matrix[r]['Total']++; }
-      });
-      selectedDayStats = { day, weekday: getWeekday(day), cols, matrix, roles };
-  }
-
+  function getWeekday(day) { const date = new Date(viewYear, viewMonth - 1, day); return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()]; }
+  
+  function viewPersonalSchedule(staffId, staffName) { if(!scheduleData?.data) return; let days = []; Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)).forEach(d => { const assign = scheduleData.data[d].find(x => x.staffId === staffId); if(assign) days.push({ day: d, weekday: getWeekday(d), ...assign }); }); const firstDayDate = new Date(viewYear, viewMonth - 1, 1); let startDayIdx = firstDayDate.getDay(); if (startDayIdx === 0) startDayIdx = 6; else startDayIdx = startDayIdx - 1; let blankCells = Array(startDayIdx).fill(null); const stat = scheduleData.stats.find(s => s.id === staffId) || { totalHours:0, gh:0, tn:0, kho:0 }; selectedStaff = { id: staffId, name: staffName, days, blankCells, stats: stat }; }
+  
+  function openEditShift(day, staffId, assign) { if (!isAdmin) return; const staffInfo = scheduleData.stats.find(s => s.id === staffId); tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo ? staffInfo.gender : 'Nữ', originalRole: assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV'), originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift }; editingShift = JSON.parse(JSON.stringify(tempEditingShift)); }
+  function resetEditShift() { if (!editingShift) return; editingShift.shift = editingShift.originalShift; editingShift.role = editingShift.originalRole; editingShift.isOFF = editingShift.shift === 'OFF'; }
+  async function saveShiftChange() { if (!editingShift || !scheduleData) return; if (editingShift.role === 'GH' && editingShift.gender !== 'Nam') { if (!confirm(`⚠️ CẢNH BÁO: Nhân viên ${editingShift.name} là NỮ.\nVị trí Giao Hàng thường yêu cầu NAM.\n\nBạn có chắc chắn muốn gán không?`)) return; } const approvedCombos = scheduleData.config?.approvedCombos || []; if (approvedCombos.length > 0 && !editingShift.isOFF) { const dayKey = String(editingShift.day); const currentDayAssignments = scheduleData.data[dayKey]; let targetRoleCode = 'TV'; if (editingShift.role === 'GH') targetRoleCode = 'GH'; else if (editingShift.role === 'Thu Ngân') targetRoleCode = 'TN'; else if (editingShift.role === 'Kho') targetRoleCode = 'Kho'; const comboConfig = approvedCombos.find(c => { let cRole = c.role || 'TV'; if (cRole === 'Thu Ngân') cRole = 'TN'; return c.code === editingShift.shift && cRole === targetRoleCode; }); const quota = comboConfig ? (parseInt(comboConfig.qty) || 0) : 0; const currentCount = currentDayAssignments.filter(a => { if (a.staffId === editingShift.staffId) return false; let r = a.role || 'TV'; if (r === 'Giao Hàng') r = 'GH'; if (r === 'Thu Ngân') r = 'TN'; if (r === 'Kho') r = 'Kho'; return a.shift === editingShift.shift && r === targetRoleCode; }).length; if (currentCount + 1 > quota) { const msg = quota === 0 ? `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`; if (!confirm(msg)) return; } } const dayKey = String(editingShift.day); const dayList = [...scheduleData.data[dayKey]]; const idx = dayList.findIndex(x => x.staffId === editingShift.staffId); if (idx !== -1) { const oldRole = dayList[idx].role || 'TV'; const newRole = editingShift.isOFF ? '' : (editingShift.role === 'TV' ? '' : editingShift.role); const updatedAssignment = { ...dayList[idx], shift: editingShift.isOFF ? 'OFF' : editingShift.shift, role: newRole }; dayList[idx] = updatedAssignment; const newStats = [...scheduleData.stats]; const statIdx = newStats.findIndex(s => s.id === editingShift.staffId); if (statIdx !== -1) { const s = newStats[statIdx]; let rOld = oldRole === 'Giao Hàng' ? 'gh' : (oldRole === 'Thu Ngân' ? 'tn' : (oldRole === 'Kho' ? 'kho' : '')); if(rOld) s[rOld] = Math.max(0, (s[rOld]||0) - 1); let rNew = newRole === 'Giao Hàng' ? 'gh' : (newRole === 'Thu Ngân' ? 'tn' : (newRole === 'Kho' ? 'kho' : '')); if(rNew) s[rNew] = (s[rNew]||0) + 1; } try { await updateDoc(doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats }); editingShift = null; } catch (e) { alert("Lỗi: " + e.message); } } }
+  
+  function showDayStats(day) { if (!scheduleData || !scheduleData.data[day]) return; const dayData = scheduleData.data[day]; const roles = ['Kho', 'Thu Ngân', 'GH', 'TV']; const matrix = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {}, 'TV': {} }; const activeShifts = new Set(); dayData.forEach(assign => { if (assign.shift !== 'OFF') activeShifts.add(assign.shift); }); const cols = Array.from(activeShifts).sort(); roles.forEach(r => { cols.forEach(c => matrix[r][c] = 0); matrix[r]['Total'] = 0; }); dayData.forEach(assign => { if (assign.shift === 'OFF') return; let r = assign.role || 'TV'; if (r === 'TN') r = 'Thu Ngân'; if (matrix[r]) { matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; matrix[r]['Total']++; } }); selectedDayStats = { day, weekday: getWeekday(day), cols, matrix, roles }; }
   function getDayColTotal(col) { return selectedDayStats ? selectedDayStats.roles.reduce((sum, r) => sum + (selectedDayStats.matrix[r][col]||0), 0) : 0; }
   function getDayGrandTotal() { return selectedDayStats ? selectedDayStats.roles.reduce((sum, r) => sum + selectedDayStats.matrix[r]['Total'], 0) : 0; }
+
+  // HELPER: Tính toán cột WE Ops on the fly nếu dữ liệu cũ chưa có
+  function getWeekendHardRoleCount(staffId) {
+      if (!scheduleData || !scheduleData.data) return 0;
+      let count = 0;
+      const isHardRole = (r) => ['Kho', 'Thu Ngân', 'Giao Hàng', 'GH', 'TN', 'K'].includes(r);
+      const isWeekend = (d) => { const date = new Date(viewYear, viewMonth - 1, d); const day = date.getDay(); return day === 0 || day === 6; };
+      
+      Object.keys(scheduleData.data).forEach(d => {
+          if (isWeekend(d)) {
+              const assign = scheduleData.data[d].find(a => a.staffId === staffId);
+              if (assign && isHardRole(assign.role)) count++;
+          }
+      });
+      return count;
+  }
 
   function exportToExcel() {
       if (!scheduleData) return;
@@ -222,11 +89,11 @@
       const wsData = [];
       const row1 = ["NHÂN SỰ"];
       days.forEach(d => row1.push(d));
-      row1.push("Tổng Giờ", "GH", "TN", "K");
+      row1.push("Tổng Giờ", "GH", "TN", "K", "WE Ops");
       wsData.push(row1);
       const row2 = [""];
       days.forEach(d => row2.push(getWeekday(d)));
-      row2.push("", "", "", "");
+      row2.push("", "", "", "", "");
       wsData.push(row2);
       scheduleData.stats.forEach(staff => {
           const row = [staff.name];
@@ -234,13 +101,11 @@
               const assign = scheduleData.data[d].find(x => x.staffId === staff.id);
               if (assign) {
                   let cell = assign.shift;
-                   if (assign.role && assign.role !== 'TV') cell += ` (${assign.role})`;
+                  if (assign.role && assign.role !== 'TV') cell += ` (${assign.role})`;
                   row.push(cell);
-              } else {
-                  row.push("");
-              }
+              } else { row.push(""); }
           });
-          row.push(staff.totalHours, staff.gh, staff.tn, staff.kho);
+          row.push(Math.round(staff.totalHours), staff.gh, staff.tn, staff.kho, getWeekendHardRoleCount(staff.id));
           wsData.push(row);
       });
       const ws = utils.aoa_to_sheet(wsData);
@@ -248,14 +113,8 @@
       writeFile(wb, `Lich_Lam_Viec_Kho_${selectedViewStore}_T${viewMonth}_${viewYear}.xlsx`);
   }
   
-  // TOUR 2: LỊCH PHÂN CA
   let showScheduleTour = false;
-  const scheduleSteps = [
-      { target: '.overflow-x-auto', title: '1. Bảng Lịch Tổng', content: 'Đây là toàn bộ lịch làm việc trong tháng.' },
-      { target: '#store-view-selector', title: '2. Chọn Kho Xem', content: 'Nếu quản lý nhiều kho, hãy chọn kho tại đây để xem lịch tương ứng.' },
-      { target: '#tour-staff-name', title: '3. Xem Chi Tiết Cá Nhân', content: 'Bấm vào <b>Tên Nhân Viên</b> để mở popup xem lịch riêng.' },
-      { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng để xem tổng giờ công.', action: () => { const tableContainer = document.querySelector('.overflow-x-auto'); if(tableContainer) tableContainer.scrollLeft = tableContainer.scrollWidth; } }
-  ];
+  const scheduleSteps = [ { target: '.overflow-x-auto', title: '1. Bảng Lịch Tổng', content: 'Đây là toàn bộ lịch làm việc trong tháng.' }, { target: '#store-view-selector', title: '2. Chọn Kho Xem', content: 'Nếu quản lý nhiều kho, hãy chọn kho tại đây để xem lịch tương ứng.' }, { target: '#tour-staff-name', title: '3. Xem Chi Tiết Cá Nhân', content: 'Bấm vào <b>Tên Nhân Viên</b> để mở popup xem lịch riêng.' }, { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng để xem tổng giờ công.', action: () => { const tableContainer = document.querySelector('.overflow-x-auto'); if(tableContainer) tableContainer.scrollLeft = tableContainer.scrollWidth; } } ];
 </script>
 
 <div class="flex items-center justify-between mb-3 px-1">
@@ -284,7 +143,7 @@
                 <span class="material-icons-round text-sm">download</span> Xuất Excel
             </button>
             <button class="flex items-center justify-center bg-purple-500 text-white w-8 h-8 rounded-lg shadow hover:bg-purple-600 transition-all" on:click={() => showScheduleTour = true} title="Hướng dẫn xem lịch">
-                <span class="material-icons-round text-lg">help_outline</span>
+                 <span class="material-icons-round text-lg">help_outline</span>
             </button>
         </div>
     {/if}
@@ -310,21 +169,23 @@
                 <tr>
                     <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-40 min-w-[140px] text-left pl-3 shadow">NHÂN SỰ</th>
                     {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
-                             <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-300' : ''}" on:click={()=>showDayStats(d)}>{d}</th>
+                        <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-300' : ''}" on:click={()=>showDayStats(d)}>{d}</th>
                     {/each}
                     <th rowspan="2" class="p-2 w-12 bg-amber-100 text-[10px] border-l border-amber-300 font-bold">Giờ</th>
                     <th rowspan="2" class="p-2 w-10 bg-blue-100 text-[10px] border-l border-amber-300 font-bold text-blue-800">GH</th>
                     <th rowspan="2" class="p-2 w-10 bg-purple-100 text-[10px] border-l border-amber-300 font-bold text-purple-800">TN</th>
                     <th rowspan="2" class="p-2 w-10 bg-orange-100 text-[10px] border-l border-amber-300 font-bold text-orange-800">K</th>
+                    <th rowspan="2" class="p-2 w-14 bg-indigo-100 text-[10px] border-l border-amber-300 font-bold text-indigo-800" title="Số ca nghiệp vụ T7/CN">WE<br>Ops</th>
                 </tr>
                 <tr>
                     {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
-                           <th class="p-0.5 border-l border-amber-500/30 text-[9px] {['T7','CN'].includes(getWeekday(d))?'bg-amber-300/80 text-amber-900':'bg-amber-200/50 text-slate-700'}">{getWeekday(d)}</th>
+                        <th class="p-0.5 border-l border-amber-500/30 text-[9px] {['T7','CN'].includes(getWeekday(d))?'bg-amber-300/80 text-amber-900':'bg-amber-200/50 text-slate-700'}">{getWeekday(d)}</th>
                     {/each}
                 </tr>
             </thead>
             <tbody class="divide-y text-xs">
-                 {#each scheduleData.stats as staff, i}
+                {#each scheduleData.stats as staff, i}
+                    {@const weCount = getWeekendHardRoleCount(staff.id)}
                     <tr class="hover:bg-blue-50 transition-colors">
                         <td id={i===0 ? 'tour-staff-name' : ''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-20 cursor-pointer hover:text-indigo-600 shadow pl-3 truncate max-w-[140px] {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}" on:click={() => viewPersonalSchedule(staff.id, staff.name)}>
                             {staff.name}
@@ -332,7 +193,7 @@
                         {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
                             {@const assign = (scheduleData.data[d]||[]).find(x => x.staffId === staff.id)}
                               <td class="p-0.5 border-l border-gray-100 h-10 align-middle {isAdmin ? 'cursor-pointer hover:bg-gray-100' : ''} {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-50/50' : ''}" on:click={() => openEditShift(d, staff.id, assign)}>
-                                {#if assign}
+                                  {#if assign}
                                     {@const badge = getRoleBadge(assign.role)}
                                      <div class="w-full h-full rounded py-1 font-bold text-[10px] flex flex-col items-center justify-center shadow-sm {getShiftColor(assign.shift)}">
                                         <span>{assign.shift}</span>
@@ -341,10 +202,11 @@
                                 {:else}<div class="text-gray-200">.</div>{/if}
                               </td>
                         {/each}
-                        <td class="p-2 font-mono font-bold bg-amber-50 text-gray-700 border-l">{staff.totalHours || 0}</td>
-                        <td class="p-2 font-mono font-bold bg-blue-50 text-blue-600 border-l">{staff.gh || '-'}</td>
-                        <td class="p-2 font-mono font-bold bg-purple-50 text-purple-600 border-l">{staff.tn || 0}</td>
-                        <td id={i===0 ? 'tour-total-col' : ''} class="p-2 font-mono font-bold bg-orange-50 text-orange-600 border-l">{staff.kho || 0}</td>
+                        <td class="p-2 font-bold text-center bg-amber-50 text-gray-700 border-l">{Math.round(staff.totalHours) || 0}</td>
+                        <td class="p-2 font-bold text-center bg-blue-50 text-blue-600 border-l">{staff.gh || '-'}</td>
+                        <td class="p-2 font-bold text-center bg-purple-50 text-purple-600 border-l">{staff.tn || 0}</td>
+                        <td id={i===0 ? 'tour-total-col' : ''} class="p-2 font-bold text-center bg-orange-50 text-orange-600 border-l">{staff.kho || 0}</td>
+                        <td class="p-2 font-bold text-center bg-indigo-50 text-indigo-700 border-l">{weCount}</td>
                     </tr>
                 {/each}
             </tbody>
@@ -355,10 +217,10 @@
 {#if selectedStaff}
     <div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>selectedStaff=null}>
         <div class="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation>
-             <div class="p-4 bg-indigo-500 text-white shrink-0">
+            <div class="p-4 bg-indigo-500 text-white shrink-0">
                 <h3 class="font-bold text-lg">{selectedStaff.name}</h3>
                 <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded">
-                    <span>{selectedStaff.stats.totalHours || 0} Giờ</span>
+                    <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
                     <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span>
                     <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span>
                     <span class="text-orange-100">K: {selectedStaff.stats.kho || 0}</span>
@@ -367,20 +229,18 @@
             <div class="flex-1 overflow-y-auto p-3 bg-slate-100">
                 <div class="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-bold text-gray-400 uppercase">
                     {#each ['T2','T3','T4','T5','T6','T7','CN'] as day}<div>{day}</div>{/each}
-                 </div>
+                </div>
                 <div class="grid grid-cols-7 gap-1">
                     {#each selectedStaff.blankCells as _}<div class="bg-transparent"></div>{/each}
                     {#each selectedStaff.days as d}
                         <div class="bg-white rounded border shadow-sm p-1 flex flex-col items-center justify-center aspect-square {d.shift==='OFF'?'opacity-60 bg-slate-100':''}">
                             <div class="text-[10px] text-gray-400 font-bold mb-1">{d.day}</div>
                             <div class="font-black text-slate-800 text-xs {d.shift==='OFF'?'text-slate-400':''}">{d.shift}</div>
-                              {#if d.shift !== 'OFF'}
+                            {#if d.shift !== 'OFF'}
                                 {@const badge = getRoleBadge(d.role)}
-                                {#if badge}
-                                      <span class="text-[9px] font-bold px-1 rounded mt-0.5 leading-tight {badge.class}">{badge.text}</span>
-                                {/if}
+                                {#if badge}<span class="text-[9px] font-bold px-1 rounded mt-0.5 leading-tight {badge.class}">{badge.text}</span>{/if}
                             {/if}
-                         </div>
+                        </div>
                     {/each}
                 </div>
             </div>
@@ -400,7 +260,7 @@
             </div>
             <div class="space-y-4">
                 <div>
-                     <label class="block text-xs font-bold text-gray-500 mb-2">Chọn Ca Nhanh</label>
+                    <label class="block text-xs font-bold text-gray-500 mb-2">Chọn Ca Nhanh</label>
                     <div class="grid grid-cols-3 gap-2 mb-2">
                         {#each QUICK_SHIFTS as s}
                             <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true; editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s; } }}>{s}</button>
@@ -411,12 +271,12 @@
                 </div>
                 {#if !editingShift.isOFF}
                     <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-fadeIn">
-                         <label class="block text-xs font-bold text-gray-500 mb-2">Vai Trò Mới</label>
+                        <label class="block text-xs font-bold text-gray-500 mb-2">Vai Trò Mới</label>
                         <div class="grid grid-cols-2 gap-2">
                             {#each ['TV', 'Thu Ngân', 'Kho', 'GH'] as r}
-                                 <label class="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-gray-200 hover:border-indigo-300 transition-colors">
+                                <label class="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-gray-200 hover:border-indigo-300 transition-colors">
                                     <input type="radio" bind:group={editingShift.role} value={r} class="accent-indigo-600 w-4 h-4">
-                                     <span class="text-xs font-bold {r==='GH'?'text-blue-600':(r==='Thu Ngân'?'text-purple-600':(r==='Kho'?'text-orange-600':'text-gray-600'))}">{r}</span>
+                                    <span class="text-xs font-bold {r==='GH'?'text-blue-600':(r==='Thu Ngân'?'text-purple-600':(r==='Kho'?'text-orange-600':'text-gray-600'))}">{r}</span>
                                 </label>
                             {/each}
                         </div>

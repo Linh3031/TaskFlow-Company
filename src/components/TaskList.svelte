@@ -1,5 +1,5 @@
 <script>
-  // Version 10.0 - Fix "activeTab not defined" by moving logic to Script
+  // Version 10.3 - Full Code & Clean Format
   import { createEventDispatcher } from 'svelte';
   import { currentTasks, currentUser } from '../lib/stores';
   import { formatDateTime } from '../lib/utils';
@@ -12,65 +12,67 @@
 
   // 1. Lọc theo Tab
   $: filteredTasks = $currentTasks.filter(t => t.type === activeTab);
-  
-  // 2. Sắp xếp (Copy mảng để tránh lỗi mutation)
+
+  // 2. Sắp xếp: Chưa xong -> Quan trọng -> Giờ -> Store
   $: sortedTasks = [...filteredTasks].sort((a, b) => {
-      const timeA = a.timeSlot || "00:00";
-      const timeB = b.timeSlot || "00:00";
-      if (timeA !== timeB) return timeA.localeCompare(timeB);
+      // Ưu tiên 1: Trạng thái hoàn thành (Chưa xong lên trước)
+      if (a.completed !== b.completed) return a.completed - b.completed;
       
+      // Ưu tiên 2: Quan trọng
       const impA = a.isImportant ? 1 : 0;
       const impB = b.isImportant ? 1 : 0;
       if (impA !== impB) return impB - impA;
 
+      // Ưu tiên 3: Giờ
+      const timeA = a.timeSlot || "00:00";
+      const timeB = b.timeSlot || "00:00";
+      if (timeA !== timeB) return timeA.localeCompare(timeB);
+
+      // Ưu tiên 4: Mã kho
       const storeA = a.storeId || "";
       const storeB = b.storeId || "";
-      if (storeA !== storeB) return storeA.localeCompare(storeB);
-      
-      return a.completed - b.completed;
+      return storeA.localeCompare(storeB);
   });
 
-  // 3. XỬ LÝ DỮ LIỆU HIỂN THỊ (QUAN TRỌNG: TÍNH TOÁN TRƯỚC TẠI ĐÂY)
-  // Tạo ra một danh sách mới, đã tính sẵn header và format text
+  // 3. Xử lý hiển thị (Regex và Header)
   $: finalTasks = sortedTasks.map((task, index, array) => {
-      // Logic kiểm tra header
       let showHeader = false;
       if (activeTab !== 'handover') {
           const prevTask = array[index - 1];
           const currTime = task.timeSlot || "Khác";
           const prevTime = prevTask?.timeSlot || "Khác";
-          showHeader = index === 0 || currTime !== prevTime;
+          showHeader = (index === 0 || currTime !== prevTime);
       }
 
-      // Logic tách chuỗi @tag
       const rawTitle = task.title || "";
-      const regex = /@([a-zA-Z0-9_]+)/g;
+      // Regex hỗ trợ dấu . và -
+      const regex = /@([\w.-]+)/g; 
       const matches = rawTitle.match(regex) || [];
       const mainText = rawTitle.replace(regex, '').trim();
 
-      // Trả về object đã xử lý
       return {
           ...task,
-          showHeader: showHeader, // Cờ hiển thị header
-          displayTitle: mainText, // Tên công việc sạch
-          displayTags: matches    // Danh sách tag
+          showHeader: showHeader,
+          displayTitle: mainText || rawTitle,
+          displayTags: matches
       };
   });
 </script>
 
-<div class="flex-1 overflow-y-auto pb-20 w-full px-1">
+<div class="flex-1 overflow-y-auto pb-20 w-full px-1 scroll-smooth" id="task-list-container">
   {#each finalTasks as task (task.id)}
     
     {#if task.showHeader}
-      <div class="flex items-center gap-2 bg-cyan-50 text-cyan-800 px-4 py-2 rounded-lg mt-4 mb-2 font-bold text-sm shadow-sm border border-cyan-100">
+      <div class="flex items-center gap-2 bg-cyan-50 text-cyan-800 px-4 py-2 rounded-lg mt-4 mb-2 font-bold text-sm shadow-sm border border-cyan-100 sticky top-0 z-10 backdrop-blur-sm bg-cyan-50/90">
         <span class="material-icons-round text-base">schedule</span> 
         {task.timeSlot || "Khác"}
       </div>
     {/if}
 
     <button 
-      class="w-full p-4 mb-2 rounded-xl flex items-start gap-3 shadow-sm border-l-4 transition-all active:scale-[0.99] 
-      {task.completed ? 'bg-gray-50 opacity-60 border-l-gray-400' : (task.isImportant ? 'bg-red-50 border-l-red-500' : 'bg-white')}
+      id={"task-" + task.id}
+      class="w-full p-4 mb-2 rounded-xl flex items-start gap-3 shadow-sm border-l-4 transition-all active:scale-[0.99] duration-300
+      {task.completed ? 'bg-gray-50 opacity-60 border-l-gray-400 order-last' : (task.isImportant ? 'bg-red-50 border-l-red-500' : 'bg-white')}
       {!task.completed && !task.isImportant && activeTab==='warehouse' ? 'border-l-orange-500' : ''}
       {!task.completed && !task.isImportant && activeTab==='cashier' ? 'border-l-green-500' : ''}
       {!task.completed && !task.isImportant && activeTab==='handover' ? 'border-l-purple-500' : ''}"
@@ -84,13 +86,13 @@
 
       <div class="flex-1 text-left">
         <div class="text-sm leading-snug">
-            {#if showStoreBadge && task.storeId}
+             {#if showStoreBadge && task.storeId}
                 <span class="inline-block bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded mr-1 font-bold tracking-wider align-middle border border-indigo-200 font-mono">
                     [{task.storeId}]
                 </span>
             {/if}
              {#if task.isImportant}
-                <span class="material-icons-round text-sm text-red-500 align-middle mr-1">star</span>
+                 <span class="material-icons-round text-sm text-red-500 align-middle mr-1">star</span>
             {/if}
             
             <span class="{task.isImportant ? 'font-bold text-red-800' : 'font-semibold text-gray-800'} {task.completed ? 'line-through text-gray-500' : ''}">
@@ -98,32 +100,32 @@
             </span>
 
             {#if task.displayTags.length > 0}
-                <span class="ml-1 text-xs text-indigo-400 font-normal {task.completed ? 'text-gray-400 line-through' : ''}">
-                    - {task.displayTags.join(' ')}
+                <span class="ml-1 text-xs text-indigo-400 font-normal opacity-80 {task.completed ? 'text-gray-400 line-through' : ''}">
+                    {task.displayTags.join(' ')}
                 </span>
             {/if}
         </div>
         
         <div class="flex flex-wrap gap-2 mt-2">
             {#if activeTab === 'handover' && task.deadline}
-                <span class="bg-red-50 text-red-600 text-xs px-2 py-0.5 rounded flex items-center gap-1 border border-red-100">
+                 <span class="bg-red-50 text-red-600 text-xs px-2 py-0.5 rounded flex items-center gap-1 border border-red-100">
                     <span class="material-icons-round text-[10px]">alarm</span> {formatDateTime(task.deadline)}
                 </span>
             {/if}
             {#if task.createdBy && task.createdBy !== 'System'}
-                <span class="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded border border-blue-100">{task.createdBy}</span>
+                 <span class="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded border border-blue-100">{task.createdBy}</span>
             {/if}
             {#if task.completed}
                 <span class="bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded flex items-center gap-1 border border-gray-200">
                     <span class="material-icons-round text-[10px]">check_circle</span> {task.completedBy} • {task.time}
-                </span>
+                 </span>
             {/if}
         </div>
         
         {#if task.note}
             <div class="mt-2 bg-yellow-50 text-yellow-800 text-xs p-2 rounded border border-yellow-100 italic flex gap-1">
                 <span class="material-icons-round text-[10px] mt-0.5">sticky_note_2</span>
-                {task.note}
+                 {task.note}
             </div>
         {/if}
       </div>

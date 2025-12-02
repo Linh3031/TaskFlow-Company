@@ -1,10 +1,9 @@
 <script>
-  // Version 9.1 - Allow Self-Tagging in Note
+  // Version 9.3 - Fix Case Sensitivity in Note
   import { createEventDispatcher, onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
   import { currentUser } from '../lib/stores';
-
   export let taskTitle = '';
   export let note = ''; 
 
@@ -14,7 +13,7 @@
   let showSuggestions = false;
   let suggestionList = [];
   let cursorPosition = 0;
-
+  
   onMount(async () => {
       const currentStoreId = $currentUser.storeIds?.[0] || '';
       if (currentStoreId) {
@@ -50,19 +49,33 @@
 
   async function detectAndNotify(content) {
       if (!content) return;
-      const regex = /@([a-zA-Z0-9_]+)/g;
+      
+      const regex = /@([\w.-]+)/g;
       const matches = content.match(regex);
+      
       if (matches) {
-          const uniqueUsers = [...new Set(matches.map(m => m.substring(1).toLowerCase()))];
+          const rawTags = matches.map(m => m.substring(1));
+          const realTargets = [];
+
+          // Tìm user thật để lấy đúng Username gốc
+          rawTags.forEach(tag => {
+              const foundUser = storeUsers.find(u => u.username.toLowerCase() === tag.toLowerCase());
+              if (foundUser) {
+                  realTargets.push(foundUser.username);
+              }
+          });
+
+          const uniqueUsers = [...new Set(realTargets)];
+
           const batchPromises = uniqueUsers.map(targetUser => {
-              // ĐÃ XÓA DÒNG CHẶN: if (targetUser === $currentUser.username) return;
-              
               return addDoc(collection(db, 'notifications'), {
-                  toUser: targetUser, fromUser: $currentUser.name || $currentUser.username,
+                  toUser: targetUser, 
+                  fromUser: $currentUser.name || $currentUser.username,
                   content: `đã nhắc đến bạn trong ghi chú: "${taskTitle}"`,
                   isRead: false, type: 'mention', createdAt: serverTimestamp()
               });
           });
+          
           await Promise.all(batchPromises);
       }
   }

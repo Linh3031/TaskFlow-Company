@@ -1,20 +1,29 @@
 <script>
+  // Version 2.0 - Click to Jump Support
   import { db } from '../lib/firebase';
   import { doc, updateDoc } from 'firebase/firestore';
   import { createEventDispatcher } from 'svelte';
-  import { formatDateTime } from '../lib/utils'; // Sử dụng hàm có sẵn
+  import { formatDateTime } from '../lib/utils';
 
   export let notifications = [];
   const dispatch = createEventDispatcher();
 
-  async function handleRead(notif) {
+  async function handleClick(notif) {
+      // 1. Đánh dấu đã đọc
       if (!notif.isRead) {
           try {
-              // Đánh dấu đã đọc trên Firebase
               await updateDoc(doc(db, 'notifications', notif.id), { isRead: true });
           } catch (e) { console.error(e); }
       }
-      // Có thể thêm logic cuộn tới công việc (nếu cần)
+      
+      // 2. Phát sự kiện nhảy tới Task (nếu có taskId)
+      if (notif.taskId) {
+          dispatch('jumpToTask', { 
+              taskId: notif.taskId,
+              tab: notif.targetTab || 'handover'
+          });
+      }
+      
       dispatch('close');
   }
 </script>
@@ -26,19 +35,19 @@
             <span class="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">
                 {notifications.filter(n => !n.isRead).length} mới
             </span>
-        {/if}
+         {/if}
     </div>
     
     <div class="max-h-80 overflow-y-auto">
         {#each notifications as notif}
-            <button class="w-full text-left p-3 border-b border-slate-50 hover:bg-indigo-50 transition-colors flex gap-3 relative {notif.isRead ? 'opacity-60' : 'bg-white'}" on:click={() => handleRead(notif)}>
+            <button class="w-full text-left p-3 border-b border-slate-50 hover:bg-indigo-50 transition-colors flex gap-3 relative {notif.isRead ? 'opacity-60' : 'bg-white'}" on:click={() => handleClick(notif)}>
                 <div class="w-8 h-8 rounded-full bg-indigo-200 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
-                    {notif.fromUser?.charAt(0).toUpperCase() || 'S'}
+                     {notif.fromUser?.charAt(0).toUpperCase() || 'S'}
                 </div>
                 
                 <div class="flex-1">
                     <p class="text-xs text-slate-800 leading-snug">
-                        <span class="font-bold">{notif.fromUser}</span> 
+                         <span class="font-bold">{notif.fromUser}</span> 
                         {notif.content}
                     </p>
                     <span class="text-[10px] text-slate-400 mt-1 block">
@@ -57,7 +66,7 @@
                 <span class="material-icons-round text-3xl mb-2 opacity-30">notifications_off</span>
                 <p>Chưa có thông báo nào</p>
             </div>
-        {/if}
+         {/if}
     </div>
 </div>
 

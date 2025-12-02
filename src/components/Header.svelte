@@ -1,17 +1,17 @@
 <script>
-  // Version 10.1 - Fix Dropdown Click Outside
+  // Version 11.1 - FULL CODE (Restored Profile Logic + Fixes)
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { currentUser, setUser } from '../lib/stores';
   import { db } from '../lib/firebase';
   import { doc, updateDoc, collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
   import NotificationDropdown from './NotificationDropdown.svelte';
-
+  
   const dispatch = createEventDispatcher();
   
-  // LOGIC PWA
+  // --- LOGIC PWA ---
   let deferredPrompt;
   let showInstallBtn = false;
-
+  
   onMount(() => {
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
@@ -56,7 +56,7 @@
     }
   }
 
-  // --- LOGIC ĐỔI MẬT KHẨU ---
+  // --- LOGIC ĐỔI MẬT KHẨU (Đã khôi phục đầy đủ) ---
   let showProfileModal = false;
   let oldPass = '';
   let newPass = '';
@@ -75,48 +75,74 @@
           alert("✅ Đổi mật khẩu thành công!");
           showProfileModal = false;
           oldPass = ''; newPass = '';
-      } catch (e) { alert("Lỗi: " + e.message); } finally { changePassLoading = false; }
+      } catch (e) { 
+          alert("Lỗi: " + e.message); 
+      } finally { 
+          changePassLoading = false;
+      }
   }
 
-  // --- LOGIC THÔNG BÁO ---
+  // --- LOGIC THÔNG BÁO (Tối ưu Performance & Fix Leak) ---
   let notifications = [];
   let unreadCount = 0;
   let showNotifDropdown = false;
-  let unsubNotif = () => {};
-  
-  // BIẾN THAM CHIẾU DOM (ĐỂ CHECK CLICK OUTSIDE)
-  let notifContainer; 
+  let unsubNotif = null; // Khởi tạo null để quản lý state
+  let notifContainer;
 
-  // Hàm xử lý khi click chuột bất kỳ đâu trên màn hình
+  // Hàm xử lý click ra ngoài để đóng dropdown
   function handleWindowClick(event) {
-      // Nếu đang mở menu VÀ click ra ngoài container (nút chuông + menu)
       if (showNotifDropdown && notifContainer && !notifContainer.contains(event.target)) {
           showNotifDropdown = false;
       }
   }
 
-  // Lắng nghe thông báo Realtime
+  // Chuyển tiếp sự kiện nhảy tới task từ Dropdown lên App
+  function forwardJump(event) {
+      dispatch('jumpToTask', event.detail);
+      showNotifDropdown = false;
+  }
+
+  // Reactive Statement: Quản lý kết nối Firebase an toàn
   $: if ($currentUser) {
+      // 1. Dọn dẹp listener cũ nếu có (Quan trọng để tránh đơ máy)
+      if (unsubNotif) {
+          unsubNotif();
+          unsubNotif = null;
+      }
+
+      // 2. Tạo biến thể tên user (Hoa/Thường) để bắt mọi thông báo
+      const username = $currentUser.username;
+      const userVariants = [...new Set([username, username.toLowerCase()])];
+      
       const q = query(
           collection(db, 'notifications'), 
-          where('toUser', '==', $currentUser.username),
+          where('toUser', 'in', userVariants),
           orderBy('createdAt', 'desc'),
           limit(20)
       );
+      
+      // 3. Khởi tạo listener mới
       unsubNotif = onSnapshot(q, (snapshot) => {
           notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
           unreadCount = notifications.filter(n => !n.isRead).length;
+      }, (error) => {
+          console.error("Lỗi tải thông báo:", error);
+          if (error.message.includes("indexes")) {
+              console.log("%c👇 BẤM VÀO ĐÂY TẠO INDEX 👇", "color: red; font-size: 16px; font-weight: bold;");
+              // Link index sẽ hiện trong console trình duyệt
+          }
       });
   }
 
+  // Dọn dẹp khi component bị hủy
   onDestroy(() => {
-      unsubNotif();
+      if (unsubNotif) unsubNotif();
   });
 </script>
 
 <svelte:window on:click={handleWindowClick} />
 
-<header class="app-header bg-white shadow-sm px-4 py-3 flex justify-between items-center z-10 shrink-0 sticky top-0">
+<header class="app-header bg-white shadow-sm px-4 py-3 flex justify-between items-center z-50 shrink-0 sticky top-0">
   <button class="flex items-center gap-3 hover:bg-gray-50 p-1 rounded-lg transition-colors text-left max-w-[50%]" on:click={() => showProfileModal = true}>
     <div class="w-9 h-9 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold text-sm border border-indigo-200 shadow-sm shrink-0">
       {$currentUser?.name?.charAt(0).toUpperCase() || 'U'}
@@ -165,7 +191,7 @@
             {/if}
         </button>
         {#if showNotifDropdown}
-            <NotificationDropdown {notifications} on:close={() => showNotifDropdown = false} />
+            <NotificationDropdown {notifications} on:close={() => showNotifDropdown = false} on:jumpToTask={forwardJump} />
         {/if}
     </div>
 
