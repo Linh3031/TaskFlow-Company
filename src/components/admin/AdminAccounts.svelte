@@ -1,7 +1,7 @@
 <script>
-  // Version 4.2 - Fix ID for Tour Guide (No Freeze)
+  // Version 5.0 - Allow Create New Store via Add User
   import { db } from '../../lib/firebase';
-  import { doc, deleteDoc, updateDoc, writeBatch, query, collection, where, getDocs, serverTimestamp } from 'firebase/firestore';
+  import { doc, deleteDoc, updateDoc, setDoc, writeBatch, query, collection, where, getDocs, serverTimestamp } from 'firebase/firestore';
   import { read, utils, writeFile } from 'xlsx';
   import { safeString } from '../../lib/utils';
   import { onMount } from 'svelte';
@@ -15,18 +15,20 @@
   let accountList = [];
   let isLoading = false;
   
+  // Form State
   let newAdminUser = ''; let newAdminPass = ''; 
-  let singleUsername = ''; let singlePass = '123456'; let singleRole = 'staff';
+  let singleUsername = ''; let singlePass = '123456'; let singleRole = 'admin'; // Mặc định là admin cho kho mới
+  let targetStoreInput = ''; // Biến mới: Để nhập mã kho tùy ý
   let showAddUserModal = false;
   
-  // --- TOUR GUIDE (Sử dụng ID) ---
+  // --- TOUR GUIDE CONFIG ---
   let showTour = false;
   const tourSteps = [
-      { target: '#btn-add-user', title: '1. Thêm Nhân Sự', content: 'Tạo tài khoản đăng nhập mới cho nhân viên.' },
+      { target: '#btn-add-user', title: '1. Tạo Admin Kho Mới', content: 'Bấm vào đây. Nếu là tài khoản Setup, bạn có thể nhập Mã Kho Mới để tạo kho.' },
       { target: '#btn-upload-acc', title: '2. Upload Nhanh', content: 'Tải danh sách Excel để tạo hàng loạt tài khoản cùng lúc.' },
-      { target: '#accounts-table', title: '3. Phân Quyền', content: 'Bạn có thể đổi mật khẩu, xóa hoặc đổi quyền (Nhân viên/Quản lý) trực tiếp tại danh sách này.' }
+      { target: '#accounts-table', title: '3. Phân Quyền', content: 'Danh sách tài khoản hiện có. Bạn có thể xóa hoặc đổi mật khẩu tại đây.' }
   ];
-  // ------------------------------
+  // -------------------------
 
   $: isDemoMode = (selectedStoreId || targetStore)?.includes('DEMO');
 
@@ -54,11 +56,19 @@
       return false;
   }
 
+  function openAddUserModal() {
+      // Khi mở modal, nếu là Super Admin thì cho phép sửa mã kho, mặc định lấy kho đang chọn
+      targetStoreInput = selectedStoreId || '';
+      showAddUserModal = true;
+  }
+
   async function fetchAllStores() {
       try {
           const q = query(collection(db, 'stores'));
           const snap = await getDocs(q);
           storeList = snap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => a.id.localeCompare(b.id));
+          
+          // Nếu chưa chọn kho nào, chọn cái đầu tiên
           if (storeList.length > 0 && !selectedStoreId) {
               selectedStoreId = storeList[0].id;
               loadAccountList(selectedStoreId);
@@ -96,13 +106,16 @@
       if (checkDemoAndBlock()) return;
       if (!singleUsername || !singlePass) return alert("Thiếu thông tin!");
       
-      const uid = safeString(singleUsername).toLowerCase();
-      const storeToAssign = selectedStoreId;
+      // Nếu là Super Admin thì lấy từ ô nhập liệu, nếu không thì lấy kho đang chọn
+      const storeToAssign = isSuperAdmin ? safeString(targetStoreInput) : selectedStoreId;
       
-      if (!storeToAssign) return alert("Chưa chọn kho nào!");
+      if (!storeToAssign) return alert("Chưa nhập Mã Kho!");
+
+      const uid = safeString(singleUsername).toLowerCase();
       isLoading = true;
       const batch = writeBatch(db);
       try {
+          // 1. Tạo User
           batch.set(doc(db, 'users', uid), {
               username: uid, username_idx: uid,
               pass: singlePass,
@@ -112,11 +125,32 @@
               storeIds: [storeToAssign],
               createdAt: serverTimestamp()
           });
+
+          // 2. Tự động tạo Kho mới vào danh sách 'stores' nếu chưa có (Chỉ dành cho Super Admin)
+          if (isSuperAdmin) {
+              const storeRef = doc(db, 'stores', storeToAssign);
+              // Dùng set với merge: true để không ghi đè nếu kho đã tồn tại
+              batch.set(storeRef, { 
+                  id: storeToAssign,
+                  name: `Kho ${storeToAssign}`,
+                  createdAt: serverTimestamp() 
+              }, { merge: true });
+          }
+
           await batch.commit();
+          
           alert(`✅ Đã thêm ${uid} vào kho ${storeToAssign}!`);
           showAddUserModal = false;
+          
+          // Reset và Reload
           singleUsername = '';
-          await loadAccountList(selectedStoreId);
+          if (isSuperAdmin) {
+              await fetchAllStores(); // Load lại danh sách kho để thấy kho mới
+              selectStore(storeToAssign); // Chuyển ngay sang kho mới
+          } else {
+              await loadAccountList(selectedStoreId);
+          }
+
       } catch (e) { alert(e.message); }
       finally { isLoading = false; }
   }
@@ -182,12 +216,19 @@
                           storeId: String(s), storeIds: [String(s)],
                           createdAt: serverTimestamp()
                       });
+                      
+                      // Nếu upload file có mã kho mới, cũng tự tạo kho luôn
+                      if (isSuperAdmin) {
+                          const sId = String(s);
+                          batch.set(doc(db, 'stores', sId), { id: sId, name: `Kho ${sId}` }, { merge: true });
+                      }
                       c++;
                   }
               });
               if (c > 0) {
                   await batch.commit();
                   alert(`Đã import ${c} tài khoản.`);
+                  if(isSuperAdmin) await fetchAllStores();
                   await loadAccountList(selectedStoreId);
               }
           } catch (e) { alert(e.message); }
@@ -244,8 +285,7 @@
               <button 
                   id="btn-add-user"
                   class="text-xs font-bold text-green-600 bg-green-50 px-3 py-2.5 rounded-lg hover:bg-green-100 flex items-center gap-1 transition-colors border border-green-100 mr-2" 
-                  on:click={(e) => checkDemoAndBlock(e) || (showAddUserModal = true)}
-                  disabled={!selectedStoreId}
+                  on:click={(e) => checkDemoAndBlock(e) || openAddUserModal()}
               >
                   <span class="material-icons-round text-sm">person_add</span> Thêm Mới
               </button>
@@ -323,7 +363,15 @@
   <div class="fixed inset-0 z-[70] bg-slate-900/50 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => showAddUserModal = false}>
       <div class="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl animate-popIn" on:click|stopPropagation>
           <h3 class="font-bold text-lg text-slate-800 mb-1">Thêm Nhân Sự</h3>
-          <p class="text-xs text-gray-500 mb-4">Thêm vào kho: <b class="text-indigo-600">{selectedStoreId}</b></p>
+          
+          {#if isSuperAdmin}
+              <div class="mb-4">
+                  <label for="store-input" class="text-[10px] font-bold text-slate-400 uppercase">Thêm vào Kho (Tạo mới nếu chưa có)</label>
+                  <input id="store-input" type="text" bind:value={targetStoreInput} class="w-full mt-1 p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-bold text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-200 uppercase" placeholder="NHẬP MÃ KHO (VD: KHO_01)">
+              </div>
+          {:else}
+              <p class="text-xs text-gray-500 mb-4">Thêm vào kho: <b class="text-indigo-600">{selectedStoreId}</b></p>
+          {/if}
           
           <div class="space-y-3">
               <div>
