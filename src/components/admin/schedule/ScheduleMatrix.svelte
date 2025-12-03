@@ -1,5 +1,5 @@
 <script>
-  // Version 52.3 - Production Fix (Reactive Map + Standardization + Debug Logs)
+  // Version 53.1 - Clean & Production Ready
   import { createEventDispatcher } from 'svelte';
   
   export let staffStats = {};
@@ -24,7 +24,7 @@
   const getShiftTotal = (shiftId, matrix) => { const s = matrix[shiftId] || {}; return (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0); };
   const getGrandTotal = (matrix) => Object.values(matrix).reduce((sum, s) => sum + (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0), 0);
 
-  // --- LOGIC CHUẨN HÓA (GIỮ NGUYÊN TỪ 52.2) ---
+  // --- LOGIC CHUẨN HÓA ---
   function standardizeRole(val) {
       const s = String(val || '').toLowerCase().trim();
       if (s === 'kho' || s === 'k') return 'kho';
@@ -34,35 +34,34 @@
       return 'tv';
   }
 
-  // --- LOGIC REACTIVE MAP (KHÔI PHỤC TỪ 52.1 NHƯNG DÙNG CHUẨN HÓA) ---
-  // Lý do: Map giúp Svelte nhận biết thay đổi tốt hơn Function Call trên Production
-  let comboMap = {};
-  
-  // Dấu $: báo cho Svelte chạy lại đoạn này mỗi khi activeSuggestedCombos thay đổi
+  // --- LOGIC MA TRẬN PHẢN ỨNG (CORE FIX) ---
+  let displayGrid = {};
+
   $: {
-      // Debug Log: Giúp kiểm tra trên Production (F12 -> Console)
-      console.log(`[Matrix v52.3] Recalculating Map for ${activeSuggestedCombos.length} items`);
+      // Tự động tính toán lại Grid hiển thị mỗi khi dữ liệu thay đổi
+      const grid = {};
       
-      const map = {};
+      // 1. Khởi tạo khung grid rỗng
+      roleRows.forEach(r => {
+          grid[r.id] = {};
+          comboCols.forEach(code => {
+              grid[r.id][code] = 0;
+          });
+      });
+
+      // 2. Đổ dữ liệu vào
       if (Array.isArray(activeSuggestedCombos)) {
           activeSuggestedCombos.forEach(c => {
               const rId = standardizeRole(c.role);
               const code = String(c.code).trim();
-              const key = `${rId}_${code}`;
-              map[key] = (parseInt(c.qty) || 0);
-              
-              // Debug chi tiết dòng đầu tiên để soi lỗi
-              // if (map[key] > 0) console.log(`Mapped: ${key} => ${map[key]}`);
+              const qty = parseInt(c.qty) || 0;
+
+              if (grid[rId] && grid[rId][code] !== undefined) {
+                  grid[rId][code] = qty;
+              }
           });
       }
-      comboMap = map;
-  }
-
-  function getComboQtyFromMap(rowId, comboCode) {
-      // rowId chuẩn ('kho', 'tn'...) lấy từ roleRows
-      const targetStandard = standardizeRole(rowId);
-      const key = `${targetStandard}_${String(comboCode).trim()}`;
-      return comboMap[key] || 0;
+      displayGrid = grid;
   }
   // -----------------------------------------------------------
 
@@ -83,10 +82,9 @@
               
               <div class="flex flex-col items-start gap-1">
                   <h3 id="matrix-header-target" class="font-bold text-slate-800 text-lg leading-tight">Định Mức Nhân Sự</h3>
-                  
                   {#if staffStats.total > 0}
-                      <div id="staff-stats-row" class="flex items-center gap-2 text-[10px] font-bold text-slate-500 opacity-80 select-none">
-                          <div class="flex items-center gap-1" title="Tổng nhân sự"><span class="material-icons-round text-[10px]">groups</span> <span>{staffStats.total}</span></div>
+                      <div class="flex items-center gap-2 text-[10px] font-bold text-slate-500 opacity-80 select-none">
+                          <div class="flex items-center gap-1" title="Tổng"><span class="material-icons-round text-[10px]">groups</span> <span>{staffStats.total}</span></div>
                           <div class="w-px h-2 bg-slate-300"></div>
                           <div class="flex items-center gap-1 text-blue-600" title="Nam"><span class="material-icons-round text-[10px]">male</span> <span>{staffStats.male}</span></div>
                           <div class="w-px h-2 bg-slate-300"></div>
@@ -158,7 +156,7 @@
       </div>
   </div>
 
-  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full">
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full relative">
       <div class="p-4 border-b border-slate-100 bg-slate-50/50 shrink-0 flex items-center"> 
            <div class="flex justify-between items-center w-full">
                <div class="flex flex-col justify-center">
@@ -190,7 +188,7 @@
                               <td class="p-1 border-r border-slate-100 text-center">
                                    <input 
                                       type="number" min="0" 
-                                      value={getComboQtyFromMap(role.id, code)} 
+                                      value={displayGrid[role.id] ? displayGrid[role.id][code] : 0} 
                                       on:change={(e) => dispatch('updateCombo', { role: role.label, code, qty: e.target.value })} 
                                       class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-indigo-600 bg-transparent transition-all"
                                   >
