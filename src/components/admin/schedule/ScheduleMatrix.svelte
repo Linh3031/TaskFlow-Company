@@ -1,8 +1,8 @@
 <script>
-  // Version 52.0 - Final UI Polish & Logic Fixes
+  // Version 52.2 - Fix Zero Combo Display (Standardize Role Logic)
   import { createEventDispatcher } from 'svelte';
   
-  export let staffStats = {}; 
+  export let staffStats = {};
   export let shiftMatrix = {};
   export let weekendMatrix = {};
   export let activeMatrixMode = 'weekday';
@@ -19,25 +19,39 @@
   const dispatch = createEventDispatcher();
   let showConfigDropdown = false;
   let configDropdownNode;
-  
+
   const getRoleTotal = (roleId, matrix) => Object.values(matrix).reduce((sum, s) => sum + (parseInt(s[roleId])||0), 0);
   const getShiftTotal = (shiftId, matrix) => { const s = matrix[shiftId] || {}; return (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0); };
   const getGrandTotal = (matrix) => Object.values(matrix).reduce((sum, s) => sum + (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0), 0);
-  
-  // FIX LOGIC COMBO: Map hiển thị -> DB
-  function getComboQty(roleLabel, comboCode) {
-      const targetRoles = [roleLabel];
-      if (roleLabel === 'Thu Ngân') targetRoles.push('TN', 'tn');
-      if (roleLabel === 'Giao Hàng') targetRoles.push('GH', 'gh');
-      if (roleLabel === 'Tư Vấn') targetRoles.push('TV', 'tv');
-      if (roleLabel === 'Kho') targetRoles.push('kho');
 
-      const found = activeSuggestedCombos.find(c => { 
-          const cRole = c.role || 'TV';
-          return String(c.code).trim() === String(comboCode).trim() && targetRoles.includes(cRole); 
+  // --- LOGIC MỚI: CHUẨN HÓA VAI TRÒ ĐỂ SO SÁNH (BULLETPROOF) ---
+  // Hàm này đưa mọi biến thể về 4 mã chuẩn: 'kho', 'tn', 'gh', 'tv'
+  function standardizeRole(val) {
+      const s = String(val || '').toLowerCase().trim();
+      if (s === 'kho' || s === 'k') return 'kho';
+      if (s.includes('thu ngân') || s.includes('tn')) return 'tn';
+      if (s.includes('giao') || s.includes('gh')) return 'gh';
+      if (s.includes('tư vấn') || s === 'tv') return 'tv';
+      return 'tv'; // Mặc định
+  }
+
+  // Hàm lấy số lượng: So sánh dựa trên mã chuẩn hóa
+  function getComboQty(rowId, comboCode) {
+      // rowId là 'kho', 'tn', 'gh', 'tv' từ roleRows
+      const targetStandard = standardizeRole(rowId);
+      
+      const found = activeSuggestedCombos.find(c => {
+          // 1. So khớp mã Ca (ép kiểu String để tránh lỗi number/string)
+          if (String(c.code) !== String(comboCode)) return false;
+          
+          // 2. So khớp Vai trò (Chuẩn hóa dữ liệu từ Logic)
+          const dataStandard = standardizeRole(c.role);
+          return dataStandard === targetStandard;
       });
+
       return found ? (parseInt(found.qty) || 0) : 0;
   }
+  // -----------------------------------------------------------
 
   function handleWindowClick(e) {
       if (showConfigDropdown && configDropdownNode && !configDropdownNode.contains(e.target)) {
@@ -54,16 +68,16 @@
       <div class="p-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
           <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
               
-              <div class="flex items-center gap-3">
+              <div class="flex flex-col items-start gap-1">
                   <h3 id="matrix-header-target" class="font-bold text-slate-800 text-lg leading-tight">Định Mức Nhân Sự</h3>
                   
                   {#if staffStats.total > 0}
-                      <div class="flex items-center gap-2 text-[11px] font-bold bg-white text-slate-600 px-2 py-1 rounded-lg border border-slate-200 shadow-sm">
-                          <div class="flex items-center gap-1" title="Tổng"><span class="material-icons-round text-xs text-slate-400">groups</span> <span class="text-xs">{staffStats.total}</span></div>
-                          <div class="w-px h-3 bg-slate-200"></div>
-                          <div class="flex items-center gap-1 text-blue-600" title="Nam"><span class="material-icons-round text-xs">male</span> <span class="text-xs">{staffStats.male}</span></div>
-                          <div class="w-px h-3 bg-slate-200"></div>
-                          <div class="flex items-center gap-1 text-pink-600" title="Nữ"><span class="material-icons-round text-xs">female</span> <span class="text-xs">{staffStats.female}</span></div>
+                      <div id="staff-stats-row" class="flex items-center gap-2 text-[10px] font-bold text-slate-500 opacity-80 select-none">
+                          <div class="flex items-center gap-1" title="Tổng nhân sự"><span class="material-icons-round text-[10px]">groups</span> <span>{staffStats.total}</span></div>
+                          <div class="w-px h-2 bg-slate-300"></div>
+                          <div class="flex items-center gap-1 text-blue-600" title="Nam"><span class="material-icons-round text-[10px]">male</span> <span>{staffStats.male}</span></div>
+                          <div class="w-px h-2 bg-slate-300"></div>
+                          <div class="flex items-center gap-1 text-pink-600" title="Nữ"><span class="material-icons-round text-[10px]">female</span> <span>{staffStats.female}</span></div>
                       </div>
                   {/if}
               </div>
@@ -104,7 +118,7 @@
                               <td class="p-1 border-r border-slate-100 text-center">
                                   {#if activeMatrixMode === 'weekday'}
                                        <input type="number" min="0" bind:value={shiftMatrix[shift.id][role.id]} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-slate-700 bg-transparent transition-all">
-                                  {:else}
+                                   {:else}
                                        <input type="number" min="0" bind:value={weekendMatrix[shift.id][role.id]} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-orange-100 hover:bg-white text-orange-800 bg-transparent transition-all">
                                   {/if}
                               </td>
@@ -119,7 +133,7 @@
                       {#each shiftCols as shift}
                           <td class="p-3 text-center text-yellow-400 font-mono text-sm font-bold bg-slate-800">{getShiftTotal(shift.id, activeMatrixMode==='weekday'?shiftMatrix:weekendMatrix)}</td>
                       {/each}
-                       <td class="p-3 text-center text-white text-sm font-bold bg-slate-900 sticky right-0">{getGrandTotal(activeMatrixMode==='weekday'?shiftMatrix:weekendMatrix)}</td>
+                      <td class="p-3 text-center text-white text-sm font-bold bg-slate-900 sticky right-0">{getGrandTotal(activeMatrixMode==='weekday'?shiftMatrix:weekendMatrix)}</td>
                   </tr>
               </tfoot>
           </table>
@@ -154,16 +168,16 @@
        
       <div class="flex-1 overflow-auto p-4 relative {activeMatrixMode==='weekend'?'bg-orange-50/30':''}">
            <table class="w-full text-sm border-separate border-spacing-0 rounded-xl border border-slate-200">
-               <thead class="bg-slate-50 text-slate-500 sticky top-0 z-10"><tr><th class="p-3 text-left font-bold border-b border-r border-slate-200 bg-slate-50">Bộ Phận</th>{#each comboCols as code}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[60px] bg-slate-50"><div class="font-black text-slate-700">{code}</div></th>{/each}</tr></thead>
+              <thead class="bg-slate-50 text-slate-500 sticky top-0 z-10"><tr><th class="p-3 text-left font-bold border-b border-r border-slate-200 bg-slate-50">Bộ Phận</th>{#each comboCols as code}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[60px] bg-slate-50"><div class="font-black text-slate-700">{code}</div></th>{/each}</tr></thead>
               <tbody>
                   {#each roleRows as role}
                       <tr class="group hover:bg-slate-50/50 transition-colors">
                           <td class="p-3 font-bold border-r border-slate-100 {role.color} border-l-4">{role.label}</td>
                           {#each comboCols as code}
                               <td class="p-1 border-r border-slate-100 text-center">
-                                  <input 
+                                   <input 
                                       type="number" min="0" 
-                                      value={getComboQty(role.label, code)} 
+                                      value={getComboQty(role.id, code)} 
                                       on:change={(e) => dispatch('updateCombo', { role: role.label, code, qty: e.target.value })} 
                                       class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-indigo-600 bg-transparent transition-all"
                                   >
@@ -218,7 +232,7 @@
            </div>
 
            <button id="btn-preview-schedule" class="flex-1 h-12 bg-indigo-600 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-0.5 transition-all flex justify-center items-center gap-2 active:scale-[0.98]" on:click={() => dispatch('preview')}>
-                <span class="material-icons-round">calendar_view_month</span><span>XEM TRƯỚC LỊCH</span>
+               <span class="material-icons-round">calendar_view_month</span><span>XEM TRƯỚC LỊCH</span>
            </button>
       </div>
   </div>
