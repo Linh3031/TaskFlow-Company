@@ -1,5 +1,5 @@
 <script>
-  // Version 52.2 - Fix Zero Combo Display (Standardize Role Logic)
+  // Version 52.3 - Production Fix (Reactive Map + Standardization + Debug Logs)
   import { createEventDispatcher } from 'svelte';
   
   export let staffStats = {};
@@ -24,32 +24,45 @@
   const getShiftTotal = (shiftId, matrix) => { const s = matrix[shiftId] || {}; return (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0); };
   const getGrandTotal = (matrix) => Object.values(matrix).reduce((sum, s) => sum + (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0), 0);
 
-  // --- LOGIC MỚI: CHUẨN HÓA VAI TRÒ ĐỂ SO SÁNH (BULLETPROOF) ---
-  // Hàm này đưa mọi biến thể về 4 mã chuẩn: 'kho', 'tn', 'gh', 'tv'
+  // --- LOGIC CHUẨN HÓA (GIỮ NGUYÊN TỪ 52.2) ---
   function standardizeRole(val) {
       const s = String(val || '').toLowerCase().trim();
       if (s === 'kho' || s === 'k') return 'kho';
       if (s.includes('thu ngân') || s.includes('tn')) return 'tn';
       if (s.includes('giao') || s.includes('gh')) return 'gh';
       if (s.includes('tư vấn') || s === 'tv') return 'tv';
-      return 'tv'; // Mặc định
+      return 'tv';
   }
 
-  // Hàm lấy số lượng: So sánh dựa trên mã chuẩn hóa
-  function getComboQty(rowId, comboCode) {
-      // rowId là 'kho', 'tn', 'gh', 'tv' từ roleRows
-      const targetStandard = standardizeRole(rowId);
+  // --- LOGIC REACTIVE MAP (KHÔI PHỤC TỪ 52.1 NHƯNG DÙNG CHUẨN HÓA) ---
+  // Lý do: Map giúp Svelte nhận biết thay đổi tốt hơn Function Call trên Production
+  let comboMap = {};
+  
+  // Dấu $: báo cho Svelte chạy lại đoạn này mỗi khi activeSuggestedCombos thay đổi
+  $: {
+      // Debug Log: Giúp kiểm tra trên Production (F12 -> Console)
+      console.log(`[Matrix v52.3] Recalculating Map for ${activeSuggestedCombos.length} items`);
       
-      const found = activeSuggestedCombos.find(c => {
-          // 1. So khớp mã Ca (ép kiểu String để tránh lỗi number/string)
-          if (String(c.code) !== String(comboCode)) return false;
-          
-          // 2. So khớp Vai trò (Chuẩn hóa dữ liệu từ Logic)
-          const dataStandard = standardizeRole(c.role);
-          return dataStandard === targetStandard;
-      });
+      const map = {};
+      if (Array.isArray(activeSuggestedCombos)) {
+          activeSuggestedCombos.forEach(c => {
+              const rId = standardizeRole(c.role);
+              const code = String(c.code).trim();
+              const key = `${rId}_${code}`;
+              map[key] = (parseInt(c.qty) || 0);
+              
+              // Debug chi tiết dòng đầu tiên để soi lỗi
+              // if (map[key] > 0) console.log(`Mapped: ${key} => ${map[key]}`);
+          });
+      }
+      comboMap = map;
+  }
 
-      return found ? (parseInt(found.qty) || 0) : 0;
+  function getComboQtyFromMap(rowId, comboCode) {
+      // rowId chuẩn ('kho', 'tn'...) lấy từ roleRows
+      const targetStandard = standardizeRole(rowId);
+      const key = `${targetStandard}_${String(comboCode).trim()}`;
+      return comboMap[key] || 0;
   }
   // -----------------------------------------------------------
 
@@ -177,7 +190,7 @@
                               <td class="p-1 border-r border-slate-100 text-center">
                                    <input 
                                       type="number" min="0" 
-                                      value={getComboQty(role.id, code)} 
+                                      value={getComboQtyFromMap(role.id, code)} 
                                       on:change={(e) => dispatch('updateCombo', { role: role.label, code, qty: e.target.value })} 
                                       class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-indigo-600 bg-transparent transition-all"
                                   >
