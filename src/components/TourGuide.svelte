@@ -9,16 +9,14 @@
   let arrowClass = '';
   let isMobile = false;
   let retryCount = 0;
-  const MAX_RETRIES = 10; // Tăng số lần thử để chờ Tab chuyển xong
+  const MAX_RETRIES = 10; 
 
-  // Hàm xử lý logic trước khi hiện bước (Quan trọng)
   async function runStepAction() {
       const step = steps[currentStepIndex];
       if (step && typeof step.action === 'function') {
-          await step.action(); // Chạy lệnh chuyển tab/mở modal
-          await tick(); // Chờ Svelte cập nhật DOM
-          // Chờ thêm một chút cho hiệu ứng CSS (nếu có)
-          await new Promise(r => setTimeout(r, 300)); 
+          await step.action();
+          await tick();
+          await new Promise(r => setTimeout(r, 300));
       }
       calculatePosition();
   }
@@ -31,17 +29,16 @@
 
     const step = steps[currentStepIndex];
     const el = document.querySelector(step.target);
-    
     if (!el) {
         if (retryCount < MAX_RETRIES) {
             retryCount++;
-            setTimeout(calculatePosition, 200); // Thử lại sau 200ms
+            setTimeout(calculatePosition, 200); 
             return;
         } else {
             console.warn('TourGuide: Target not found:', step.target);
-            // Fallback: Hiện giữa màn hình nếu không tìm thấy đích
+            // Fallback an toàn: Hiện giữa màn hình nếu không tìm thấy đích (tránh đơ)
             styleString = 'display: none;';
-            tooltipStyle = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; z-index: 10000;`;
+            tooltipStyle = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; z-index: 100000;`;
             return;
         }
     }
@@ -58,8 +55,8 @@
         height: ${rect.height}px;
         transition: all 0.3s ease-out;
         opacity: 1;
+        z-index: 99999; /* Đảm bảo khung sáng nằm trên cùng */
     `;
-
     if (isMobile) {
         const isTargetInBottomHalf = rect.top > (window.innerHeight / 2);
         tooltipStyle = `
@@ -67,9 +64,9 @@
             ${isTargetInBottomHalf ? 'top: 20px;' : 'bottom: 20px;'}
             left: 50%;
             transform: translateX(-50%);
-            width: 90%;
-            max-width: 350px;
+            width: 90%; max-width: 350px;
             opacity: 1;
+            z-index: 100000;
         `;
         arrowClass = 'hidden';
     } else {
@@ -80,7 +77,6 @@
         
         if (leftPos < 10) leftPos = 10;
         if (leftPos + 300 > window.innerWidth) leftPos = window.innerWidth - 310;
-
         tooltipStyle = `
             position: fixed;
             top: ${topPos}px;
@@ -88,6 +84,7 @@
             transform: ${transformY};
             width: 300px;
             opacity: 1;
+            z-index: 100000; /* Tooltip nằm trên cả khung sáng */
         `;
         
         arrowClass = isBottom 
@@ -96,7 +93,7 @@
     }
         
     el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-  }
+}
 
   function nextStep() { currentStepIndex++; retryCount=0; runStepAction(); }
   function prevStep() { if (currentStepIndex > 0) { currentStepIndex--; retryCount=0; runStepAction(); } }
@@ -104,21 +101,20 @@
   function skipTour() { dispatch('complete'); }
 
   onMount(() => {
-    runStepAction(); // Chạy bước đầu tiên
+    runStepAction(); 
     window.addEventListener('resize', calculatePosition);
     window.addEventListener('scroll', calculatePosition, { capture: true });
   });
-  
   onDestroy(() => {
     window.removeEventListener('resize', calculatePosition);
     window.removeEventListener('scroll', calculatePosition, { capture: true });
   });
 </script>
 
-<div class="fixed inset-0 z-[9999] overflow-hidden pointer-events-none">
-    <div class="box-content rounded-lg border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.75)]" style={styleString}></div>
+<div class="fixed inset-0 z-[99998] overflow-hidden pointer-events-none">
+    <div class="box-content rounded-lg border-2 border-yellow-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.75)] pointer-events-none" style={styleString}></div>
 
-    <div class="bg-white p-5 rounded-xl shadow-2xl border border-gray-100 pointer-events-auto flex flex-col z-[10000]" style={tooltipStyle}>
+    <div class="bg-white p-5 rounded-xl shadow-2xl border border-gray-100 pointer-events-auto flex flex-col" style={tooltipStyle}>
         <div class="flex justify-between items-start mb-3">
             <h4 class="font-bold text-gray-800 text-lg">{steps[currentStepIndex]?.title}</h4>
             <button class="text-gray-400 hover:text-gray-600 p-1" on:click={skipTour} aria-label="Đóng">

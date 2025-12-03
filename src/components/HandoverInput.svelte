@@ -1,9 +1,9 @@
 <script>
-  // Version 10.0 - Clean Logs & Save TaskID for Jump
+  // Version 41.0 - Optimized Handover (Use Cache)
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
-  import { currentUser } from '../lib/stores';
+  import { currentUser, storeUsersCache } from '../lib/stores'; // Import Cache
   import { getTodayStr } from '../lib/utils';
 
   let taskTitle = '', deadline = '';
@@ -15,17 +15,28 @@
   let suggestionList = [];
   let cursorPosition = 0;
 
-  onMount(async () => {
-      if (selectedTargetStore) await loadStoreUsers(selectedTargetStore);
-  });
-  
-  $: if (selectedTargetStore) loadStoreUsers(selectedTargetStore);
+  // Logic tải User thông minh
+  $: if (selectedTargetStore) loadStoreUsersSmart(selectedTargetStore);
 
-  async function loadStoreUsers(storeId) {
+  async function loadStoreUsersSmart(storeId) {
+      // 1. Kiểm tra trong Cache trước
+      if ($storeUsersCache[storeId]) {
+          storeUsers = $storeUsersCache[storeId];
+          // console.log("Loaded users from Cache");
+          return;
+      }
+
+      // 2. Nếu chưa có thì mới tải từ DB
       try {
           const q = query(collection(db, 'users'), where('storeIds', 'array-contains', storeId));
           const snap = await getDocs(q);
-          storeUsers = snap.docs.map(d => ({ username: d.data().username, name: d.data().name }));
+          const users = snap.docs.map(d => ({ username: d.data().username, name: d.data().name }));
+          
+          storeUsers = users;
+          
+          // 3. Lưu vào Cache
+          storeUsersCache.update(c => ({ ...c, [storeId]: users }));
+          // console.log("Loaded users from DB & Cached");
       } catch (e) { console.error(e); }
   }
 
@@ -56,9 +67,7 @@
 
   async function addTask() {
     if (!taskTitle.trim()) return;
-    
     try {
-      // 1. Tạo Task trước và LẤY REFERENCE để có ID
       const docRef = await addDoc(collection(db, 'tasks'), {
         type: 'handover', title: taskTitle, completed: false, createdBy: $currentUser?.name,
         deadline: deadline, date: getTodayStr(),
@@ -66,7 +75,6 @@
         timestamp: serverTimestamp()
       });
 
-      // 2. Logic gửi thông báo (Kèm taskId)
       const regex = /@([\w.-]+)/g;
       const matches = taskTitle.match(regex);
       
@@ -74,21 +82,20 @@
           const rawTags = matches.map(m => m.substring(1));
           const realTargets = [];
           
-          // Map user hoa/thường
           rawTags.forEach(tag => {
               const foundUser = storeUsers.find(u => u.username.toLowerCase() === tag.toLowerCase());
               if (foundUser) realTargets.push(foundUser.username);
+              else realTargets.push(tag); 
           });
 
           const uniqueTargets = [...new Set(realTargets)];
-          
           const batchPromises = uniqueTargets.map(targetUser => {
               return addDoc(collection(db, 'notifications'), {
                   toUser: targetUser, 
                   fromUser: $currentUser.name || $currentUser.username,
                   content: `đã nhắc đến bạn trong bàn giao: "${taskTitle}"`,
-                  taskId: docRef.id, // <--- QUAN TRỌNG: Lưu ID để nhảy tới
-                  targetTab: 'handover', // Lưu tab đích
+                  taskId: docRef.id, 
+                  targetTab: 'handover',
                   isRead: false, type: 'mention', createdAt: serverTimestamp()
               });
           });
@@ -138,7 +145,7 @@
                          {user.name.charAt(0)}
                     </div>
                     <div>
-                        <div class="text-xs font-bold text-gray-800">{user.name}</div>
+                         <div class="text-xs font-bold text-gray-800">{user.name}</div>
                         <div class="text-[10px] text-gray-400">@{user.username}</div>
                     </div>
                 </button>

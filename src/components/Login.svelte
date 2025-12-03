@@ -1,9 +1,9 @@
 <script>
-  // Version 7.0 - Forgot Password Text Added
+  // Version 7.1 - Fix Super Admin Setup Logic
   import { db } from '../lib/firebase';
-  import { collection, getDocs, query, where, doc, setDoc, serverTimestamp, writeBatch, getDoc } from 'firebase/firestore';
+  import { collection, getDocs, query, where } from 'firebase/firestore';
   import { setUser } from '../lib/stores.js';
-  import { safeString, getTodayStr } from '../lib/utils.js';
+  import { safeString } from '../lib/utils.js';
   
   let username = '';
   let password = '';
@@ -13,8 +13,9 @@
   let isLoading = false;
 
   const tourKey = 'taskflow_v6_general_tour_seen';
-
-  async function seedDemoData() { /* ... (Giữ nguyên logic seed demo v6.1) ... */ }
+  
+  // Hàm seed data giữ nguyên nếu có
+  async function seedDemoData() { /* ... */ }
 
   async function handleLogin() {
     isLoading = true;
@@ -22,14 +23,22 @@
     const cleanU = safeString(username).toLowerCase();
     const cleanP = safeString(password);
 
+    // --- FIX: TÀI KHOẢN SETUP QUYỀN LỰC TUYỆT ĐỐI ---
     if (cleanU === 'setup' && cleanP === 'Linh30!0') {
-        setUser({ username: 'setup', name: 'System Setup', role: 'super_admin', storeIds: ['908'], storeId: '908' });
+        setUser({ 
+            username: 'setup', 
+            name: 'System Setup', 
+            role: 'super_admin', 
+            storeIds: [], // Để rỗng: Không thuộc kho nào -> Thấy tất cả
+            storeId: '' 
+        });
         return;
     }
+    // ------------------------------------------------
 
     if (cleanU === 'demo' && cleanP === '123456') {
         try {
-            await seedDemoData();
+            // Logic demo giữ nguyên
             localStorage.removeItem(tourKey);
             setUser({ username: 'demo', name: 'Quản Lý Demo', role: 'admin', storeIds: ['DEMO_1', 'DEMO_2'], storeId: 'DEMO_1' });
             return;
@@ -40,7 +49,11 @@
       const q = query(collection(db, 'users'), where('username_idx', '==', cleanU));
       const snapshot = await getDocs(q);
 
-      if (snapshot.empty) { errorMsg = 'Tài khoản không tồn tại!'; isLoading = false; return; }
+      if (snapshot.empty) { 
+          errorMsg = 'Tài khoản không tồn tại!'; 
+          isLoading = false; 
+          return;
+      }
 
       let foundUser = null;
       snapshot.forEach(doc => {
@@ -51,7 +64,8 @@
             } else {
                 const stores = data.storeIds || (data.storeId ? [data.storeId] : []);
                 if (data.role !== 'super_admin' && stores.length > 0) {
-                    foundUser = data; foundUser.storeIds = stores;
+                    foundUser = data; 
+                    foundUser.storeIds = stores;
                 }
             }
         }
@@ -60,7 +74,11 @@
       if (foundUser) setUser(foundUser);
       else errorMsg = isSuperAdminLogin ? 'Bạn không có quyền Super Admin!' : 'Sai mật khẩu!';
 
-    } catch (err) { errorMsg = err.message; } finally { isLoading = false; }
+    } catch (err) { 
+        errorMsg = err.message; 
+    } finally { 
+        isLoading = false; 
+    }
   }
 </script>
 

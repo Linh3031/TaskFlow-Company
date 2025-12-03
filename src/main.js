@@ -1,16 +1,14 @@
 // src/main.js
-// Version 1.1 - Safe PWA Registration
+// Version 1.2 - Fix PWA Error on Localhost
 import { mount } from 'svelte'
 import './app.css'
 import App from './App.svelte'
 
 // --- ĐĂNG KÝ PWA (CẬP NHẬT AN TOÀN) ---
-// Chỉ chạy khi trình duyệt hỗ trợ
-if ('serviceWorker' in navigator) {
+// Chỉ chạy khi trình duyệt hỗ trợ VÀ ĐANG Ở CHẾ ĐỘ PRODUCTION (Đã Build)
+// import.meta.env.PROD trả về true khi build, false khi chạy dev (localhost)
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    // Lưu ý: Trong lúc Dev (localhost), SW đôi khi gây phiền toái vì cache quá mạnh.
-    // Nếu muốn tắt ở chế độ Dev, hãy dùng: if (import.meta.env.PROD) { ... }
-    
     navigator.serviceWorker.register('/sw.js')
       .then(registration => {
         console.log('✅ PWA Registered:', registration.scope);
@@ -35,6 +33,8 @@ if ('serviceWorker' in navigator) {
         console.error('❌ SW Registration Failed:', err);
       });
   });
+} else {
+  console.log('🚧 PWA Service Worker is disabled in Development mode.');
 }
 // ----------------------------------
 

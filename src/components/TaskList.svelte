@@ -1,5 +1,5 @@
 <script>
-  // Version 39.0 - Fix Handover Display & Sorting Logic
+  // Version 40.0 - Fix Display Tag Layout & Sorting
   import { createEventDispatcher } from 'svelte';
   import { currentTasks, currentUser } from '../lib/stores';
   import { formatDateTime } from '../lib/utils';
@@ -15,18 +15,14 @@
   // 1. Lọc theo Tab
   $: filteredTasks = $currentTasks.filter(t => t.type === activeTab);
 
-  // 2. GOM NHÓM THEO GIỜ
+  // 2. GOM NHÓM & SẮP XẾP
   $: groupedTasks = (() => {
       const groups = {};
       
       filteredTasks.forEach(task => {
           const timeKey = task.timeSlot || "Khác";
           if (!groups[timeKey]) {
-              groups[timeKey] = {
-                  timeSlot: timeKey,
-                  tasks: [],
-                  allDone: true
-              };
+              groups[timeKey] = { timeSlot: timeKey, tasks: [], allDone: true };
           }
           groups[timeKey].tasks.push(task);
           if (!task.completed) groups[timeKey].allDone = false;
@@ -34,21 +30,17 @@
 
       const groupArray = Object.values(groups);
 
-      // Sắp xếp Group
+      // Sort Group: Xong hết xuống đáy
       groupArray.sort((a, b) => {
-          // Ưu tiên 1: Nhóm xong hết xuống đáy
           if (a.allDone !== b.allDone) return a.allDone - b.allDone;
-          // Ưu tiên 2: Theo giờ
           return a.timeSlot.localeCompare(b.timeSlot);
       });
 
-      // Sắp xếp Task trong Group
+      // Sort Task trong Group: Chưa xong lên đầu -> Quan trọng -> Store
       groupArray.forEach(group => {
           group.tasks.sort((a, b) => {
-             // FIX 1: Ưu tiên CHƯA XONG lên đầu
-             if (a.completed !== b.completed) return a.completed - b.completed;
+             if (a.completed !== b.completed) return a.completed - b.completed; // 0 (False) lên trước
              
-             // Sau đó mới tới Quan trọng
              const impA = a.isImportant ? 1 : 0;
              const impB = b.isImportant ? 1 : 0;
              if (impA !== impB) return impB - impA;
@@ -66,31 +58,24 @@
       else expandedHistoryTaskId = taskId;
   }
 
-  function handleTaskClick(task) {
-      dispatch('taskClick', task);
-  }
+  function handleTaskClick(task) { dispatch('taskClick', task); }
 
   function handleKeydown(e, task) {
-      if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          handleTaskClick(task);
-      }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleTaskClick(task); }
   }
 
-  // FIX 2: Tách tên và tag chuẩn hơn
+  // FIX: Logic tách tên sạch sẽ hơn
   function formatTaskTitle(title) {
-      // Regex bắt @Username (chấp nhận cả dấu chấm, gạch ngang)
       const regex = /@([^\s]+)/g; 
       const matches = title.match(regex) || [];
-      // Xóa tag khỏi title chính để hiển thị sạch
-      const mainText = title.replace(regex, '').trim();
+      // Xóa tag và xóa khoảng trắng thừa (VD: "Việc A  " -> "Việc A")
+      const mainText = title.replace(regex, '').replace(/\s+/g, ' ').trim();
       return { mainText, tags: matches };
   }
 </script>
 
 <div class="flex-1 overflow-y-auto pb-20 w-full px-1 scroll-smooth" id="task-list-container">
   {#each groupedTasks as group (group.timeSlot)}
-    
     <div class="flex items-center gap-2 px-4 py-2 rounded-lg mt-4 mb-2 font-bold text-sm shadow-sm border sticky top-0 z-10 backdrop-blur-sm transition-all duration-500
         {group.allDone ? 'bg-gray-100 text-gray-500 border-gray-200' : 'bg-cyan-50 text-cyan-800 border-cyan-100 bg-cyan-50/90'}">
         <span class="material-icons-round text-base">schedule</span> 
@@ -126,24 +111,25 @@
                   <div class="flex-1 text-left pr-8"> 
                     <div class="text-sm leading-snug">
                          {#if showStoreBadge && task.storeId}
-                            <span class="inline-block bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded mr-1 font-bold tracking-wider align-middle border border-indigo-200 font-mono">
-                                [{task.storeId}]
-                            </span>
+                            <span class="inline-block bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded mr-1 font-bold tracking-wider align-middle border border-indigo-200 font-mono">[{task.storeId}]</span>
                         {/if}
                   
                         {#if task.isImportant}
                              <span class="material-icons-round text-sm text-red-500 align-middle mr-1">star</span>
                         {/if}
                         
-                        <span class="{task.isImportant ? 'font-bold text-red-800' : 'font-semibold text-gray-800'} {task.completed ? 'line-through text-gray-500' : ''}">
+                        <span class="{task.isImportant ? 'font-bold text-red-800' : 'font-bold text-gray-800'} {task.completed ? 'line-through text-gray-500' : ''}">
                             {titleData.mainText || task.title}
                         </span>
 
                         {#if titleData.tags.length > 0}
-                            {#each titleData.tags as tag}
-                                <span class="ml-1 text-xs font-normal {task.completed ? 'text-gray-300' : 'text-gray-400'}">
-                                    - {tag.replace('@', '')} </span>
-                            {/each}
+                             <span class="inline-flex gap-1 ml-1">
+                                {#each titleData.tags as tag}
+                                    <span class="text-xs font-normal {task.completed ? 'text-gray-300' : 'text-gray-400'}">
+                                        — {tag.replace('@', '')}
+                                    </span>
+                                {/each}
+                             </span>
                         {/if}
                     </div>
                     
@@ -165,20 +151,13 @@
                     
                     {#if task.note}
                         <div class="mt-2 bg-yellow-50 text-yellow-800 text-xs p-2 rounded border border-yellow-100 italic flex gap-1">
-                            <span class="material-icons-round text-[10px] mt-0.5">sticky_note_2</span>
-                            {task.note}
+                            <span class="material-icons-round text-[10px] mt-0.5">sticky_note_2</span>{task.note}
                         </div>
                     {/if}
                   </div>
                 </div>
 
-                <button 
-                    class="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-indigo-500 transition-colors z-20"
-                    on:click={(e) => toggleHistory(e, task.id)}
-                    title="Lịch sử thao tác"
-                  >
-                      <span class="material-icons-round text-base">history</span>
-                </button>
+                <button class="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-indigo-500 transition-colors z-20" on:click={(e) => toggleHistory(e, task.id)} title="Lịch sử"><span class="material-icons-round text-base">history</span></button>
 
                 {#if expandedHistoryTaskId === task.id}
                     <div class="bg-gray-50 border-x border-b border-gray-200 rounded-b-xl mx-2 p-3 text-xs text-gray-600 animate-fadeIn shadow-inner mb-2 -mt-2 relative z-30">
@@ -188,12 +167,8 @@
                                 {#each task.history.slice().reverse() as log}
                                     <div class="flex justify-between items-center border-b border-gray-200 pb-1 last:border-0">
                                         <div class="flex items-center gap-2">
-                                            <span class="material-icons-round text-[14px] {log.action==='done'?'text-green-600':'text-orange-500'}">
-                                                {log.action==='done'?'check_circle':'undo'}
-                                            </span>
-                                            <span class="font-bold {log.action==='done'?'text-green-700':'text-orange-700'}">
-                                                {log.action==='done'?'Hoàn thành':'Hoàn tác'}
-                                            </span>
+                                            <span class="material-icons-round text-[14px] {log.action==='done'?'text-green-600':'text-orange-500'}">{log.action==='done'?'check_circle':'undo'}</span>
+                                            <span class="font-bold {log.action==='done'?'text-green-700':'text-orange-700'}">{log.action==='done'?'Hoàn thành':'Hoàn tác'}</span>
                                             <span>bởi <b>{log.user}</b></span>
                                         </div>
                                         <span class="font-mono text-[10px] text-gray-400">{log.time}</span>
@@ -211,14 +186,8 @@
   {/each}
   
   {#if groupedTasks.length === 0}
-    <div class="text-center py-10 text-gray-400 flex flex-col items-center">
-        <span class="material-icons-round text-4xl mb-2 opacity-30">assignment_turned_in</span>
-        <p class="text-sm">Chưa có công việc nào</p>
-    </div>
+    <div class="text-center py-10 text-gray-400 flex flex-col items-center"><span class="material-icons-round text-4xl mb-2 opacity-30">assignment_turned_in</span><p class="text-sm">Chưa có công việc nào</p></div>
   {/if}
 </div>
 
-<style>
-    .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
-</style>
+<style>.animate-fadeIn { animation: fadeIn 0.2s ease-out; } @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }</style>

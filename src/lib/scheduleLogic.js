@@ -1,6 +1,4 @@
-// src/lib/scheduleLogic.js
-// Version 34.0 - Spring Algorithm (Better Spacing) & 4-Tier Priority
-
+// Version 35.0 - Add Shift 123456
 export const SHIFT_DEFINITIONS = [
     // Ca Chuẩn
     { code: '123', label: 'Ca Sáng (1+2+3)', time: '08:00 - 15:00', hours: 7, group: 'SANG' },
@@ -10,7 +8,8 @@ export const SHIFT_DEFINITIONS = [
     { code: '2-5', label: 'Ca Gãy (2+5)', time: '09:00-12:00 & 18:00-21:00', hours: 6, group: 'GAY' },
     { code: '2345', label: 'Giao Hàng Full', time: '09:00 - 21:00', hours: 12, group: 'FULL' },
     
-    // Ca Siêu Cường (Extreme - Cho chế độ cao điểm)
+    // Ca Siêu Cường & Đặc Biệt
+    { code: '123456', label: 'Full Ngày Đêm', time: '08:00 - 22:00', hours: 13.5, group: 'EXTREME' }, // Mới thêm
     { code: '12-56', label: 'Sáng Sớm + Tối Muộn', time: '08:00-12:00 & 18:00-22:00', hours: 8, group: 'EXTREME' },
     { code: '12-456', label: 'Sáng Sớm + Chiều Full', time: '08:00-12:00 & 15:00-22:00', hours: 11, group: 'EXTREME' },
     { code: '123-56', label: 'Sáng Full + Tối Muộn', time: '08:00-15:00 & 18:00-22:00', hours: 11, group: 'EXTREME' },
@@ -18,6 +17,7 @@ export const SHIFT_DEFINITIONS = [
     { code: '23456', label: 'Chiều Cường Lực', time: '09:00 - 22:00', hours: 13, group: 'EXTREME' }
 ];
 
+// ... (Phần code bên dưới giữ nguyên không đổi)
 const SHIFT_INFO = {};
 SHIFT_DEFINITIONS.forEach(s => SHIFT_INFO[s.code] = { h: s.hours, group: s.group });
 SHIFT_INFO['OFF'] = { h: 0, group: 'OFF' };
@@ -26,15 +26,13 @@ const ROLE_MAP = { 'Thu Ngân': 'tn', 'TN': 'tn', 'Kho': 'kho', 'K': 'kho', 'Gia
 const DISPLAY_ROLE_MAP = { 'tn': 'Thu Ngân', 'kho': 'Kho', 'gh': 'Giao Hàng', 'tv': '' };
 const HARD_ROLES = ['gh', 'kho', 'tn'];
 
-// --- CORE UTILS ---
 function getShiftGroup(code) { return SHIFT_INFO[code]?.group || 'OFF'; }
 
 function isShiftConflict(yesterdayCode, todayCode) {
     if (!yesterdayCode || !todayCode || yesterdayCode === 'OFF' || todayCode === 'OFF') return false;
     const gA = getShiftGroup(yesterdayCode);
     const gB = getShiftGroup(todayCode);
-    // ƯU TIÊN 1: XOAY CA (Sáng -> Chiều -> Sáng)
-    if (gA === gB && gA !== 'EXTREME' && gA !== 'GAY' && gA !== 'FULL') return true; 
+    if (gA === gB && gA !== 'EXTREME' && gA !== 'GAY' && gA !== 'FULL') return true;
     return false;
 }
 
@@ -42,7 +40,8 @@ function interleaveShifts(shiftList) {
     if (!shiftList || shiftList.length === 0) return [];
     const buckets = {};
     shiftList.forEach(s => { if (!buckets[s]) buckets[s] = []; buckets[s].push(s); });
-    const PRIORITY_ORDER = ['12345', '23456', '2345', '12-456', '123-56', '12-56', '2-5', '123', '456', '23', '45'];
+    // Thêm 123456 vào độ ưu tiên
+    const PRIORITY_ORDER = ['123456', '12345', '23456', '2345', '12-456', '123-56', '12-56', '2-5', '123', '456', '23', '45'];
     Object.keys(buckets).forEach(k => { if (!PRIORITY_ORDER.includes(k)) PRIORITY_ORDER.push(k); });
     let result = [];
     let hasItems = true;
@@ -134,7 +133,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
         weekendHardRoleCount: 0,
         stats: { hours: 0, roles: { tn: 0, tv: 0, kho: 0, gh: 0 } }
     }));
-
     if (prevScheduleData && prevScheduleData.data) {
         const lastDayKey = Object.keys(prevScheduleData.data).sort((a,b)=>Number(b)-Number(a))[0];
         if (lastDayKey) {
@@ -188,7 +186,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
 
         const currentPool = isWeekend ? weekendPool : weekdayPool;
         const currentDemands = JSON.parse(JSON.stringify(isWeekend ? weekendDemands : weekdayDemands));
-        
         let currentDayAssignments = staffList.map((staff, index) => {
             let poolIndex = (index + d) % staffList.length;
             let assignedShift = currentPool[poolIndex];
@@ -197,7 +194,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 shift: assignedShift, role: 'tv', fixed: false, originalIndex: index
             };
         });
-
         const ROLE_PRIORITY = ['gh', 'kho', 'tn'];
 
         ROLE_PRIORITY.forEach(targetRole => {
@@ -214,28 +210,15 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
             allCandidates.forEach(cand => {
                 const staff = staffList.find(s => s.id === cand.staffId);
                 let score = 0;
-
-                // 1. Ràng buộc cứng (Giới tính GH)
                 if (targetRole === 'gh' && !cand.isMale) { cand.score = -99999999; return; }
-
-                // 2. ƯU TIÊN 2: KHÔNG TRÙNG CA NGHIỆP VỤ (FATIGUE)
                 const gap = d - staff.lastHardRoleDay;
                 if (gap <= 1) {
-                    score -= 5000000; // Phạt nặng nếu làm liên tiếp
+                    score -= 5000000; 
                 } else {
-                    // NEW: THUẬT TOÁN LÒ XO (SPRING ALGORITHM)
-                    // Thưởng điểm mạnh cho người đã nghỉ lâu để kéo họ vào làm
-                    // Gap=2 (+400), Gap=5 (+1600), Gap=10 (+3600)
-                    score += gap * 400; 
+                    score += gap * 400;
                 }
-
-                // 3. ƯU TIÊN 3: CÔNG BẰNG TỔNG QUÁT (TOTAL FAIRNESS)
                 score -= staff.stats.roles[targetRole] * 1000;
-
-                // 4. ƯU TIÊN 4: CÂN BẰNG CUỐI TUẦN
                 if (isWeekend) score -= staff.weekendHardRoleCount * 50000;
-
-                // 5. ƯU TIÊN 4: GIỚI TÍNH KHO/TN (SOFT)
                 if (targetRole === 'kho' && genderConfig.kho === 'mixed') {
                     const existingInShift = currentDayAssignments.filter(a => a.fixed && a.role === 'kho' && a.shift === cand.shift);
                     const hasMale = existingInShift.some(a => a.isMale);
@@ -250,15 +233,12 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                         if (!hasFemale && cand.isMale) score -= 500;
                     }
                 }
-
-                // Tránh gán ca dài
                 let nextPoolIndex = (cand.originalIndex + d + 1) % staffList.length;
                 let nextShift = currentPool[nextPoolIndex];
                 if (['2345', '123', '12-56'].includes(nextShift)) score -= 50;
 
                 cand.score = score;
             });
-
             allCandidates.sort((a, b) => b.score - a.score);
 
             for (let i = 0; i < shiftsNeedingRole.length; i++) {
@@ -268,8 +248,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                     if (cand.fixed) continue;
                     
                     const staffCand = staffList.find(s => s.id === cand.staffId);
-                    
-                    // ƯU TIÊN 1: XOAY CA (ROTATION - HARD CHECK)
                     if (cand.shift !== targetShiftCode) {
                         if (isShiftConflict(staffCand.lastShiftCode, targetShiftCode)) continue;
                     }
@@ -278,7 +256,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                         cand.role = targetRole;
                         cand.fixed = true; break;
                     } else {
-                        // Swap logic
                         let potentialSeatHolders = currentDayAssignments.filter(a => a.shift === targetShiftCode && !a.fixed);
                         let validSeatHolder = null;
                         for (let k = 0; k < potentialSeatHolders.length; k++) {
@@ -301,7 +278,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 }
             }
         });
-
         schedule[d] = currentDayAssignments.map(a => {
             const staff = staffList.find(s => s.id === a.staffId);
             staff.lastShiftCode = a.shift;
@@ -332,6 +308,5 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
         gh: s.stats.roles.gh, tn: s.stats.roles.tn, kho: s.stats.roles.kho,
         weekendHardRoles: s.weekendHardRoleCount
     }));
-
     return { schedule, staffStats: finalStaffStats, endOffset: 0, warnings };
 }

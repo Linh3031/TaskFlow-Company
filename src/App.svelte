@@ -1,8 +1,8 @@
 <script>
-  // Version 7.0 - Group Logic & History Log Support
+  // Version 9.0 - Fix General Tour Guide
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
-  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion } from 'firebase/firestore'; // Added arrayUnion
+  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion } from 'firebase/firestore'; 
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
 
@@ -22,9 +22,19 @@
   let noteInput = '';
   let selectedDate = getTodayStr();
   
+  let activeStoreId = '';
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
-  const tourSteps = [];
+
+  // --- CẬP NHẬT NỘI DUNG TOUR TỔNG ---
+  const tourSteps = [
+      { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Đây là thanh điều hướng chính.' },
+      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Bấm vào đây để chuyển qua lại giữa các danh sách công việc: Kho, Thu Ngân, Bàn Giao và Lịch Ca.' },
+      { target: '#date-picker-container', title: 'Chọn Ngày', content: 'Xem lại lịch sử công việc của những ngày trước tại đây.' },
+      { target: '#btn-notif', title: 'Thông Báo', content: 'Nhận thông báo khi có người nhắc tên (@) bạn trong công việc.' },
+      { target: '#btn-admin', title: 'Quản Trị Hệ Thống', content: 'Khu vực dành cho Quản lý để cài đặt, tạo mẫu công việc và phân ca.' }
+  ];
+  // ------------------------------------
 
   let unsubStores = () => {};
   let unsubTemplate = () => {};
@@ -34,32 +44,44 @@
     unsubStores = onSnapshot(collection(db, 'stores'), (snap) => {
         storeList.set(snap.docs.map(d => ({id:d.id, ...d.data()})));
     });
+    // Chỉ hiện tour nếu user chưa xem bao giờ
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
 
   onDestroy(() => { unsubStores(); unsubTemplate(); unsubTasks(); });
 
-  $: if ($currentUser) loadDataForUser($currentUser, selectedDate);
-
-  function loadDataForUser(user, dateStr) {
-      unsubTemplate(); unsubTasks();
-      const myStores = user.storeIds || (user.storeId ? [user.storeId] : []);
-      
-      if (myStores.length > 0) {
-          unsubTemplate = onSnapshot(doc(db, 'settings', `template_${myStores[0]}`), (docSnap) => {
-              taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
-          });
-          
-          const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', 'in', myStores));
-          unsubTasks = onSnapshot(q, (snapshot) => {
-              const tasks = [];
-              snapshot.forEach(doc => tasks.push({ id: doc.id, ...doc.data() }));
-              currentTasks.set(tasks);
-          });
-      } else { currentTasks.set([]); }
+  $: if ($currentUser && !activeStoreId) {
+      if ($currentUser.storeIds && $currentUser.storeIds.length > 0) {
+          activeStoreId = $currentUser.storeIds[0];
+      } else if ($currentUser.role === 'super_admin') {
+          activeStoreId = '908'; 
+      }
   }
 
-  // UPDATE 1: Ghi log khi Hoàn tác (Undo)
+  $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
+
+  function loadDataForUser(storeId, dateStr) {
+      if(unsubTemplate) unsubTemplate(); 
+      if(unsubTasks) unsubTasks();
+
+      unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
+          taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
+      });
+
+      const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
+      
+      unsubTasks = onSnapshot(q, (snapshot) => {
+          const tasks = [];
+          snapshot.forEach(doc => {
+              const data = doc.data();
+              if (data.type) { 
+                  tasks.push({ id: doc.id, ...data });
+              }
+          });
+          currentTasks.set(tasks);
+      });
+  }
+
   function handleTaskClick(event) {
     const task = event.detail;
     if (task.completed) {
@@ -68,17 +90,16 @@
           const time = getCurrentTimeShort();
           updateDoc(doc(db, 'tasks', task.id), { 
               completed: false, 
-              // completedBy: null, // Không xóa người làm cũ để giữ dấu vết nếu cần (hoặc xóa tùy bạn)
-              // time: null,
               history: arrayUnion({ action: 'undo', user, time, fullTime: new Date().toISOString() })
           });
       }
     } else {
-      selectedTask = task; noteInput = ''; showTaskModal = true;
+      selectedTask = task;
+      noteInput = '';
+      showTaskModal = true;
     }
   }
 
-  // UPDATE 2: Ghi log khi Hoàn thành (Done)
   function confirmComplete() {
     if (!selectedTask) return;
     const user = $currentUser.name || $currentUser.username;
@@ -127,7 +148,7 @@
           <div class="icon-box"><span class="material-icons-round">campaign</span></div><small>Bàn Giao</small>
         </button>
         <button id="tab-schedule" class="tab-btn {activeTab==='schedule'?'active':''}" on:click={() => activeTab='schedule'} style="--theme-color: #e91e63;">
-          <div class="icon-box"><span class="material-icons-round">calendar_month</span></div><small>Lịch Ca</small>
+            <div class="icon-box"><span class="material-icons-round">calendar_month</span></div><small>Lịch Ca</small>
         </button>
       </nav>
 
@@ -135,9 +156,16 @@
         <div class="section-header {activeTab}-theme flex flex-col gap-2 items-start sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
-                 {#if $currentUser.role === 'super_admin'}🛡️ Super Admin View
+                 {#if $currentUser.role === 'super_admin'}
+                    🛡️ View: 
+                    <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer">
+                        <option value="908">Kho 908</option>
+                        {#each $storeList as s}
+                            {#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}
+                        {/each}
+                    </select>
                  {:else}
-                    {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
+                  {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
                     {#if activeTab==='handover'}📢 Bàn Giao Ca{/if}
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
@@ -145,9 +173,9 @@
               </h3>
               {#if activeTab !== 'schedule'}
                    <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
-              {/if}
+               {/if}
            </div>
-        
+          
            {#if activeTab !== 'schedule'}
             <div id="date-picker-container" class="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-full sm:w-auto">
                 <span class="material-icons-round text-gray-500 text-sm">calendar_today</span>
@@ -160,7 +188,7 @@
         
         {#if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> {:else} <TaskList {activeTab} on:taskClick={handleTaskClick} /> {/if}
       </div>
-      <footer>Design by 3031 | {#if $currentUser.role === 'super_admin'} Super Admin {:else} Kho: {$currentUser.storeIds?.join(', ')} {/if}</footer>
+      <footer>Design by 3031 | Kho đang xem: {activeStoreId}</footer>
     </div>
   {/if}
   
@@ -170,6 +198,7 @@
   {#if showTaskModal && selectedTask} <TaskModal taskTitle={selectedTask.title} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> {/if}
   {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
 </main>
+
 <style>
   main { width: 100%; height: 100%; }
   .app-container { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-body); }

@@ -1,11 +1,11 @@
-// Version 6.0 - Update Default Template (Standard 908)
+// Version 41.0 - Optimize Store: Add User Cache
 import { writable } from 'svelte/store';
 
-// User hiện tại (null nếu chưa đăng nhập)
+// User hiện tại
 const storedUser = localStorage.getItem('taskflow_user');
 export const currentUser = writable(storedUser ? JSON.parse(storedUser) : null);
 
-// Danh sách công việc hôm nay
+// Danh sách công việc
 export const currentTasks = writable([]);
 
 // Mẫu Checklist
@@ -13,6 +13,10 @@ export const taskTemplate = writable({});
 
 // Danh sách kho
 export const storeList = writable([]);
+
+// CACHE MỚI: Danh sách nhân viên theo Kho
+// Cấu trúc: { 'storeId': [ {username, name}, ... ] }
+export const storeUsersCache = writable({});
 
 // Trạng thái Loading
 export const isLoading = writable(false);
@@ -29,7 +33,7 @@ export const setUser = (user) => {
     }
 };
 
-// DỮ LIỆU MẪU MẶC ĐỊNH (CHUẨN KHO 908)
+// (Giữ nguyên DEFAULT_TEMPLATE...)
 export const DEFAULT_TEMPLATE = {
     warehouse: [
         { time: "08:00", title: "Kiểm tra hàng nhập đầu ngày", isImportant: true, days: [0,1,2,3,4,5,6] },
@@ -46,5 +50,5 @@ export const DEFAULT_TEMPLATE = {
         { time: "18:00", title: "Vệ sinh khu vực thu ngân", isImportant: false, days: [0,1,2,3,4,5,6] },
         { time: "21:30", title: "Chốt ca & In báo cáo cuối ngày", isImportant: true, days: [0,1,2,3,4,5,6] }
     ],
-    handover: [] // Bàn giao thường nhập tay theo tình huống
+    handover: []
 };

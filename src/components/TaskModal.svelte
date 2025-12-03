@@ -1,26 +1,32 @@
 <script>
-  // Version 9.3 - Fix Case Sensitivity in Note
+  // Version 41.0 - Optimized Task Modal (Use Cache)
   import { createEventDispatcher, onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
-  import { currentUser } from '../lib/stores';
+  import { currentUser, storeUsersCache } from '../lib/stores'; // Import Cache
   export let taskTitle = '';
   export let note = ''; 
 
   const dispatch = createEventDispatcher();
-
   let storeUsers = [];
   let showSuggestions = false;
   let suggestionList = [];
   let cursorPosition = 0;
-  
+
+  // Logic tải user thông minh (giống bên Handover)
   onMount(async () => {
       const currentStoreId = $currentUser.storeIds?.[0] || '';
       if (currentStoreId) {
+          if ($storeUsersCache[currentStoreId]) {
+              storeUsers = $storeUsersCache[currentStoreId];
+              return;
+          }
           try {
               const q = query(collection(db, 'users'), where('storeIds', 'array-contains', currentStoreId));
               const snap = await getDocs(q);
-              storeUsers = snap.docs.map(d => ({ username: d.data().username, name: d.data().name }));
+              const users = snap.docs.map(d => ({ username: d.data().username, name: d.data().name }));
+              storeUsers = users;
+              storeUsersCache.update(c => ({ ...c, [currentStoreId]: users }));
           } catch (e) { console.error(e); }
       }
   });
@@ -49,24 +55,18 @@
 
   async function detectAndNotify(content) {
       if (!content) return;
-      
       const regex = /@([\w.-]+)/g;
       const matches = content.match(regex);
       
       if (matches) {
           const rawTags = matches.map(m => m.substring(1));
           const realTargets = [];
-
-          // Tìm user thật để lấy đúng Username gốc
           rawTags.forEach(tag => {
               const foundUser = storeUsers.find(u => u.username.toLowerCase() === tag.toLowerCase());
-              if (foundUser) {
-                  realTargets.push(foundUser.username);
-              }
-          });
-
+              if (foundUser) realTargets.push(foundUser.username);
+              else realTargets.push(tag);
+           });
           const uniqueUsers = [...new Set(realTargets)];
-
           const batchPromises = uniqueUsers.map(targetUser => {
               return addDoc(collection(db, 'notifications'), {
                   toUser: targetUser, 
@@ -75,7 +75,6 @@
                   isRead: false, type: 'mention', createdAt: serverTimestamp()
               });
           });
-          
           await Promise.all(batchPromises);
       }
   }
@@ -111,7 +110,7 @@
                 <button class="w-full text-left p-2 hover:bg-indigo-50 flex items-center gap-2 border-b border-gray-50 last:border-0" on:click={() => selectUser(user)}>
                     <div class="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-[9px] font-bold shrink-0">{user.name.charAt(0)}</div>
                     <div class="truncate">
-                        <span class="text-xs font-bold text-gray-800">{user.name}</span>
+                         <span class="text-xs font-bold text-gray-800">{user.name}</span>
                         <span class="text-[9px] text-gray-400 ml-1">@{user.username}</span>
                     </div>
                 </button>
