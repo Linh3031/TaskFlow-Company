@@ -1,8 +1,8 @@
 <script>
-  // Version 9.0 - Fix General Tour Guide
+  // Version 10.4 - CLEAN & STABLE (Fixed ID logic kept, Debug tools removed)
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
-  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion } from 'firebase/firestore'; 
+  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore'; 
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
 
@@ -26,25 +26,57 @@
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
 
-  // --- CẬP NHẬT NỘI DUNG TOUR TỔNG ---
   const tourSteps = [
-      { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Đây là thanh điều hướng chính.' },
-      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Bấm vào đây để chuyển qua lại giữa các danh sách công việc: Kho, Thu Ngân, Bàn Giao và Lịch Ca.' },
-      { target: '#date-picker-container', title: 'Chọn Ngày', content: 'Xem lại lịch sử công việc của những ngày trước tại đây.' },
-      { target: '#btn-notif', title: 'Thông Báo', content: 'Nhận thông báo khi có người nhắc tên (@) bạn trong công việc.' },
-      { target: '#btn-admin', title: 'Quản Trị Hệ Thống', content: 'Khu vực dành cho Quản lý để cài đặt, tạo mẫu công việc và phân ca.' }
+      { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow.' },
+      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: Kho, Thu Ngân, Bàn Giao, Lịch Ca.' },
+      { target: '#date-navigator', title: 'Chọn Ngày', content: 'Bấm < hoặc > để chuyển ngày.' },
+      { target: '#btn-notif', title: 'Thông Báo', content: 'Xem ai nhắc tên bạn.' },
+      { target: '#btn-admin', title: 'Cài Đặt', content: 'Cấu hình hệ thống.' }
   ];
-  // ------------------------------------
 
   let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
+  
+  let hasCheckedInit = false; 
+
+  // --- LOGIC HIỂN THỊ NGÀY THÁNG ---
+  $: displayDateLabel = (() => {
+      if (!selectedDate) return '';
+      const [y, m, d] = selectedDate.split('-');
+      return `${d}/${m}`;
+  })();
+
+  $: displayDayOfWeek = (() => {
+      if (!selectedDate) return '';
+      const date = new Date(selectedDate);
+      const days = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+      return days[date.getDay()];
+  })();
+
+  function changeDate(offset) {
+      const d = new Date(selectedDate);
+      d.setDate(d.getDate() + offset);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      selectedDate = `${year}-${month}-${day}`;
+  }
+  
+  function openDatePicker() {
+      try { document.getElementById('hidden-date-input').showPicker(); } 
+      catch (e) { document.getElementById('hidden-date-input').click(); }
+  }
+
+  // Reset cờ khi đổi kho hoặc đổi ngày
+  $: if (activeStoreId || selectedDate) {
+      hasCheckedInit = false;
+  }
 
   onMount(() => {
     unsubStores = onSnapshot(collection(db, 'stores'), (snap) => {
         storeList.set(snap.docs.map(d => ({id:d.id, ...d.data()})));
     });
-    // Chỉ hiện tour nếu user chưa xem bao giờ
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
 
@@ -54,11 +86,72 @@
       if ($currentUser.storeIds && $currentUser.storeIds.length > 0) {
           activeStoreId = $currentUser.storeIds[0];
       } else if ($currentUser.role === 'super_admin') {
-          activeStoreId = '908'; 
+          activeStoreId = '908';
       }
   }
 
   $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
+
+  // TỰ ĐỘNG KHỞI TẠO (CHẠY NGẦM AN TOÀN)
+  $: if ($currentUser && activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks) {
+       if (!hasCheckedInit) {
+           initDailyTasksSafe(activeStoreId, selectedDate, $currentTasks, $taskTemplate);
+       }
+  }
+
+  // === HÀM SINH ID CỐ ĐỊNH (CỐT LÕI CỦA VIỆC CHỐNG TRÙNG) ===
+  function generateFixedID(storeId, dateStr, type, title) {
+      const cleanTitle = title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+      return `${storeId}_${dateStr}_${type}_${cleanTitle}`;
+  }
+
+  async function initDailyTasksSafe(storeId, dateStr, currentTasks, template) {
+      if (dateStr !== getTodayStr()) return;
+      hasCheckedInit = true;
+
+      const dayOfWeek = new Date().getDay();
+      const batch = writeBatch(db);
+      let hasUpdates = false;
+      const types = ['warehouse', 'cashier'];
+
+      types.forEach(type => {
+          const templateItems = template[type] || [];
+          templateItems.forEach(tpl => {
+              if (tpl.days && tpl.days.includes(dayOfWeek)) {
+                  
+                  const fixedID = generateFixedID(storeId, dateStr, type, tpl.title);
+                  
+                  // Kiểm tra trùng lặp
+                  const existsByID = currentTasks.some(t => t.id === fixedID);
+                  const existsByTitle = currentTasks.some(t => 
+                      t.title.trim().toLowerCase() === tpl.title.trim().toLowerCase() && 
+                      t.type === type
+                  );
+
+                  if (!existsByID && !existsByTitle) {
+                      const docRef = doc(db, 'tasks', fixedID);
+                      batch.set(docRef, {
+                          title: tpl.title.trim(),
+                          timeSlot: tpl.time,
+                          isImportant: tpl.isImportant || false,
+                          type: type,
+                          storeId: storeId,
+                          date: dateStr,
+                          completed: false,
+                          createdBy: 'System',
+                          timestamp: serverTimestamp()
+                      });
+                      hasUpdates = true;
+                  }
+              }
+          });
+      });
+
+      if (hasUpdates) {
+          console.log("⚡ Đang đồng bộ công việc thiếu...");
+          try { await batch.commit(); } catch(e) { console.error(e); }
+      }
+  }
 
   function loadDataForUser(storeId, dateStr) {
       if(unsubTemplate) unsubTemplate(); 
@@ -69,14 +162,11 @@
       });
 
       const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
-      
       unsubTasks = onSnapshot(q, (snapshot) => {
           const tasks = [];
           snapshot.forEach(doc => {
               const data = doc.data();
-              if (data.type) { 
-                  tasks.push({ id: doc.id, ...data });
-              }
+              if (data.type) tasks.push({ id: doc.id, ...data });
           });
           currentTasks.set(tasks);
       });
@@ -104,12 +194,8 @@
     if (!selectedTask) return;
     const user = $currentUser.name || $currentUser.username;
     const time = getCurrentTimeShort();
-    
     updateDoc(doc(db, 'tasks', selectedTask.id), {
-      completed: true, 
-      completedBy: user, 
-      time: time, 
-      note: noteInput,
+      completed: true, completedBy: user, time: time, note: noteInput,
       history: arrayUnion({ action: 'done', user, time, fullTime: new Date().toISOString() })
     });
     showTaskModal = false; selectedTask = null;
@@ -125,31 +211,26 @@
           el.style.transition = "background-color 0.5s";
           el.style.backgroundColor = "#fff9c4"; 
           setTimeout(() => { el.style.backgroundColor = ""; }, 2000);
-      } else {
-          alert("Không tìm thấy công việc này trong ngày hiện tại!");
-      }
+      } else { alert("Không tìm thấy công việc này!"); }
   }
 </script>
 
 <main>
   {#if !$currentUser} <Login /> {:else}
     <div class="app-container">
-      <Header on:openAdmin={() => showAdminModal = true} on:openTour={() => showTour = true} on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ -> Chọn "Thêm vào MH chính"')} 
-              on:jumpToTask={handleJumpToTask} />
+      <Header on:openAdmin={() => showAdminModal = true} on:openTour={() => showTour = true} on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ -> Chọn "Thêm vào MH chính"')} on:jumpToTask={handleJumpToTask} />
       
       <nav id="tab-nav-container" class="tab-nav">
-        <button class="tab-btn {activeTab==='warehouse'?'active':''}" on:click={() => activeTab='warehouse'} style="--theme-color: #ff9800;">
-          <div class="icon-box"><span class="material-icons-round">inventory_2</span></div><small>Kho</small>
-        </button>
-         <button class="tab-btn {activeTab==='cashier'?'active':''}" on:click={() => activeTab='cashier'} style="--theme-color: #4caf50;">
-          <div class="icon-box"><span class="material-icons-round">point_of_sale</span></div><small>Thu Ngân</small>
-        </button>
-        <button class="tab-btn {activeTab==='handover'?'active':''}" on:click={() => activeTab='handover'} style="--theme-color: #673ab7;">
-          <div class="icon-box"><span class="material-icons-round">campaign</span></div><small>Bàn Giao</small>
-        </button>
-        <button id="tab-schedule" class="tab-btn {activeTab==='schedule'?'active':''}" on:click={() => activeTab='schedule'} style="--theme-color: #e91e63;">
-            <div class="icon-box"><span class="material-icons-round">calendar_month</span></div><small>Lịch Ca</small>
-        </button>
+        {#each [
+            {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'},
+            {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50'},
+            {id:'handover', icon:'campaign', label:'Bàn Giao', color:'#673ab7'},
+            {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'}
+        ] as t}
+            <button class="tab-btn {activeTab===t.id?'active':''}" on:click={() => activeTab=t.id} style="--theme-color: {t.color};">
+                <div class="icon-box"><span class="material-icons-round">{t.icon}</span></div><small>{t.label}</small>
+            </button>
+        {/each}
       </nav>
 
       <div id="main-content" class="content-area">
@@ -157,44 +238,44 @@
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
                  {#if $currentUser.role === 'super_admin'}
-                    🛡️ View: 
-                    <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer">
-                        <option value="908">Kho 908</option>
-                        {#each $storeList as s}
-                            {#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}
-                        {/each}
-                    </select>
+                    🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
                  {:else}
-                  {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
+                    {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
                     {#if activeTab==='handover'}📢 Bàn Giao Ca{/if}
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
-                {/if}
+                 {/if}
               </h3>
               {#if activeTab !== 'schedule'}
                    <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
            </div>
-          
+           
            {#if activeTab !== 'schedule'}
-            <div id="date-picker-container" class="flex items-center gap-2 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-full sm:w-auto">
-                <span class="material-icons-round text-gray-500 text-sm">calendar_today</span>
-                <input type="date" bind:value={selectedDate} class="bg-transparent border-none outline-none text-sm font-bold text-gray-700 w-full sm:w-auto">
+            <div id="date-navigator" class="flex items-center gap-1 w-full sm:w-auto bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-sm">
+                <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
+                    <span class="material-icons-round text-lg">chevron_left</span>
+                </button>
+                <button class="relative flex-1 sm:flex-none flex flex-col items-center justify-center px-3 cursor-pointer group min-w-[70px] bg-transparent border-none" on:click={openDatePicker}>
+                    <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
+                    <span class="text-sm font-black text-gray-800 leading-tight group-hover:text-indigo-600 transition-colors">{displayDateLabel}</span>
+                </button>
+                <input id="hidden-date-input" type="date" bind:value={selectedDate} class="absolute opacity-0 pointer-events-none w-0 h-0">
+                <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(1)}>
+                    <span class="material-icons-round text-lg">chevron_right</span>
+                </button>
              </div>
           {/if}
         </div>
 
         {#if activeTab === 'handover' && selectedDate === getTodayStr()} <HandoverInput /> {/if}
-        
         {#if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> {:else} <TaskList {activeTab} on:taskClick={handleTaskClick} /> {/if}
       </div>
       <footer>Design by 3031 | Kho đang xem: {activeStoreId}</footer>
     </div>
   {/if}
   
-  {#if showAdminModal} 
-    <AdminModal on:close={() => showAdminModal = false} on:switchTab={(e) => { activeTab = e.detail; showAdminModal = false; }} /> 
-  {/if}
+  {#if showAdminModal} <AdminModal on:close={() => showAdminModal = false} on:switchTab={(e) => { activeTab = e.detail; showAdminModal = false; }} /> {/if}
   {#if showTaskModal && selectedTask} <TaskModal taskTitle={selectedTask.title} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> {/if}
   {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
 </main>

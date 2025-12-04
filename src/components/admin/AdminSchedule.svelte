@@ -1,5 +1,5 @@
 <script>
-  // Version 52.0 - Update Tour Guide for New Layout
+  // Version 53.0 - Full Code (Added Backup & Restore Logic)
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import { db } from '../../lib/firebase';
   import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -7,7 +7,7 @@
   import { safeString } from '../../lib/utils';
   import { currentUser } from '../../lib/stores';
   import { calculateCombosFromMatrix, generateMonthlySchedule, SHIFT_DEFINITIONS, suggestPeakCombos } from '../../lib/scheduleLogic';
-  import { optimizeSchedule, autoFixRotation, autoFixWeekendFairness, autoFixGenderBalance } from '../../lib/optimization';
+  import { optimizeSchedule, autoFixRotation, autoFixWeekendFairness, autoFixGenderBalance, manualBalanceGender } from '../../lib/optimization';
   import TourGuide from '../TourGuide.svelte'; 
   
   import ScheduleMatrix from './schedule/ScheduleMatrix.svelte';
@@ -23,19 +23,16 @@
   let scheduleYear = new Date().getFullYear();
   let showStoreConfig = false; 
 
-  // --- TOUR GUIDE (Đã cập nhật vị trí Stats) ---
   let showTour = false;
   const tourSteps = [
       { target: '#toolbar-actions', title: '1. Công Cụ Đầu Vào', content: 'Nơi tải danh sách nhân viên từ Excel và Cấu hình khung giờ hoạt động.' },
       { target: '#month-navigator', title: '2. Chọn Tháng & Chế Độ', content: 'Chọn tháng cần làm lịch. Chuyển đổi qua lại giữa <b>Thứ 2-6</b> và <b>T7-CN</b> để nhập định mức riêng.' },
-      // CẬP NHẬT: Nhắc đến dòng trạng thái nhân sự nhỏ bên dưới
-      { target: '#matrix-header-target', title: '3. Nhập Định Mức', content: 'Nhập số lượng nhân viên cần thiết cho từng bộ phận (Kho, Thu Ngân...).<br><br><b>Lưu ý:</b> Xem tổng số nhân viên hiện có ở dòng chữ nhỏ ngay bên dưới tiêu đề này.' },
+      { target: '#matrix-header-target', title: '3. Nhập Định Mức', content: 'Nhập số lượng nhân viên cần thiết cho từng bộ phận (Kho, Thu Ngân...) tại các khung giờ bên dưới.' },
       { target: '#btn-calculate', title: '4. Tính Toán Tự Động', content: 'Bấm nút này để hệ thống quy đổi nhu cầu lẻ thành các Combo ca làm việc.' },
       { target: '#peak-mode-toggle', title: '5. Chế Độ Cao Điểm', content: 'Bật khi thiếu nhân sự để kích hoạt các ca gãy/kẹp nách.' },
       { target: '#combo-header-target', title: '6. Tinh Chỉnh Combo', content: 'Xem kết quả quy đổi bên dưới. Bạn có thể sửa trực tiếp số lượng các ca tại đây.' },
       { target: '#btn-preview-schedule', title: '7. Tạo & Xem Trước', content: 'Bước cuối: Tạo bảng phân ca chi tiết để kiểm tra và áp dụng.' }
   ];
-  // ---------------------------------------------------------------
 
   const defaultMatrix = { c1: { kho: 0, tn: 0, tv: 0, gh: 0 }, c2: { kho: 0, tn: 0, tv: 0, gh: 0 }, c3: { kho: 0, tn: 0, tv: 0, gh: 0 }, c4: { kho: 0, tn: 0, tv: 0, gh: 0 }, c5: { kho: 0, tn: 0, tv: 0, gh: 0 }, c6: { kho: 0, tn: 0, tv: 0, gh: 0 } };
   let shiftMatrix = JSON.parse(JSON.stringify(defaultMatrix)); 
@@ -97,16 +94,11 @@
   } else if (qtyVal > 0) { currentList.push({ code: comboCode, role: roleLabel, label: `${roleLabel} ${comboCode}`, qty: qtyVal });
   } if (activeMatrixMode === 'weekday') suggestedCombos = currentList; else suggestedWeekendCombos = currentList;
   }
-  function matchRoleCode(uiLabel) { if (!uiLabel) return 'TV'; const cleanLabel = uiLabel.trim(); if (cleanLabel === 'Giao Hàng') return 'GH';
-  if (cleanLabel === 'Kho') return 'Kho'; if (cleanLabel === 'Thu Ngân') return 'TN'; if (cleanLabel === 'Tư Vấn') return 'TV';
-  return cleanLabel; }
   async function saveGenderConfig(newConfig) { if (!targetStore) return; genderConfig = newConfig;
   try { await setDoc(doc(db, 'settings', `shift_matrix_${targetStore}`), { genderConfig }, { merge: true }); } catch (e) { console.error(e);
   } }
   function togglePeakMode() { isPeakMode = !isPeakMode; if (isPeakMode) { handleCalculateCombos(true);
   } }
-  function confirmEnablePeak() { showShortageAlert = false; isPeakMode = true; handleCalculateCombos(true);
-  }
   async function handleCalculateCombos(save = true) { if(save) isLoading = true;
   try { const clean = (m) => { const c = JSON.parse(JSON.stringify(m));
   Object.keys(c).forEach(key => { if(c[key]) ['kho', 'tn', 'tv', 'gh'].forEach(role => { let val = parseInt(c[key][role]); if (isNaN(val)) val = 0; c[key][role] = val; }); });
@@ -128,6 +120,54 @@
   setTimeout(() => { const previewEl = document.getElementById('preview-schedule-container'); if(previewEl) previewEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
   } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false;
   } }
+  
+  function handleManualBalance(e) {
+    const config = e.detail;
+    if (!previewScheduleData) return;
+    
+    const params = {
+        fromGender: config.direction === 'male_to_female' ? 'Nam' : 'Nữ',
+        toGender: config.direction === 'male_to_female' ? 'Nữ' : 'Nam',
+        role: config.role,
+        qty: parseInt(config.qty) || 1
+    };
+
+    isLoading = true;
+    setTimeout(() => {
+        const result = manualBalanceGender(previewScheduleData, scheduleStaffList, scheduleMonth, scheduleYear, params);
+        
+        if (result.count > 0) {
+            previewScheduleData = result.schedule;
+            optimizationLogs = [...optimizationLogs, ...result.logs];
+            
+            // Update Stats
+            const newRoleStats = {};
+            scheduleStaffList.forEach(s => {
+                let h=0, tn=0, kho=0, gh=0;
+                Object.values(previewScheduleData).forEach(dayList => {
+                    const assign = dayList.find(a => a.staffId === s.id);
+                    if(assign && assign.shift !== 'OFF') {
+                        if(assign.role==='Thu Ngân' || assign.role==='TN') tn++;
+                        if(assign.role==='Kho' || assign.role==='K') kho++;
+                        if(assign.role==='Giao Hàng' || assign.role==='GH') gh++;
+                    }
+                });
+                newRoleStats[s.id] = { tn, kho, gh };
+            });
+
+            previewStats = previewStats.map(s => {
+                if (newRoleStats[s.id]) return { ...s, ...newRoleStats[s.id] };
+                return s;
+            });
+
+            alert(`✅ Đã đổi thành công ${result.count} ca!`);
+        } else {
+            alert("⚠️ Không tìm thấy ca nào phù hợp để đổi (hoặc đã vi phạm hết các điều kiện ưu tiên).");
+        }
+        isLoading = false;
+    }, 200);
+  }
+
   function getShiftColor(code) { if (code === 'OFF') return 'bg-slate-100 text-slate-400 border-slate-200 font-bold tracking-wider text-[10px]';
   const map = { '123': 'bg-green-50 text-green-700 border-green-100', '456': 'bg-orange-50 text-orange-700 border-orange-100', '23': 'bg-cyan-50 text-cyan-700 border-cyan-100', '45': 'bg-blue-50 text-blue-700 border-blue-100', '2-5': 'bg-pink-50 text-pink-700 border-pink-100', '2345': 'bg-red-50 text-red-700 border-red-100', '12-56': 'bg-purple-100 text-purple-700 border-purple-200' };
   return map[code] || 'bg-white text-gray-800 border-gray-200'; }
@@ -189,10 +229,73 @@
   function handleOptimize() { if (!previewScheduleData) return; const beforeOptimizeJSON = JSON.stringify(previewScheduleData); isLoading = true;
   setTimeout(() => { const optResult = optimizeSchedule(previewScheduleData, scheduleStaffList); const afterOptimizeJSON = JSON.stringify(optResult.optimizedSchedule); if (beforeOptimizeJSON === afterOptimizeJSON) { alert("✅ Lịch hiện tại đã tối ưu!"); isLoading = false; return; } previewScheduleData = optResult.optimizedSchedule; const newRoleStats = {}; optResult.finalStats.forEach(s => newRoleStats[s.id] = s.roles); previewStats = previewStats.map(s => { if (newRoleStats[s.id]) { return { ...s, ...newRoleStats[s.id] }; } return s; }); optimizationLogs = optResult.changesLog; isLoading = false; }, 200);
   }
-  async function handleApplySchedule() { if (!previewScheduleData) return; if (!confirm(`⚠️ XÁC NHẬN ÁP DỤNG LỊCH THÁNG ${scheduleMonth}/${scheduleYear}?`)) return;
-  isLoading = true; try { const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`; await setDoc(doc(db, 'stores', targetStore, 'schedules', scheduleId), { config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig }, data: previewScheduleData, stats: previewStats, endOffset: originalResult.endOffset, updatedAt: serverTimestamp(), updatedBy: $currentUser.username });
-  alert("✅ Đã áp dụng lịch thành công!"); dispatch('switchTab', 'schedule'); } catch (e) { alert("Lỗi: " + e.message);
-  } finally { isLoading = false; } }
+
+  // --- LOGIC MỚI: BACKUP & RESTORE ---
+  async function handleApplySchedule() { 
+      if (!previewScheduleData) return; 
+      if (!confirm(`⚠️ XÁC NHẬN ÁP DỤNG LỊCH THÁNG ${scheduleMonth}/${scheduleYear}?`)) return;
+      
+      isLoading = true; 
+      try { 
+          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`; 
+          const mainRef = doc(db, 'stores', targetStore, 'schedules', scheduleId);
+          
+          // 1. TẠO BACKUP TRƯỚC KHI GHI
+          const currentSnap = await getDoc(mainRef);
+          if (currentSnap.exists()) {
+              const backupRef = doc(db, 'stores', targetStore, 'schedules', `${scheduleId}_backup`);
+              await setDoc(backupRef, currentSnap.data());
+              console.log("✅ Đã tạo backup bản lịch cũ.");
+          }
+
+          // 2. GHI LỊCH MỚI
+          await setDoc(mainRef, { 
+              config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig }, 
+              data: previewScheduleData, 
+              stats: previewStats, 
+              endOffset: originalResult.endOffset, 
+              updatedAt: serverTimestamp(), 
+              updatedBy: $currentUser.username 
+          });
+          
+          alert("✅ Đã áp dụng lịch thành công!"); 
+          dispatch('switchTab', 'schedule'); 
+      } catch (e) { 
+          alert("Lỗi: " + e.message); 
+      } finally { 
+          isLoading = false; 
+      } 
+  }
+
+  async function handleRestoreBackup() {
+      if (!confirm("⚠️ CẢNH BÁO: Bạn có chắc chắn muốn khôi phục lại phiên bản lịch trước đó?")) return;
+      
+      isLoading = true;
+      try {
+          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`; 
+          const backupRef = doc(db, 'stores', targetStore, 'schedules', `${scheduleId}_backup`);
+          const backupSnap = await getDoc(backupRef);
+
+          if (!backupSnap.exists()) {
+              alert("❌ Không tìm thấy bản sao lưu nào để khôi phục.");
+              isLoading = false;
+              return;
+          }
+
+          // Khôi phục: Ghi đè bản backup vào bản chính
+          const mainRef = doc(db, 'stores', targetStore, 'schedules', scheduleId);
+          await setDoc(mainRef, backupSnap.data());
+
+          alert("✅ Đã khôi phục thành công lịch cũ!");
+          dispatch('switchTab', 'schedule'); // Load lại tab lịch
+      } catch (e) {
+          alert("Lỗi khôi phục: " + e.message);
+      } finally {
+          isLoading = false;
+      }
+  }
+  // -----------------------------------
+
   function openEditPreviewShift(day, staffId, assign) { const staffInfo = previewStats.find(s => s.id === staffId);
   tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo ?
   staffInfo.gender : 'Nữ', originalRole: assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV'), originalShift: assign.originalShift !== undefined ?
@@ -243,7 +346,6 @@
                     Tải Mẫu
                 </button>
                 <label class="bg-blue-600 text-white hover:bg-blue-700 font-bold py-2 px-3 rounded-lg text-xs cursor-pointer flex items-center gap-1 shadow-lg shadow-blue-200 transition-all active:scale-95">
-               
                     <span class="material-icons-round text-sm">upload</span>
                     Upload
                     <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={(e) => handleStaffUpload(e)}>
@@ -251,7 +353,6 @@
 
                 <div class="w-px h-8 bg-slate-200 mx-1"></div>
 
-          
                 <button 
                     class="bg-gray-100 text-gray-600 hover:bg-gray-200 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-gray-200"
                     on:click={()=>showStoreConfig=true}
@@ -267,7 +368,6 @@
     </div>
 
     <div id="matrix-input-area">
-      
         <ScheduleMatrix 
             bind:staffStats
             bind:shiftMatrix
@@ -290,7 +390,8 @@
             on:calculate={() => handleCalculateCombos(true)}
             on:togglePeak={togglePeakMode}
             on:updateCombo={(e) => updateComboQty(e.detail.role, e.detail.code, e.detail.qty)}
-            on:configChange={(e) => { const newConf = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
+            on:configChange={(e) => { const newConf 
+            = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
             on:preview={handleGeneratePreview}
         />
     </div>
@@ -309,7 +410,6 @@
             {getShiftColor}
             {getRoleBadge}
             {isCellRelevant}
-            
             on:inspectionChange={(e) => inspectionMode = e.detail}
             on:fixRotation={handleAutoFixRotation}
             on:fixWeekend={handleAutoFixWeekend}
@@ -317,9 +417,11 @@
             on:optimize={handleOptimize}
             on:reset={handleResetPreview}
             on:apply={handleApplySchedule}
+            on:restore={handleRestoreBackup} 
             on:cellClick={(e) => openEditPreviewShift(e.detail.day, e.detail.staffId, e.detail.assign)}
             on:staffClick={(e) => viewPersonalSchedule(e.detail.id, e.detail.name)}
             on:headerClick={(e) => handleDayHeaderClick(e.detail)}
+            on:balanceGender={handleManualBalance}
         />
     </div>
 </div>
@@ -330,13 +432,11 @@
 {#if editingShift} 
     <div class="fixed inset-0 z-[80] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>editingShift=null}> 
         <div class="bg-white w-full max-w-sm rounded-xl p-5 shadow-2xl" on:click|stopPropagation> 
-           
             <div class="flex justify-between items-start mb-4"> 
                 <div>
                     <h3 class="font-bold text-lg text-slate-800">Sửa Ca: {editingShift.name}</h3>
                     <p class="text-xs text-gray-500">Ngày {editingShift.day} - Hiện tại: <span class="font-bold">{tempEditingShift.shift}</span></p>
                 </div> 
-        
                 {#if editingShift.shift !== editingShift.originalShift ||
                 editingShift.role !== editingShift.originalRole} 
                     <button class="text-xs text-red-600 hover:underline font-bold bg-red-50 px-2 py-1 rounded" on:click={resetEditPreviewShift}>Reset về gốc</button> 
@@ -344,11 +444,9 @@
             </div> 
             <div class="space-y-4"> 
                 <div> 
-    
                     <label class="block text-xs font-bold text-gray-500 mb-2">Chọn Ca Nhanh</label> 
                     <div class="grid grid-cols-3 gap-2 mb-2"> 
                         {#each QUICK_SHIFTS as s} 
-                       
                             <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true;
                             editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s;
                             } }}>{s}</button> 
@@ -361,25 +459,20 @@
                 </div> 
                 {#if !editingShift.isOFF} 
                     <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-fadeIn"> 
-         
                         <label class="block text-xs font-bold text-gray-500 mb-2">Vai Trò Mới</label> 
                         <div class="grid grid-cols-2 gap-2"> 
                             {#each ['TV', 'Thu Ngân', 'Kho', 'GH'] as r} 
-             
                                 <label class="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-gray-200 hover:border-indigo-300 transition-colors"> 
                                     <input type="radio" bind:group={editingShift.role} value={r} class="accent-indigo-600 w-4 h-4"> 
-                          
                                     <span class="text-xs font-bold {r==='GH'?'text-blue-600':(r==='Thu Ngân'?'text-purple-600':(r==='Kho'?'text-orange-600':'text-gray-600'))}">{r}</span> 
                                 </label> 
                             {/each} 
-                       
                         </div> 
                     </div> 
                 {/if} 
             </div> 
             <div class="flex gap-3 mt-6"> 
                 <button class="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-bold text-sm hover:bg-slate-200 transition-colors" on:click={()=>editingShift=null}>Hủy Bỏ</button> 
-   
                 <button class="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-0.5 transition-all" on:click={savePreviewShiftChange}>Lưu Thay Đổi</button> 
             </div> 
         </div> 
@@ -389,7 +482,6 @@
 {#if selectedStaff} 
     <div class="fixed inset-0 z-[90] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>selectedStaff=null}> 
         <div class="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation> 
-        
             <div class="p-4 bg-indigo-500 text-white shrink-0"> 
                 <h3 class="font-bold text-lg">{selectedStaff.name}</h3> 
                 <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded"> 
@@ -406,25 +498,20 @@
             <div class="flex-1 overflow-y-auto p-3 bg-slate-100"> 
                 <div class="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-bold text-gray-400 uppercase"> 
                     {#each ['T2','T3','T4','T5','T6','T7','CN'] as day}<div>{day}</div>{/each} 
-  
                 </div> 
                 <div class="grid grid-cols-7 gap-1"> 
                     {#each selectedStaff.blankCells as _}<div class="bg-transparent"></div>{/each} 
                     {#each selectedStaff.days as d} 
-                
                         <div class="bg-white rounded border shadow-sm p-1 flex flex-col items-center justify-center aspect-square {d.shift==='OFF'?'opacity-60 bg-slate-100':''}"> 
                             <div class="text-[10px] text-gray-400 font-bold mb-1">{d.day}</div> 
                             <div class="font-black text-slate-800 text-xs {d.shift==='OFF'?'text-slate-400':''}">{d.shift}</div> 
-             
-                                {#if d.shift !== 'OFF'} 
+                            {#if d.shift !== 'OFF'} 
                                 {@const badge = getRoleBadge(d.role)} 
                                 {#if badge}<span class="text-[9px] font-bold px-1 rounded mt-0.5 leading-tight {badge.class}">{badge.text}</span>{/if} 
-    
-                                {/if} 
+                            {/if} 
                         </div> 
                     {/each} 
                 </div> 
-            
             </div> 
             <div class="p-3 border-t bg-white text-center">
                 <button class="w-full py-2 bg-gray-100 rounded text-gray-600 font-bold text-sm" on:click={()=>selectedStaff=null}>Đóng</button>
@@ -435,27 +522,22 @@
 
 {#if selectedDayStats} 
     <div class="fixed inset-0 z-[90] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>selectedDayStats=null}> 
-        <div class="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl" 
-            on:click|stopPropagation> 
+        <div class="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl" on:click|stopPropagation> 
             <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center"> 
                 <h3 class="font-bold text-lg text-slate-800"> Chi Tiết Ngày {selectedDayStats.day} ({selectedDayStats.weekday}) <span class="ml-2 text-sm text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">Tổng công: {selectedDayStats.totalHours} giờ</span> </h3> 
                 <button on:click={()=>selectedDayStats=null} class="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center"><span class="material-icons-round text-slate-500">close</span></button> 
             </div> 
-  
             <div class="p-5 overflow-x-auto"> 
                 <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200"> 
                     <thead class="bg-slate-50 text-slate-500">
                         <tr>
-                
                             <th class="p-3 text-left font-bold border-b border-r border-slate-200">Bộ Phận</th>
                             {#each selectedDayStats.cols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[50px]"><div class="font-black text-slate-700">{col}</div></th>{/each}
                             <th class="p-3 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700">Tổng</th>
-     
                         </tr>
                     </thead> 
                     <tbody> 
                         {#each selectedDayStats.roles as role} 
-           
                             <tr class="hover:bg-slate-50 transition-colors"> 
                                 <td class="p-3 font-bold border-r border-slate-100 {role==='GH'?'text-blue-600':(role==='Thu Ngân'?'text-purple-600':(role==='Kho'?'text-orange-600':'text-gray-600'))}">{role}</td> 
                                 {#each selectedDayStats.cols as col}<td class="p-2 border-r border-slate-100 text-center font-mono 
@@ -463,16 +545,13 @@
                                 <td class="p-3 text-center font-black text-slate-700 bg-slate-50 border-l border-slate-100">{selectedDayStats.matrix[role]['Total']}</td> 
                             </tr> 
                         {/each} 
-  
                     </tbody> 
                     <tfoot class="bg-slate-800 text-slate-300 font-bold">
                         <tr>
-                            <td class="p-3 text-right text-xs uppercase tracking-wider">Tổng 
-                            Cộng</td>
+                            <td class="p-3 text-right text-xs uppercase tracking-wider">Tổng Cộng</td>
                             {#each selectedDayStats.cols as col}<td class="p-3 text-center text-yellow-400 font-mono text-lg">{getDayColTotal(col)}</td>{/each}
                             <td class="p-3 text-center text-white text-xl bg-slate-900">{getDayGrandTotal()}</td>
                         </tr>
-       
                     </tfoot> 
                 </table> 
             </div> 

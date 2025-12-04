@@ -1,5 +1,5 @@
 // src/lib/optimization.js
-// Version 33.0 - Fix Lazy Search Logic in Gender Balance
+// Version 37.0 - FIX: Manual Balance respects Weekend Load
 
 const SHIFT_GROUPS = {
     '123': 'SANG', '23': 'SANG', '12-56': 'SANG', '123-56': 'SANG', '12345': 'SANG',
@@ -8,11 +8,13 @@ const SHIFT_GROUPS = {
 };
 
 function getGroup(code) { return SHIFT_GROUPS[code] || 'OFF'; }
+
 function isHardRole(r) { return ['Kho', 'Thu Ngân', 'Giao Hàng', 'GH', 'TN', 'K'].includes(r); }
+
 function isWeekend(d, month, year) { 
-    const date = new Date(year, month - 1, d); 
+    const date = new Date(year, month - 1, d);
     const day = date.getDay();
-    return day === 0 || day === 6; 
+    return day === 0 || day === 6;
 }
 
 function hasRotationConflict(shift1, shift2) {
@@ -22,7 +24,7 @@ function hasRotationConflict(shift1, shift2) {
     return false;
 }
 
-// 1. AUTO FIX ROTATION (GIỮ NGUYÊN)
+// 1. AUTO FIX ROTATION
 export function autoFixRotation(scheduleData, month, year) {
     let schedule = JSON.parse(JSON.stringify(scheduleData));
     let logs = [];
@@ -80,7 +82,7 @@ export function autoFixRotation(scheduleData, month, year) {
     return { success: fixedCount > 0, count: fixedCount, schedule, logs };
 }
 
-// 2. AUTO FIX WEEKEND FAIRNESS (GIỮ NGUYÊN)
+// 2. AUTO FIX WEEKEND FAIRNESS
 export function autoFixWeekendFairness(scheduleData, month, year, staffList) {
     let schedule = JSON.parse(JSON.stringify(scheduleData));
     let logs = [];
@@ -140,13 +142,13 @@ export function autoFixWeekendFairness(scheduleData, month, year, staffList) {
             logs.push(`Ngày ${swapDay}: Chuyển ${tempRole} từ ${donor.name} sang ${receiver.name}.`);
             fixedCount++;
         } else {
-            receiver.count += 999; 
+            receiver.count += 999;
         }
     }
     return { success: fixedCount > 0, count: fixedCount, schedule, logs };
 }
 
-// 3. AUTO FIX GENDER (NÂNG CẤP VÒNG LẶP SÂU)
+// 3. AUTO FIX GENDER (Basic)
 export function autoFixGenderBalance(scheduleData, month, year, forceFix = false) {
     let schedule = JSON.parse(JSON.stringify(scheduleData));
     let logs = [];
@@ -160,7 +162,6 @@ export function autoFixGenderBalance(scheduleData, month, year, forceFix = false
         const todayAssigns = schedule[todayKey];
         const prevAssigns = schedule[prevKey] || [];
 
-        // Gom nhóm Kho
         const shiftGroups = {};
         todayAssigns.forEach((assign, idx) => {
             if (assign.shift === 'OFF') return;
@@ -172,40 +173,27 @@ export function autoFixGenderBalance(scheduleData, month, year, forceFix = false
             }
         });
 
-        // Tìm ca thiếu Nam (Chỉ có Nữ) và ca Dư Nam (Có >= 1 Nam)
         let lackMaleShifts = Object.values(shiftGroups).filter(g => g.males.length === 0 && g.females.length >= 1);
         let richMaleShifts = Object.values(shiftGroups).filter(g => g.males.length >= 1);
 
-        // Duyệt qua từng ca thiếu Nam
         lackMaleShifts.forEach(badShift => {
             let fixed = false;
-
-            // CHIẾN THUẬT 1: ĐỔI NỘI BỘ (Nam Kho ca khác -> Nữ Kho ca này)
-            // Duyệt qua tất cả các ca Dư Nam
             for (let targetRich of richMaleShifts) {
                 if (targetRich.code === badShift.code || fixed) continue;
-
-                // VÒNG LẶP SÂU: Duyệt qua TẤT CẢ ứng viên Nam trong ca đó
                 for (let maleCandidate of targetRich.males) {
-                    if (fixed) break; // Đã sửa được thì thôi
-
-                    const femaleCandidate = badShift.females[0]; // Lấy 1 bạn nữ ra đổi
-
-                    // Check xung đột xoay ca
+                    if (fixed) break;
+                    const femaleCandidate = badShift.females[0];
                     const prevMale = prevAssigns.find(p => p.staffId === maleCandidate.staffId);
                     const prevFemale = prevAssigns.find(p => p.staffId === femaleCandidate.staffId);
 
                     let conflictM = prevMale ? hasRotationConflict(prevMale.shift, badShift.code) : false;
                     let conflictF = prevFemale ? hasRotationConflict(prevFemale.shift, targetRich.code) : false;
 
-                    if (conflictM || conflictF) {
-                        if (!forceFix) {
-                            conflictWarnings.push(`Ngày ${todayKey}: Đổi ${maleCandidate.name} (Kho) gây lỗi xoay ca.`);
-                            continue; // Bỏ qua ông này, thử ông tiếp theo
-                        }
+                    if ((conflictM || conflictF) && !forceFix) {
+                        conflictWarnings.push(`Ngày ${todayKey}: Đổi ${maleCandidate.name} (Kho) gây lỗi xoay ca.`);
+                        continue;
                     }
 
-                    // Thực hiện đổi
                     const idxM = maleCandidate.idx;
                     const idxF = femaleCandidate.idx;
                     const shiftM = schedule[todayKey][idxM].shift;
@@ -214,49 +202,10 @@ export function autoFixGenderBalance(scheduleData, month, year, forceFix = false
                     schedule[todayKey][idxM].isChanged = true;
                     schedule[todayKey][idxF].shift = shiftM;
                     schedule[todayKey][idxF].isChanged = true;
-
                     logs.push(`Ngày ${todayKey}: Đổi nội bộ Kho: ${maleCandidate.name} qua ca ${badShift.code}.`);
                     fixedCount++;
                     fixed = true;
-                    // Cập nhật lại array tạm để không lấy lại người này (Đơn giản hóa)
                     targetRich.males = targetRich.males.filter(m => m.staffId !== maleCandidate.staffId);
-                }
-            }
-
-            // CHIẾN THUẬT 2: MƯỢN BINH TỪ TƯ VẤN (Nếu nội bộ bó tay)
-            if (!fixed) {
-                const maleTroops = todayAssigns.filter(a => a.role === 'TV' && a.gender === 'Nam' && a.shift !== 'OFF');
-                
-                for (let soldier of maleTroops) {
-                    if (fixed) break;
-                    
-                    const femaleTarget = badShift.females[0];
-                    const prevSoldier = prevAssigns.find(p => p.staffId === soldier.staffId);
-                    // Lính nhận ca của Nữ Kho
-                    const conflict = prevSoldier ? hasRotationConflict(prevSoldier.shift, femaleTarget.shift) : false;
-
-                    if (conflict && !forceFix) {
-                        conflictWarnings.push(`Ngày ${todayKey}: Mượn ${soldier.name} (TV) gây lỗi xoay ca.`);
-                        continue;
-                    }
-
-                    // Đổi
-                    const idxS = todayAssigns.findIndex(x => x.staffId === soldier.staffId);
-                    const idxF = femaleTarget.idx; // Lưu ý idx này là index trong todayAssigns (đã map ở trên)
-
-                    const shiftS = schedule[todayKey][idxS].shift;
-                    
-                    schedule[todayKey][idxS].shift = schedule[todayKey][idxF].shift;
-                    schedule[todayKey][idxS].role = 'Kho';
-                    schedule[todayKey][idxS].isChanged = true;
-
-                    schedule[todayKey][idxF].shift = shiftS;
-                    schedule[todayKey][idxF].role = 'TV';
-                    schedule[todayKey][idxF].isChanged = true;
-
-                    logs.push(`Ngày ${todayKey}: Điều động ${soldier.name} từ TV sang Kho.`);
-                    fixedCount++;
-                    fixed = true;
                 }
             }
         });
@@ -272,6 +221,176 @@ export function autoFixGenderBalance(scheduleData, month, year, forceFix = false
     };
 }
 
+// 4. MANUAL BALANCE GENDER (UPDATED LOGIC)
+export function manualBalanceGender(scheduleData, staffList, month, year, config) {
+    let schedule = JSON.parse(JSON.stringify(scheduleData));
+    let logs = [];
+    let successCount = 0;
+    
+    const targetRoleLabel = config.role === 'tn' ? 'Thu Ngân' : 'Kho';
+    const targetRoleKey = config.role; 
+
+    const donors = staffList.filter(s => s.gender === config.fromGender);
+    const receivers = staffList.filter(s => s.gender === config.toGender);
+
+    // Helper: Đếm số lượng ca cuối tuần hiện tại của một nhân viên
+    const getWeekendLoad = (staffId) => {
+        let count = 0;
+        Object.keys(schedule).forEach(d => {
+            if (isWeekend(parseInt(d), month, year)) {
+                const assign = schedule[d].find(a => a.staffId === staffId);
+                if (assign && isHardRole(assign.role)) count++;
+            }
+        });
+        return count;
+    };
+
+    // Helper: Đếm tổng số nghiệp vụ (để ưu tiên người ít việc)
+    const getRoleCount = (staffId) => {
+        let count = 0;
+        Object.values(schedule).forEach(dayList => {
+            const assign = dayList.find(a => a.staffId === staffId);
+            if (assign && (assign.role === targetRoleLabel || assign.role === targetRoleKey)) count++;
+        });
+        return count;
+    };
+
+    const days = Object.keys(schedule).sort((a, b) => Number(a) - Number(b));
+    const lockedStaffOnDay = {}; 
+    days.forEach(d => lockedStaffOnDay[d] = new Set());
+
+    donors.forEach(donor => {
+        let swappedCount = 0;
+
+        for (const d of days) {
+            if (swappedCount >= config.qty) break; 
+            if (lockedStaffOnDay[d].has(donor.id)) continue;
+
+            const dayList = schedule[d];
+            const donorIdx = dayList.findIndex(a => a.staffId === donor.id);
+            const donorAssign = dayList[donorIdx];
+
+            if (donorAssign && (donorAssign.role === targetRoleLabel || donorAssign.role === targetRoleKey)) {
+                
+                let bestCandidate = null;
+                let bestScore = -Infinity;
+
+                const sortedReceivers = [...receivers].sort((a, b) => getRoleCount(a.id) - getRoleCount(b.id));
+
+                for (const receiver of sortedReceivers) {
+                    if (lockedStaffOnDay[d].has(receiver.id)) continue;
+
+                    const receiverIdx = dayList.findIndex(a => a.staffId === receiver.id);
+                    const receiverAssign = dayList[receiverIdx];
+
+                    if (isHardRole(receiverAssign.role)) continue; 
+
+                    let score = 0;
+                    let isViable = true;
+                    
+                    const isDayWeekend = isWeekend(d, month, year);
+
+                    // --- LOGIC MỚI: KIỂM TRA TẢI TRỌNG CUỐI TUẦN ---
+                    if (isDayWeekend) {
+                        const currentWeekendLoad = getWeekendLoad(receiver.id);
+                        // Phạt cực nặng nếu người này đã có nhiều ca cuối tuần (>=2)
+                        // Công thức: Mỗi ca cuối tuần đang có sẽ trừ 5000 điểm
+                        score -= (currentWeekendLoad * 5000);
+                        score -= 1000; // Phạt chung vì là ngày cuối tuần
+                    } else {
+                        score += 100;
+                    }
+
+                    // P2: Liên tiếp 2 ngày
+                    if (d > 1) {
+                        const prevDay = schedule[d-1];
+                        const prevAssign = prevDay.find(a => a.staffId === receiver.id);
+                        if (prevAssign && isHardRole(prevAssign.role)) { score -= 2000; isViable = false; }
+                    }
+                    if (d < days.length) {
+                        const nextDay = schedule[Number(d)+1];
+                        if (nextDay) {
+                            const nextAssign = nextDay.find(a => a.staffId === receiver.id);
+                            if (nextAssign && isHardRole(nextAssign.role)) { score -= 2000; isViable = false; }
+                        }
+                    }
+
+                    // P3: Xoay ca
+                    if (d > 1) {
+                        const prevDay = schedule[d-1];
+                        const prevAssign = prevDay.find(a => a.staffId === receiver.id);
+                        if (prevAssign && hasRotationConflict(prevAssign.shift, donorAssign.shift)) score -= 500;
+                        else score += 50;
+                    }
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestCandidate = { ...receiver, idx: receiverIdx, currentShift: receiverAssign.shift, currentRole: receiverAssign.role };
+                    }
+                }
+
+                if (bestCandidate) {
+                    schedule[d][donorIdx].shift = bestCandidate.currentShift;
+                    schedule[d][donorIdx].role = bestCandidate.currentRole;
+                    schedule[d][donorIdx].isChanged = true;
+
+                    schedule[d][bestCandidate.idx].shift = donorAssign.shift;
+                    schedule[d][bestCandidate.idx].role = donorAssign.role;
+                    schedule[d][bestCandidate.idx].isChanged = true;
+
+                    lockedStaffOnDay[d].add(donor.id);
+                    lockedStaffOnDay[d].add(bestCandidate.id);
+
+                    logs.push(`Ngày ${d}: Đổi ${donorAssign.role} từ ${donor.name} -> ${bestCandidate.name}.`);
+                    successCount++;
+                    swappedCount++;
+                }
+            }
+        }
+    });
+
+    return { schedule, logs, count: successCount };
+}
+
+// 5. OPTIMIZE SCHEDULE
 export function optimizeSchedule(scheduleData, staffList) { 
-    return { optimizedSchedule: scheduleData, changesLog: [], finalStats: [] }; 
+    let schedule = JSON.parse(JSON.stringify(scheduleData));
+    let allLogs = [];
+    
+    const today = new Date();
+    const month = today.getMonth() + 1;
+    const year = today.getFullYear();
+
+    const fixRot = autoFixRotation(schedule, month, year);
+    if (fixRot.success) {
+        schedule = fixRot.schedule;
+        allLogs = [...allLogs, ...fixRot.logs];
+    }
+
+    const fixWeek = autoFixWeekendFairness(schedule, month, year, staffList);
+    if (fixWeek.success) {
+        schedule = fixWeek.schedule;
+        allLogs = [...allLogs, ...fixWeek.logs];
+    }
+
+    const finalStats = staffList.map(s => {
+        let roles = { tn: 0, tv: 0, kho: 0, gh: 0 };
+        let totalH = 0;
+        Object.values(schedule).forEach(dayList => {
+            const assign = dayList.find(a => a.staffId === s.id);
+            if (assign && assign.shift !== 'OFF') {
+                if (assign.role === 'tn' || assign.role === 'TN' || assign.role === 'Thu Ngân') roles.tn++;
+                else if (assign.role === 'kho' || assign.role === 'K' || assign.role === 'Kho') roles.kho++;
+                else if (assign.role === 'gh' || assign.role === 'GH' || assign.role === 'Giao Hàng') roles.gh++;
+                else roles.tv++;
+            }
+        });
+        return { id: s.id, roles };
+    });
+
+    return { 
+        optimizedSchedule: schedule, 
+        changesLog: allLogs, 
+        finalStats: finalStats 
+    };
 }
