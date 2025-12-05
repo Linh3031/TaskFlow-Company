@@ -1,14 +1,13 @@
 <script>
-  // Version 2.5 - Add Excel Export to Preview & Rename Column
+  // Version 54.5 - Remove Garbage Text
   import { createEventDispatcher } from 'svelte';
-  import { utils, writeFile } from 'xlsx'; // Import thêm xlsx
+  import { utils, writeFile } from 'xlsx';
 
   export let previewScheduleData = null;
   export let previewStats = [];
   export let optimizationLogs = [];
   export let inspectionMode = 'none';
   export let INSPECTION_OPTIONS = [];
-  
   export let checkInspectionError = (d, assign, mode) => false;
   export let getWeekendFairnessStatus = (staffId) => 0;
   export let getWeekendHardRoleCount = (staffId) => 0;
@@ -25,7 +24,6 @@
       role: 'tn',
       qty: 1
   };
-
   function onInspectionChange(e) {
       dispatch('inspectionChange', e.target.value);
   }
@@ -35,7 +33,6 @@
       dispatch('balanceGender', balanceConfig);
   }
 
-  // --- HÀM MỚI: XUẤT EXCEL TỪ PREVIEW ---
   function exportPreviewToExcel() {
       if (!previewScheduleData) return;
       const wb = utils.book_new();
@@ -59,7 +56,6 @@
                   row.push(cell);
               } else { row.push(""); }
           });
-          // Lưu ý: previewStats có thể chưa có totalHours nếu chưa tính, nên lấy an toàn
           row.push(Math.round(staff.totalHours || 0), staff.gh || 0, staff.tn || 0, staff.kho || 0, getWeekendHardRoleCount(staff.id));
           wsData.push(row);
       });
@@ -126,8 +122,8 @@
                   <tr> 
                       <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-[70] min-w-[140px] text-left pl-3 shadow">NHÂN SỰ</th> 
                       {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d} 
-                          <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d))?'bg-amber-300':''} relative group" on:click={()=>dispatch('headerClick', d)}>
-                              {d}
+                          <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none bg-amber-400 {['T7','CN'].includes(getWeekday(d))?'bg-amber-300':''} relative group" on:click={()=>dispatch('headerClick', d)}>
+                               {d}
                               {#if inspectionMode !== 'none'}
                                   {@const hasError = previewScheduleData[d].some(assign => checkInspectionError(d, assign, inspectionMode))}
                                   {#if hasError}
@@ -148,7 +144,7 @@
                   </tr> 
                   <tr>
                       {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d}
-                          <th class="p-0.5 border-l border-amber-500/30 text-[9px] {['T7','CN'].includes(getWeekday(d))?'bg-amber-300/80 text-amber-900':'bg-amber-200/50 text-slate-700'}">{getWeekday(d)}</th>
+                          <th class="p-0.5 border-l border-amber-500/30 text-[9px] bg-amber-200 {['T7','CN'].includes(getWeekday(d))?'bg-amber-300/80 text-amber-900':'text-slate-700'}">{getWeekday(d)}</th>
                       {/each}
                   </tr>
               </thead> 

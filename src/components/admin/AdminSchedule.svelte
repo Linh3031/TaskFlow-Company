@@ -1,5 +1,5 @@
 <script>
-  // Version 53.0 - Full Code (Added Backup & Restore Logic)
+  // Version 54.5 - Fix Critical Syntax Error & Remove Garbage Text
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import { db } from '../../lib/firebase';
   import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -29,9 +29,8 @@
       { target: '#month-navigator', title: '2. Chọn Tháng & Chế Độ', content: 'Chọn tháng cần làm lịch. Chuyển đổi qua lại giữa <b>Thứ 2-6</b> và <b>T7-CN</b> để nhập định mức riêng.' },
       { target: '#matrix-header-target', title: '3. Nhập Định Mức', content: 'Nhập số lượng nhân viên cần thiết cho từng bộ phận (Kho, Thu Ngân...) tại các khung giờ bên dưới.' },
       { target: '#btn-calculate', title: '4. Tính Toán Tự Động', content: 'Bấm nút này để hệ thống quy đổi nhu cầu lẻ thành các Combo ca làm việc.' },
-      { target: '#peak-mode-toggle', title: '5. Chế Độ Cao Điểm', content: 'Bật khi thiếu nhân sự để kích hoạt các ca gãy/kẹp nách.' },
-      { target: '#combo-header-target', title: '6. Tinh Chỉnh Combo', content: 'Xem kết quả quy đổi bên dưới. Bạn có thể sửa trực tiếp số lượng các ca tại đây.' },
-      { target: '#btn-preview-schedule', title: '7. Tạo & Xem Trước', content: 'Bước cuối: Tạo bảng phân ca chi tiết để kiểm tra và áp dụng.' }
+      { target: '#combo-header-target', title: '5. Tinh Chỉnh Combo', content: 'Xem kết quả quy đổi bên dưới. Bạn có thể sửa trực tiếp số lượng hoặc Thêm cột ca mới.' },
+      { target: '#btn-preview-schedule', title: '6. Tạo & Xem Trước', content: 'Bước cuối: Tạo bảng phân ca chi tiết để kiểm tra và áp dụng.' }
   ];
 
   const defaultMatrix = { c1: { kho: 0, tn: 0, tv: 0, gh: 0 }, c2: { kho: 0, tn: 0, tv: 0, gh: 0 }, c3: { kho: 0, tn: 0, tv: 0, gh: 0 }, c4: { kho: 0, tn: 0, tv: 0, gh: 0 }, c5: { kho: 0, tn: 0, tv: 0, gh: 0 }, c6: { kho: 0, tn: 0, tv: 0, gh: 0 } };
@@ -41,7 +40,11 @@
   let suggestedWeekendCombos = [];
   let activeMatrixMode = 'weekday';
   let genderConfig = { kho: 'none', tn: 'none' };
-  let isPeakMode = false;
+  
+  // Dynamic Columns State
+  const DEFAULT_COLS = ['123', '456', '23', '45', '2-5', '2345', '123456', '12-56'];
+  let customComboCols = [...DEFAULT_COLS]; 
+
   let showShortageAlert = false;
   let shortageCount = 0;
   let previewScheduleData = null;
@@ -51,8 +54,7 @@
   let inspectionMode = 'none';
   const shiftCols = [ { id: 'c1', label: 'C1 (08-09h)' }, { id: 'c2', label: 'C2 (09-12h)' }, { id: 'c3', label: 'C3 (12-15h)' }, { id: 'c4', label: 'C4 (15-18h)' }, { id: 'c5', label: 'C5 (18-21h)' }, { id: 'c6', label: 'C6 (21-21h30)' } ];
   const roleRows = [ { id: 'kho', label: 'Kho', color: 'text-orange-600 bg-orange-50 border-orange-100' }, { id: 'tn', label: 'Thu Ngân', color: 'text-purple-600 bg-purple-50 border-purple-100' }, { id: 'gh', label: 'Giao Hàng', color: 'text-blue-600 bg-blue-50 border-blue-100' }, { id: 'tv', label: 'Tư Vấn', color: 'text-gray-600 bg-gray-50 border-gray-200' } ];
-  const BASE_COLS = ['123', '456', '23', '45', '2-5', '2345', '123456'];
-  const EXTREME_COLS = ['12-56', '12-456', '123-56', '12345'];
+  
   const QUICK_SHIFTS = ['OFF', '123', '456', '23', '45', '2345'];
   const INSPECTION_OPTIONS = [ { val: 'none', label: 'Tắt soi lỗi', icon: 'visibility_off', color: 'text-gray-400' }, { val: 'gender', label: 'Soi Giới Tính', icon: 'wc', color: 'text-pink-500' }, { val: 'weekend', label: 'Công Bằng Cuối Tuần', icon: 'balance', color: 'text-indigo-600' }, { val: 'rotation', label: 'Soi Nhịp Sáng/Chiều', icon: 'sync_problem', color: 'text-orange-500' }, { val: 'fatigue', label: 'Soi Trùng Nghiệp Vụ', icon: 'battery_alert', color: 'text-red-600' } ];
   let editingShift = null; 
@@ -60,32 +62,69 @@
   let selectedStaff = null;
   let selectedDayStats = null;
   $: isDemoMode = targetStore?.includes('DEMO');
-  $: comboCols = isPeakMode ? [...BASE_COLS, ...EXTREME_COLS] : BASE_COLS;
+  
   $: activeSuggestedCombos = activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos;
   $: totalCombos = activeSuggestedCombos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
+  
   let comboTotalsMap = {};
-  $: { const map = {};
-  comboCols.forEach(code => { const items = activeSuggestedCombos.filter(c => c.code === code); map[code] = items.reduce((sum, c) => sum + (parseInt(c.qty) || 0), 0); });
-  comboTotalsMap = map; }
+  $: { 
+      const map = {};
+      customComboCols.forEach(code => { 
+          const items = activeSuggestedCombos.filter(c => c.code === code); 
+          map[code] = items.reduce((sum, c) => sum + (parseInt(c.qty) || 0), 0); 
+      });
+      comboTotalsMap = map; 
+  }
+
   $: if (scheduleStaffList) { try { staffStats = { total: scheduleStaffList.length, male: scheduleStaffList.filter(s => String(s.gender || '').trim().toLowerCase() === 'nam').length, female: scheduleStaffList.filter(s => String(s.gender || '').trim().toLowerCase() !== 'nam').length };
   } catch (e) { staffStats = { total: 0, male: 0, female: 0 };
   } }
+  
   $: if (targetStore) loadStoreData();
+  
   function checkDemoAndBlock(e) { if (isDemoMode) { e && e.preventDefault();
   alert("Tài khoản demo không có tính năng này!"); return true; } return false;
   }
-  async function loadStoreData() { if (!targetStore) return; scheduleStaffList = []; shiftMatrix = JSON.parse(JSON.stringify(defaultMatrix)); weekendMatrix = JSON.parse(JSON.stringify(defaultMatrix));
-  suggestedCombos = []; suggestedWeekendCombos = []; previewScheduleData = null; try { const staffSnap = await getDoc(doc(db, 'settings', `staff_list_${targetStore}`));
-  if (staffSnap.exists()) scheduleStaffList = staffSnap.data().staffList || []; const configSnap = await getDoc(doc(db, 'settings', `shift_matrix_${targetStore}`));
-  if (configSnap.exists()) { const data = configSnap.data(); if (data.matrix) shiftMatrix = { ...defaultMatrix, ...data.matrix }; if (data.approvedCombos) suggestedCombos = data.approvedCombos;
-  if (data.weekendMatrix) weekendMatrix = { ...defaultMatrix, ...data.weekendMatrix }; if (data.weekendCombos) suggestedWeekendCombos = data.weekendCombos; if (data.genderConfig) genderConfig = data.genderConfig;
-  } } catch (e) { console.error(e); } }
+  
+  async function loadStoreData() { 
+      if (!targetStore) return; 
+      scheduleStaffList = []; 
+      shiftMatrix = JSON.parse(JSON.stringify(defaultMatrix)); 
+      weekendMatrix = JSON.parse(JSON.stringify(defaultMatrix));
+      suggestedCombos = []; 
+      suggestedWeekendCombos = []; 
+      previewScheduleData = null; 
+      
+      try { 
+          const staffSnap = await getDoc(doc(db, 'settings', `staff_list_${targetStore}`));
+          if (staffSnap.exists()) scheduleStaffList = staffSnap.data().staffList || []; 
+          
+          const configSnap = await getDoc(doc(db, 'settings', `shift_matrix_${targetStore}`));
+          if (configSnap.exists()) { 
+              const data = configSnap.data(); 
+              if (data.matrix) shiftMatrix = { ...defaultMatrix, ...data.matrix }; 
+              if (data.approvedCombos) suggestedCombos = data.approvedCombos;
+              if (data.weekendMatrix) weekendMatrix = { ...defaultMatrix, ...data.weekendMatrix }; 
+              if (data.weekendCombos) suggestedWeekendCombos = data.weekendCombos; 
+              if (data.genderConfig) genderConfig = data.genderConfig;
+              
+              if (data.comboCols && Array.isArray(data.comboCols)) {
+                  customComboCols = data.comboCols;
+              } else {
+                  customComboCols = [...DEFAULT_COLS];
+              }
+          } 
+      } catch (e) { console.error(e); } 
+  }
+  
   function downloadScheduleSample() { const wb = utils.book_new();
   const wsData = [["Ho_Ten", "Gioi_Tinh"], ["Nguyễn Văn A", "Nam"], ["Trần Thị B", "Nữ"]]; const ws = utils.aoa_to_sheet(wsData); utils.book_append_sheet(wb, ws, "DS_Nhan_Vien");
   writeFile(wb, `Mau_Phan_Ca_${targetStore}.xlsx`); }
+  
   async function handleStaffUpload(e) { const file = e.target.files[0]; if(!file) return; isLoading = true;
   setTimeout(async () => { try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); let newStaff = []; for(let i=0; i<json.length; i++) { const row = json[i]; let name = row['Ho_Ten'] || row['Họ Tên'] || ''; let gender = row['Gioi_Tinh'] || row['Giới Tính'] || 'Nữ'; if(name) { newStaff.push({ id: String(newStaff.length+1), name: safeString(name), gender: String(gender).toLowerCase().includes('nam') ? 'Nam' : 'Nữ' }); } } if(newStaff.length > 0) { scheduleStaffList = newStaff; await setDoc(doc(db, 'settings', `staff_list_${targetStore}`), { staffList: scheduleStaffList, updatedAt: serverTimestamp() }); alert(`✅ Đã cập nhật danh sách: ${newStaff.length} nhân viên vào kho ${targetStore}.`); } else { alert(`⚠️ File không có dữ liệu hợp lệ!`); } } catch(e) { alert("Lỗi file: " + e.message); } finally { isLoading=false; e.target.value=null; } }, 100);
   }
+  
   function updateComboQty(roleLabel, comboCode, newQty) { const qtyVal = parseInt(newQty) || 0; let currentList = activeMatrixMode === 'weekday' ?
   [...suggestedCombos] : [...suggestedWeekendCombos]; const targetRoles = [roleLabel]; if (roleLabel === 'Thu Ngân') targetRoles.push('TN', 'tn');
   if (roleLabel === 'Giao Hàng') targetRoles.push('GH', 'gh'); if (roleLabel === 'Tư Vấn') targetRoles.push('TV', 'tv');
@@ -94,24 +133,47 @@
   } else if (qtyVal > 0) { currentList.push({ code: comboCode, role: roleLabel, label: `${roleLabel} ${comboCode}`, qty: qtyVal });
   } if (activeMatrixMode === 'weekday') suggestedCombos = currentList; else suggestedWeekendCombos = currentList;
   }
+  
   async function saveGenderConfig(newConfig) { if (!targetStore) return; genderConfig = newConfig;
   try { await setDoc(doc(db, 'settings', `shift_matrix_${targetStore}`), { genderConfig }, { merge: true }); } catch (e) { console.error(e);
   } }
-  function togglePeakMode() { isPeakMode = !isPeakMode; if (isPeakMode) { handleCalculateCombos(true);
-  } }
+  
+  function handleAddColumn() {
+      customComboCols = [...customComboCols, '']; 
+  }
+
+  function handleUpdateColumns(newCols) {
+      customComboCols = newCols;
+  }
+
   async function handleCalculateCombos(save = true) { if(save) isLoading = true;
   try { const clean = (m) => { const c = JSON.parse(JSON.stringify(m));
   Object.keys(c).forEach(key => { if(c[key]) ['kho', 'tn', 'tv', 'gh'].forEach(role => { let val = parseInt(c[key][role]); if (isNaN(val)) val = 0; c[key][role] = val; }); });
   return c; }; shiftMatrix = clean(shiftMatrix); weekendMatrix = clean(weekendMatrix); await tick(); showShortageAlert = false; shortageCount = 0;
   let tempWeekday = calculateCombosFromMatrix(shiftMatrix); let tempWeekend = calculateCombosFromMatrix(weekendMatrix); const checkShortage = (combos) => { const totalDemand = combos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
   return totalDemand > staffStats.total ? (totalDemand - staffStats.total) : 0; }; const s1 = checkShortage(tempWeekday); const s2 = checkShortage(tempWeekend);
-  if (s1 > 0 || s2 > 0) { shortageCount = Math.max(s1, s2); showShortageAlert = true;
-  if (isPeakMode) { suggestedCombos = suggestPeakCombos(tempWeekday, s1); suggestedWeekendCombos = suggestPeakCombos(tempWeekend, s2); } else { suggestedCombos = tempWeekday; suggestedWeekendCombos = tempWeekend;
-  } } else { suggestedCombos = tempWeekday; suggestedWeekendCombos = tempWeekend;
-  } if(save) { await setDoc(doc(db, 'settings', `shift_matrix_${targetStore}`), { matrix: shiftMatrix, approvedCombos: suggestedCombos, weekendMatrix: weekendMatrix, weekendCombos: suggestedWeekendCombos, genderConfig, updatedAt: serverTimestamp(), updatedBy: $currentUser.username });
+  
+  suggestedCombos = tempWeekday; 
+  suggestedWeekendCombos = tempWeekend;
+  
+  if (s1 > 0 || s2 > 0) { shortageCount = Math.max(s1, s2); showShortageAlert = true; } 
+  
+  if(save) { 
+      await setDoc(doc(db, 'settings', `shift_matrix_${targetStore}`), { 
+          matrix: shiftMatrix, 
+          approvedCombos: suggestedCombos, 
+          weekendMatrix: weekendMatrix, 
+          weekendCombos: suggestedWeekendCombos, 
+          genderConfig, 
+          comboCols: customComboCols, 
+          updatedAt: serverTimestamp(), 
+          updatedBy: $currentUser.username 
+      });
   } } catch (e) { alert("Lỗi tính toán: " + e.message); } finally { if(save) isLoading = false;
   } }
-  async function handleGeneratePreview() { if (totalCombos > staffStats.total && !isPeakMode) { alert(`⛔ KHÔNG THỂ TẠO LỊCH!\n\nNhu cầu đang cần ${totalCombos} vị trí, nhưng chỉ có ${staffStats.total} nhân viên.`);
+  
+  async function handleGeneratePreview() { if (totalCombos > staffStats.total) { 
+    alert(`⛔ KHÔNG THỂ TẠO LỊCH!\n\nNhu cầu đang cần ${totalCombos} vị trí, nhưng chỉ có ${staffStats.total} nhân viên.`);
   return; } if (suggestedCombos.length === 0 && suggestedWeekendCombos.length === 0) return alert("Chưa có combo nào!"); isLoading = true;
   try { let prevMonth = scheduleMonth - 1, prevYear = scheduleYear; if(prevMonth === 0) { prevMonth = 12; prevYear--;
   } let prevScheduleData = null; const prevSnap = await getDoc(doc(db, 'stores', targetStore, 'schedules', `${prevYear}-${String(prevMonth).padStart(2,'0')}`)); if(prevSnap.exists()) prevScheduleData = prevSnap.data();
@@ -124,7 +186,6 @@
   function handleManualBalance(e) {
     const config = e.detail;
     if (!previewScheduleData) return;
-    
     const params = {
         fromGender: config.direction === 'male_to_female' ? 'Nam' : 'Nữ',
         toGender: config.direction === 'male_to_female' ? 'Nữ' : 'Nam',
@@ -140,7 +201,6 @@
             previewScheduleData = result.schedule;
             optimizationLogs = [...optimizationLogs, ...result.logs];
             
-            // Update Stats
             const newRoleStats = {};
             scheduleStaffList.forEach(s => {
                 let h=0, tn=0, kho=0, gh=0;
@@ -159,7 +219,6 @@
                 if (newRoleStats[s.id]) return { ...s, ...newRoleStats[s.id] };
                 return s;
             });
-
             alert(`✅ Đã đổi thành công ${result.count} ca!`);
         } else {
             alert("⚠️ Không tìm thấy ca nào phù hợp để đổi (hoặc đã vi phạm hết các điều kiện ưu tiên).");
@@ -178,8 +237,9 @@
   }
   function isWeekendDay(d) { const date = new Date(scheduleYear, scheduleMonth - 1, d); const dayOfWeek = date.getDay();
   return (dayOfWeek === 0 || dayOfWeek === 6); }
-  function getShiftGroup(code) { const def = SHIFT_DEFINITIONS.find(s => s.code === code);
-  return def ? def.group : 'OFF'; }
+  function getShiftGroup(code) { 
+      return 'OFF'; 
+  }
   function isHardRole(roleName) { return ['Kho', 'Thu Ngân', 'Giao Hàng', 'GH', 'TN', 'K'].includes(roleName);
   }
   function getWeekday(day) { const date = new Date(scheduleYear, scheduleMonth - 1, day);
@@ -205,8 +265,7 @@
   } } return false; } if (mode === 'weekend') { if (!isWeekendDay(d) || !isHardRole(assign.role)) return false; const rowStatus = getWeekendFairnessStatus(assign.staffId);
   if (rowStatus === 1) return "Dư ca nghiệp vụ cuối tuần"; return false;
   } if (mode === 'rotation') { if (d == 1) return false; const prevAssign = previewScheduleData[d-1]?.find(a => a.staffId === assign.staffId);
-  if (!prevAssign || prevAssign.shift === 'OFF') return false; const gCurrent = getShiftGroup(assign.shift); const gPrev = getShiftGroup(prevAssign.shift);
-  if (gCurrent !== 'OFF' && gCurrent !== 'GAY' && gCurrent !== 'FULL' && gCurrent !== 'EXTREME' && gCurrent === gPrev) return `Lặp lại nhóm ca ${gCurrent}`;
+  if (!prevAssign || prevAssign.shift === 'OFF') return false; 
   return false; } if (mode === 'fatigue') { if (d == 1) return false;
   const prevAssign = previewScheduleData[d-1]?.find(a => a.staffId === assign.staffId); if (!prevAssign || !prevAssign.role) return false;
   if (isHardRole(prevAssign.role) && isHardRole(assign.role)) { return `Làm nghiệp vụ liên tiếp 2 ngày`; } return false; } return false;
@@ -214,6 +273,7 @@
   function isCellRelevant(d, assign, currentMode) { const mode = currentMode || inspectionMode; if (mode === 'none') return true;
   if (checkInspectionError(d, assign, mode)) return true; if (mode === 'weekend' && isWeekendDay(d)) return true; if (mode === 'rotation') return true;
   return false; }
+  
   function handleAutoFixRotation() { if (!previewScheduleData) return; isLoading = true;
   setTimeout(() => { const result = autoFixRotation(previewScheduleData, scheduleMonth, scheduleYear); if (result.success) { previewScheduleData = result.schedule; optimizationLogs = [...optimizationLogs, ...result.logs]; alert(`✅ Đã sửa thành công ${result.count} lỗi!`); } else { alert("✅ Hệ thống đã tối ưu."); } isLoading = false; }, 300);
   }
@@ -229,18 +289,16 @@
   function handleOptimize() { if (!previewScheduleData) return; const beforeOptimizeJSON = JSON.stringify(previewScheduleData); isLoading = true;
   setTimeout(() => { const optResult = optimizeSchedule(previewScheduleData, scheduleStaffList); const afterOptimizeJSON = JSON.stringify(optResult.optimizedSchedule); if (beforeOptimizeJSON === afterOptimizeJSON) { alert("✅ Lịch hiện tại đã tối ưu!"); isLoading = false; return; } previewScheduleData = optResult.optimizedSchedule; const newRoleStats = {}; optResult.finalStats.forEach(s => newRoleStats[s.id] = s.roles); previewStats = previewStats.map(s => { if (newRoleStats[s.id]) { return { ...s, ...newRoleStats[s.id] }; } return s; }); optimizationLogs = optResult.changesLog; isLoading = false; }, 200);
   }
-
-  // --- LOGIC MỚI: BACKUP & RESTORE ---
+  
   async function handleApplySchedule() { 
-      if (!previewScheduleData) return; 
+      if (!previewScheduleData) return;
       if (!confirm(`⚠️ XÁC NHẬN ÁP DỤNG LỊCH THÁNG ${scheduleMonth}/${scheduleYear}?`)) return;
       
-      isLoading = true; 
+      isLoading = true;
       try { 
-          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`; 
+          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`;
           const mainRef = doc(db, 'stores', targetStore, 'schedules', scheduleId);
           
-          // 1. TẠO BACKUP TRƯỚC KHI GHI
           const currentSnap = await getDoc(mainRef);
           if (currentSnap.exists()) {
               const backupRef = doc(db, 'stores', targetStore, 'schedules', `${scheduleId}_backup`);
@@ -248,53 +306,47 @@
               console.log("✅ Đã tạo backup bản lịch cũ.");
           }
 
-          // 2. GHI LỊCH MỚI
           await setDoc(mainRef, { 
-              config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig }, 
+              config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig, comboCols: customComboCols }, 
               data: previewScheduleData, 
               stats: previewStats, 
               endOffset: originalResult.endOffset, 
               updatedAt: serverTimestamp(), 
               updatedBy: $currentUser.username 
           });
-          
           alert("✅ Đã áp dụng lịch thành công!"); 
           dispatch('switchTab', 'schedule'); 
       } catch (e) { 
-          alert("Lỗi: " + e.message); 
+          alert("Lỗi: " + e.message);
       } finally { 
-          isLoading = false; 
+          isLoading = false;
       } 
   }
 
   async function handleRestoreBackup() {
       if (!confirm("⚠️ CẢNH BÁO: Bạn có chắc chắn muốn khôi phục lại phiên bản lịch trước đó?")) return;
-      
       isLoading = true;
       try {
-          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`; 
+          const scheduleId = `${scheduleYear}-${String(scheduleMonth).padStart(2,'0')}`;
           const backupRef = doc(db, 'stores', targetStore, 'schedules', `${scheduleId}_backup`);
           const backupSnap = await getDoc(backupRef);
-
           if (!backupSnap.exists()) {
               alert("❌ Không tìm thấy bản sao lưu nào để khôi phục.");
               isLoading = false;
               return;
           }
 
-          // Khôi phục: Ghi đè bản backup vào bản chính
           const mainRef = doc(db, 'stores', targetStore, 'schedules', scheduleId);
           await setDoc(mainRef, backupSnap.data());
 
           alert("✅ Đã khôi phục thành công lịch cũ!");
-          dispatch('switchTab', 'schedule'); // Load lại tab lịch
+          dispatch('switchTab', 'schedule');
       } catch (e) {
           alert("Lỗi khôi phục: " + e.message);
       } finally {
           isLoading = false;
       }
   }
-  // -----------------------------------
 
   function openEditPreviewShift(day, staffId, assign) { const staffInfo = previewStats.find(s => s.id === staffId);
   tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo ?
@@ -320,7 +372,7 @@
   }
   function showDayStats(day) { if (!previewScheduleData || !previewScheduleData[day]) return; const dayData = previewScheduleData[day];
   const roles = ['Kho', 'Thu Ngân', 'GH', 'TV']; const matrix = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {}, 'TV': {} };
-  const activeShifts = new Set(); let totalHours = 0; dayData.forEach(assign => { if (assign.shift !== 'OFF') { activeShifts.add(assign.shift); const def = SHIFT_DEFINITIONS.find(s => s.code === assign.shift); if (def) totalHours += def.hours; } });
+  const activeShifts = new Set(); let totalHours = 0; dayData.forEach(assign => { if (assign.shift !== 'OFF') { activeShifts.add(assign.shift); } });
   const cols = Array.from(activeShifts).sort(); roles.forEach(r => { cols.forEach(c => matrix[r][c] = 0); matrix[r]['Total'] = 0; });
   dayData.forEach(assign => { if (assign.shift === 'OFF') return; let r = assign.role || 'TV'; if (r === 'TN') r = 'Thu Ngân'; if (matrix[r]) { matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; matrix[r]['Total']++; } });
   selectedDayStats = { day, weekday: getWeekday(day), cols, matrix, roles, totalHours }; }
@@ -337,31 +389,17 @@
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div class="flex items-center gap-2">
             <div id="toolbar-actions" class="flex items-center gap-2">
-                <button 
-                    class="bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold py-2 px-3 rounded-lg text-xs transition-colors 
-                    flex items-center gap-1 border border-blue-100" 
-                    on:click={(e) => checkDemoAndBlock(e) ||
-                    downloadScheduleSample()}
-                >
-                    Tải Mẫu
-                </button>
+                <button class="bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-blue-100" on:click={(e) => checkDemoAndBlock(e) || downloadScheduleSample()}>Tải Mẫu</button>
                 <label class="bg-blue-600 text-white hover:bg-blue-700 font-bold py-2 px-3 rounded-lg text-xs cursor-pointer flex items-center gap-1 shadow-lg shadow-blue-200 transition-all active:scale-95">
-                    <span class="material-icons-round text-sm">upload</span>
-                    Upload
+                    <span class="material-icons-round text-sm">upload</span> Upload
                     <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={(e) => handleStaffUpload(e)}>
                 </label>
-
                 <div class="w-px h-8 bg-slate-200 mx-1"></div>
-
-                <button 
-                    class="bg-gray-100 text-gray-600 hover:bg-gray-200 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-gray-200"
-                    on:click={()=>showStoreConfig=true}
-                >
+                <button class="bg-gray-100 text-gray-600 hover:bg-gray-200 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-gray-200" on:click={()=>showStoreConfig=true}>
                     <span class="material-icons-round text-sm">settings</span> Khai báo giờ công
                 </button>
             </div>
         </div>
-
         <div class="flex items-center gap-2">
              <button id="btn-help-schedule" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400" on:click={() => showTour = true}><span class="material-icons-round">help_outline</span></button>
         </div>
@@ -373,12 +411,11 @@
             bind:shiftMatrix
             bind:weekendMatrix
             bind:activeMatrixMode
-            bind:isPeakMode
             bind:scheduleMonth
             bind:scheduleYear
             {shiftCols}
             {roleRows}
-            {comboCols}
+            comboCols={customComboCols}
             {activeSuggestedCombos}
             {comboTotalsMap}
             {genderConfig}
@@ -388,11 +425,11 @@
                 else { if(scheduleMonth==1){scheduleMonth=12;scheduleYear--}else{scheduleMonth--} }
             }}
             on:calculate={() => handleCalculateCombos(true)}
-            on:togglePeak={togglePeakMode}
             on:updateCombo={(e) => updateComboQty(e.detail.role, e.detail.code, e.detail.qty)}
-            on:configChange={(e) => { const newConf 
-            = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
+            on:configChange={(e) => { const newConf = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
             on:preview={handleGeneratePreview}
+            on:addCol={handleAddColumn}
+            on:updateCols={(e) => handleUpdateColumns(e.detail)}
         />
     </div>
 
@@ -437,8 +474,7 @@
                     <h3 class="font-bold text-lg text-slate-800">Sửa Ca: {editingShift.name}</h3>
                     <p class="text-xs text-gray-500">Ngày {editingShift.day} - Hiện tại: <span class="font-bold">{tempEditingShift.shift}</span></p>
                 </div> 
-                {#if editingShift.shift !== editingShift.originalShift ||
-                editingShift.role !== editingShift.originalRole} 
+                {#if editingShift.shift !== editingShift.originalShift || editingShift.role !== editingShift.originalRole} 
                     <button class="text-xs text-red-600 hover:underline font-bold bg-red-50 px-2 py-1 rounded" on:click={resetEditPreviewShift}>Reset về gốc</button> 
                 {/if} 
             </div> 
@@ -447,15 +483,11 @@
                     <label class="block text-xs font-bold text-gray-500 mb-2">Chọn Ca Nhanh</label> 
                     <div class="grid grid-cols-3 gap-2 mb-2"> 
                         {#each QUICK_SHIFTS as s} 
-                            <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true;
-                            editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s;
-                            } }}>{s}</button> 
+                            <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true; editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s; } }}>{s}</button> 
                         {/each} 
                     </div> 
                     <label class="block text-xs font-bold text-gray-500 mb-1 mt-3">Ca Tùy Chỉnh</label> 
-                    <input type="text" value={editingShift.isOFF 
-                    ? 'OFF' : editingShift.shift} on:input={(e) => { if(!editingShift.isOFF) editingShift.shift = e.target.value;
-                    }} disabled={editingShift.isOFF} class="w-full p-2.5 border rounded-lg text-center font-bold text-sm transition-colors {editingShift.isOFF ? 'bg-red-600 text-yellow-300 border-red-600 cursor-not-allowed opacity-100' : 'bg-white text-slate-800 border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200'}" placeholder="Nhập mã ca (vd: 12-56)"> 
+                    <input type="text" value={editingShift.isOFF ? 'OFF' : editingShift.shift} on:input={(e) => { if(!editingShift.isOFF) editingShift.shift = e.target.value; }} disabled={editingShift.isOFF} class="w-full p-2.5 border rounded-lg text-center font-bold text-sm transition-colors {editingShift.isOFF ? 'bg-red-600 text-yellow-300 border-red-600 cursor-not-allowed opacity-100' : 'bg-white text-slate-800 border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200'}" placeholder="Nhập mã ca (vd: 12-56)"> 
                 </div> 
                 {#if !editingShift.isOFF} 
                     <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-fadeIn"> 
@@ -485,14 +517,10 @@
             <div class="p-4 bg-indigo-500 text-white shrink-0"> 
                 <h3 class="font-bold text-lg">{selectedStaff.name}</h3> 
                 <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded"> 
-                    <span>{Math.round(selectedStaff.stats.totalHours) ||
-                    0} Giờ</span> 
-                    <span class="text-blue-100">GH: {selectedStaff.stats.gh ||
-                    0}</span> 
-                    <span class="text-purple-100">TN: {selectedStaff.stats.tn ||
-                    0}</span> 
-                    <span class="text-orange-100">K: {selectedStaff.stats.kho ||
-                    0}</span> 
+                    <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span> 
+                    <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span> 
+                    <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span> 
+                    <span class="text-orange-100">K: {selectedStaff.stats.kho || 0}</span> 
                 </div> 
             </div> 
             <div class="flex-1 overflow-y-auto p-3 bg-slate-100"> 
@@ -513,9 +541,7 @@
                     {/each} 
                 </div> 
             </div> 
-            <div class="p-3 border-t bg-white text-center">
-                <button class="w-full py-2 bg-gray-100 rounded text-gray-600 font-bold text-sm" on:click={()=>selectedStaff=null}>Đóng</button>
-            </div> 
+            <div class="p-3 border-t bg-white text-center"><button class="w-full py-2 bg-gray-100 rounded text-gray-600 font-bold text-sm" on:click={()=>selectedStaff=null}>Đóng</button></div> 
         </div> 
     </div> 
 {/if}
@@ -529,30 +555,17 @@
             </div> 
             <div class="p-5 overflow-x-auto"> 
                 <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200"> 
-                    <thead class="bg-slate-50 text-slate-500">
-                        <tr>
-                            <th class="p-3 text-left font-bold border-b border-r border-slate-200">Bộ Phận</th>
-                            {#each selectedDayStats.cols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[50px]"><div class="font-black text-slate-700">{col}</div></th>{/each}
-                            <th class="p-3 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700">Tổng</th>
-                        </tr>
-                    </thead> 
+                    <thead class="bg-slate-50 text-slate-500"><tr><th class="p-3 text-left font-bold border-b border-r border-slate-200">Bộ Phận</th>{#each selectedDayStats.cols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[50px]"><div class="font-black text-slate-700">{col}</div></th>{/each}<th class="p-3 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700">Tổng</th></tr></thead> 
                     <tbody> 
                         {#each selectedDayStats.roles as role} 
                             <tr class="hover:bg-slate-50 transition-colors"> 
                                 <td class="p-3 font-bold border-r border-slate-100 {role==='GH'?'text-blue-600':(role==='Thu Ngân'?'text-purple-600':(role==='Kho'?'text-orange-600':'text-gray-600'))}">{role}</td> 
-                                {#each selectedDayStats.cols as col}<td class="p-2 border-r border-slate-100 text-center font-mono 
-                                {selectedDayStats.matrix[role][col]>0?'font-bold text-slate-800':'text-gray-300'}">{selectedDayStats.matrix[role][col] || '-'}</td>{/each} 
+                                {#each selectedDayStats.cols as col}<td class="p-2 border-r border-slate-100 text-center font-mono {selectedDayStats.matrix[role][col]>0?'font-bold text-slate-800':'text-gray-300'}">{selectedDayStats.matrix[role][col] || '-'}</td>{/each} 
                                 <td class="p-3 text-center font-black text-slate-700 bg-slate-50 border-l border-slate-100">{selectedDayStats.matrix[role]['Total']}</td> 
                             </tr> 
                         {/each} 
                     </tbody> 
-                    <tfoot class="bg-slate-800 text-slate-300 font-bold">
-                        <tr>
-                            <td class="p-3 text-right text-xs uppercase tracking-wider">Tổng Cộng</td>
-                            {#each selectedDayStats.cols as col}<td class="p-3 text-center text-yellow-400 font-mono text-lg">{getDayColTotal(col)}</td>{/each}
-                            <td class="p-3 text-center text-white text-xl bg-slate-900">{getDayGrandTotal()}</td>
-                        </tr>
-                    </tfoot> 
+                    <tfoot class="bg-slate-800 text-slate-300 font-bold"><tr><td class="p-3 text-right text-xs uppercase tracking-wider">Tổng Cộng</td>{#each selectedDayStats.cols as col}<td class="p-3 text-center text-yellow-400 font-mono text-lg">{getDayColTotal(col)}</td>{/each}<td class="p-3 text-center text-white text-xl bg-slate-900">{getDayGrandTotal()}</td></tr></tfoot> 
                 </table> 
             </div> 
         </div> 

@@ -1,9 +1,9 @@
 <script>
-  // Version 7.1 - Fix Super Admin Setup Logic
+  // Version 7.4 - Fix Invalid ID Error (Sanitize Slash Character)
   import { db } from '../lib/firebase';
-  import { collection, getDocs, query, where } from 'firebase/firestore';
-  import { setUser } from '../lib/stores.js';
-  import { safeString } from '../lib/utils.js';
+  import { collection, getDocs, query, where, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
+  import { setUser, DEFAULT_TEMPLATE } from '../lib/stores.js';
+  import { safeString, getTodayStr } from '../lib/utils.js';
   
   let username = '';
   let password = '';
@@ -13,9 +13,129 @@
   let isLoading = false;
 
   const tourKey = 'taskflow_v6_general_tour_seen';
-  
-  // Hàm seed data giữ nguyên nếu có
-  async function seedDemoData() { /* ... */ }
+
+  // --- HÀM TẠO DỮ LIỆU DEMO ---
+  async function seedDemoData() {
+      const demoStoreId = 'DEMO_1';
+      const todayStr = getTodayStr();
+      const dateObj = new Date();
+      const monthStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+      const batch = writeBatch(db);
+
+      console.log("⏳ Đang khởi tạo dữ liệu Demo...");
+
+      // 1. TẠO CÔNG VIỆC MẪU (TASKS)
+      // Dùng template chuẩn (giống kho 908)
+      const types = ['warehouse', 'cashier'];
+      types.forEach(type => {
+          (DEFAULT_TEMPLATE[type] || []).forEach(tpl => {
+              // FIX LỖI: Chuẩn hóa ID kỹ càng (Bỏ dấu, bỏ ký tự đặc biệt như /)
+              const cleanTitle = tpl.title
+                  .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Bỏ dấu tiếng Việt
+                  .replace(/[^a-zA-Z0-9]/g, "") // Bỏ hết ký tự lạ (/, -, dấu cách...)
+                  .toLowerCase();
+
+              const taskId = `${demoStoreId}_${todayStr}_${type}_${cleanTitle}`;
+              const taskRef = doc(db, 'tasks', taskId);
+              
+              batch.set(taskRef, {
+                  title: tpl.title,
+                  timeSlot: tpl.time,
+                  isImportant: tpl.isImportant || false,
+                  type: type,
+                  storeId: demoStoreId,
+                  date: todayStr,
+                  completed: false,
+                  createdBy: 'System Demo',
+                  timestamp: serverTimestamp()
+              });
+          });
+      });
+
+      // Thêm vài việc Bàn Giao mẫu
+      const handovers = [
+          { t: "Giao chìa khóa tủ két cho ca sau", time: "12:00" },
+          { t: "Lưu ý: Khách VIP cọc đơn hàng #999", time: "14:30" }
+      ];
+      handovers.forEach((h, i) => {
+          const hId = `${demoStoreId}_${todayStr}_handover_demo_${i}`;
+          batch.set(doc(db, 'tasks', hId), {
+              title: h.t,
+              deadline: `${todayStr}T${h.time}`,
+              type: 'handover',
+              storeId: demoStoreId,
+              date: todayStr,
+              completed: false,
+              createdBy: 'Quản Lý Demo',
+              timestamp: serverTimestamp()
+          });
+      });
+
+      // 2. TẠO DANH SÁCH NHÂN VIÊN MẪU
+      const demoStaff = [
+          { id: 'demo_nv1', name: 'Nguyễn Văn An', gender: 'Nam' },
+          { id: 'demo_nv2', name: 'Trần Thị Bích', gender: 'Nữ' },
+          { id: 'demo_nv3', name: 'Lê Hoàng Cường', gender: 'Nam' },
+          { id: 'demo_nv4', name: 'Phạm Thu Dung', gender: 'Nữ' },
+          { id: 'demo_nv5', name: 'Vũ Minh Em', gender: 'Nam' }
+      ];
+      batch.set(doc(db, 'settings', `staff_list_${demoStoreId}`), {
+          staffList: demoStaff,
+          updatedAt: serverTimestamp()
+      });
+
+      // 3. TẠO CẤU HÌNH CA & LỊCH LÀM VIỆC THÁNG NÀY
+      // Cấu hình Matrix
+      batch.set(doc(db, 'settings', `shift_matrix_${demoStoreId}`), {
+          genderConfig: { kho: 'mixed', tn: 'mixed' },
+          comboCols: ['123', '456', '23', '45', '2-5'],
+          matrix: {}, 
+          updatedAt: serverTimestamp()
+      });
+
+      // Tạo Lịch (Schedule) giả lập
+      const daysInMonth = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate();
+      const scheduleData = {};
+      
+      for (let d = 1; d <= daysInMonth; d++) {
+          const dayData = demoStaff.map((s, idx) => {
+              // Thuật toán gán ca xoay vòng đơn giản để demo: 123 -> 456 -> OFF
+              const pattern = (d + idx) % 3; 
+              let shift = 'OFF', role = '';
+              
+              if (pattern === 0) { shift = '123'; role = (idx % 2 === 0) ? 'Kho' : 'Thu Ngân'; }
+              else if (pattern === 1) { shift = '456'; role = (idx % 2 !== 0) ? 'Kho' : 'Thu Ngân'; }
+              
+              return {
+                  staffId: s.id, name: s.name, gender: s.gender,
+                  shift: shift, role: role,
+                  originalShift: shift, originalRole: role
+              };
+          });
+          scheduleData[d] = dayData;
+      }
+
+      // Tính Stats giả
+      const stats = demoStaff.map(s => ({
+          id: s.id, name: s.name, gender: s.gender,
+          totalHours: 150, gh: 5, tn: 10, kho: 10 
+      }));
+
+      batch.set(doc(db, 'stores', demoStoreId, 'schedules', monthStr), {
+          data: scheduleData,
+          stats: stats,
+          config: { matrix: {}, approvedCombos: [] },
+          updatedAt: serverTimestamp()
+      });
+
+      try {
+          await batch.commit();
+          console.log("✅ Đã tạo xong dữ liệu Demo!");
+      } catch (e) {
+          console.error("Lỗi tạo Demo:", e);
+          throw e; // Ném lỗi ra để hiển thị alert bên dưới
+      }
+  }
 
   async function handleLogin() {
     isLoading = true;
@@ -29,7 +149,7 @@
             username: 'setup', 
             name: 'System Setup', 
             role: 'super_admin', 
-            storeIds: [], // Để rỗng: Không thuộc kho nào -> Thấy tất cả
+            storeIds: [], 
             storeId: '' 
         });
         return;
@@ -38,11 +158,18 @@
 
     if (cleanU === 'demo' && cleanP === '123456') {
         try {
-            // Logic demo giữ nguyên
+            // TẠO DỮ LIỆU TRƯỚC KHI VÀO
+            await seedDemoData();
+            
             localStorage.removeItem(tourKey);
-            setUser({ username: 'demo', name: 'Quản Lý Demo', role: 'admin', storeIds: ['DEMO_1', 'DEMO_2'], storeId: 'DEMO_1' });
+            setUser({ username: 'demo', name: 'Quản Lý Demo', role: 'admin', storeIds: ['DEMO_1'], storeId: 'DEMO_1' });
             return;
-        } catch(e) { console.error(e); }
+        } catch(e) { 
+            console.error(e);
+            errorMsg = "Lỗi khởi tạo Demo: " + e.message;
+            isLoading = false;
+            return;
+        }
     }
 
     try {
@@ -50,7 +177,7 @@
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) { 
-          errorMsg = 'Tài khoản không tồn tại!'; 
+          errorMsg = 'Tài khoản không tồn tại!';
           isLoading = false; 
           return;
       }
@@ -68,16 +195,15 @@
                     foundUser.storeIds = stores;
                 }
             }
-        }
+         }
       });
 
       if (foundUser) setUser(foundUser);
       else errorMsg = isSuperAdminLogin ? 'Bạn không có quyền Super Admin!' : 'Sai mật khẩu!';
-
     } catch (err) { 
-        errorMsg = err.message; 
+        errorMsg = err.message;
     } finally { 
-        isLoading = false; 
+        isLoading = false;
     }
   }
 </script>
@@ -112,12 +238,18 @@
       <button type="submit" class="btn-grad" disabled={isLoading}>{isLoading?'...':(isSuperAdminLogin?'LOGIN ADMIN':'VÀO KHO')}</button>
       <p class="error-msg" role="alert">{errorMsg}</p>
       
-      <div class="mt-4 text-xs text-gray-500">
-          Quên mật khẩu? Vui lòng liên hệ <b class="text-purple-600">Quản lý kho</b> để được cấp lại.
+      <div class="mt-4 space-y-2">
+          <div class="text-xs text-gray-500">
+              Quên mật khẩu? Vui lòng liên hệ <b class="text-purple-600">Quản lý kho</b> để được cấp lại.
+          </div>
+          
+          <div class="text-xs text-gray-500">
+              Liên hệ <b class="text-purple-600">3031</b> để tạo tài khoản chính thức miễn phí
+          </div>
       </div>
       
       <div class="mt-4 text-xs text-gray-400 pt-2 border-t border-dashed border-gray-200">
-          Demo: <b>demo</b> / <b>123456</b>
+          Đăng nhập để xem tính năng Demo : <b>demo</b>/<b>123456</b>
       </div>
     </form>
   </div>

@@ -1,5 +1,5 @@
 <script>
-  // Version 10.4 - CLEAN & STABLE (Fixed ID logic kept, Debug tools removed)
+  // Version 10.5 - Fix Checklist Init Logic (Support Future Dates & Prevent Race Condition)
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore'; 
@@ -20,6 +20,7 @@
   let showTaskModal = false;
   let selectedTask = null;
   let noteInput = '';
+  
   let selectedDate = getTodayStr();
   
   let activeStoreId = '';
@@ -37,7 +38,6 @@
   let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
-  
   let hasCheckedInit = false; 
 
   // --- LOGIC HIỂN THỊ NGÀY THÁNG ---
@@ -92,24 +92,35 @@
 
   $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
 
-  // TỰ ĐỘNG KHỞI TẠO (CHẠY NGẦM AN TOÀN)
-  $: if ($currentUser && activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks) {
+  // --- FIX LOGIC KHỞI TẠO ---
+  // 1. Chỉ chạy khi TaskTemplate có dữ liệu thật (keys > 0)
+  // 2. hasCheckedInit chỉ bật khi đã chạy xong logic
+  $: if ($currentUser && activeStoreId && $taskTemplate && Object.keys($taskTemplate).length > 0 && $currentTasks) {
        if (!hasCheckedInit) {
+           // Truyền selectedDate vào để hỗ trợ tạo lịch cho tương lai
            initDailyTasksSafe(activeStoreId, selectedDate, $currentTasks, $taskTemplate);
        }
   }
 
-  // === HÀM SINH ID CỐ ĐỊNH (CỐT LÕI CỦA VIỆC CHỐNG TRÙNG) ===
+  // === HÀM SINH ID CỐ ĐỊNH (CHỐNG TRÙNG LẶP TUYỆT ĐỐI) ===
   function generateFixedID(storeId, dateStr, type, title) {
       const cleanTitle = title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
       return `${storeId}_${dateStr}_${type}_${cleanTitle}`;
   }
 
   async function initDailyTasksSafe(storeId, dateStr, currentTasks, template) {
-      if (dateStr !== getTodayStr()) return;
-      hasCheckedInit = true;
+      // FIX: Cho phép tạo task cho hôm nay VÀ tương lai
+      // Không tạo lại quá khứ để bảo toàn lịch sử
+      if (dateStr < getTodayStr()) {
+          hasCheckedInit = true; // Đánh dấu đã check để không loop
+          return;
+      }
 
-      const dayOfWeek = new Date().getDay();
+      hasCheckedInit = true; // Đánh dấu ngay để chặn các lần gọi dư thừa
+
+      const targetDate = new Date(dateStr);
+      const dayOfWeek = targetDate.getDay(); // Lấy thứ của ngày đang chọn (không phải hôm nay)
+      
       const batch = writeBatch(db);
       let hasUpdates = false;
       const types = ['warehouse', 'cashier'];
@@ -119,24 +130,27 @@
           templateItems.forEach(tpl => {
               if (tpl.days && tpl.days.includes(dayOfWeek)) {
                   
+                  // ID cố định -> Chìa khóa chống trùng lặp (x2, x3)
                   const fixedID = generateFixedID(storeId, dateStr, type, tpl.title);
                   
-                  // Kiểm tra trùng lặp
+                  // Kiểm tra kỹ trong danh sách hiện tại
                   const existsByID = currentTasks.some(t => t.id === fixedID);
+                  
+                  // (Optional) Kiểm tra theo Title đề phòng ID cũ khác format, nhưng ID fixed là quan trọng nhất
                   const existsByTitle = currentTasks.some(t => 
                       t.title.trim().toLowerCase() === tpl.title.trim().toLowerCase() && 
                       t.type === type
                   );
 
                   if (!existsByID && !existsByTitle) {
-                      const docRef = doc(db, 'tasks', fixedID);
+                      const docRef = doc(db, 'tasks', fixedID); // Dùng set với ID cố định
                       batch.set(docRef, {
                           title: tpl.title.trim(),
                           timeSlot: tpl.time,
                           isImportant: tpl.isImportant || false,
                           type: type,
                           storeId: storeId,
-                          date: dateStr,
+                          date: dateStr, // Ngày của công việc (có thể là tương lai)
                           completed: false,
                           createdBy: 'System',
                           timestamp: serverTimestamp()
@@ -148,19 +162,24 @@
       });
 
       if (hasUpdates) {
-          console.log("⚡ Đang đồng bộ công việc thiếu...");
+          console.log(`⚡ Đang khởi tạo công việc cho ngày ${dateStr}...`);
           try { await batch.commit(); } catch(e) { console.error(e); }
+      } else {
+          // console.log("✅ Đã đồng bộ, không có việc mới.");
       }
   }
 
   function loadDataForUser(storeId, dateStr) {
-      if(unsubTemplate) unsubTemplate(); 
+      if(unsubTemplate) unsubTemplate();
       if(unsubTasks) unsubTasks();
 
+      // Load Template
       unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
-          taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
+          // Luôn set object rỗng nếu chưa có data để tránh lỗi undefined
+          taskTemplate.set(docSnap.exists() ? docSnap.data() : {}); 
       });
 
+      // Load Task theo ngày chọn
       const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
       unsubTasks = onSnapshot(q, (snapshot) => {
           const tasks = [];
@@ -238,7 +257,7 @@
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
                  {#if $currentUser.role === 'super_admin'}
-                    🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
+                     🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
@@ -247,7 +266,7 @@
                  {/if}
               </h3>
               {#if activeTab !== 'schedule'}
-                   <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+                <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
            </div>
            
