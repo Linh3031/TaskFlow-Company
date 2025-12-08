@@ -1,10 +1,10 @@
 <script>
-  // Version 38.0 - Added Restore Backup & Renamed Column
+  // Version 39.0 - Added Mobile-Friendly Staff Details List
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
-  import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore'; // Thêm setDoc
+  import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
   import { currentUser } from '../lib/stores';
-  import { utils, writeFile } from 'xlsx'; 
+  import { utils, writeFile } from 'xlsx';
   import TourGuide from './TourGuide.svelte';
 
   export let activeTab;
@@ -25,8 +25,7 @@
   $: if (myStores.length > 0 && !selectedViewStore) { selectedViewStore = myStores[0]; }
 
   let unsubscribe = () => {};
-  $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr) { loadSchedule(currentMonthStr, selectedViewStore);
-  }
+  $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr) { loadSchedule(currentMonthStr, selectedViewStore); }
 
   async function loadSchedule(monthStr, storeId) {
       scheduleData = null; loading = true;
@@ -39,15 +38,13 @@
               if(snap.exists()) { scheduleData = snap.data(); } 
               else { scheduleData = null; }
           });
-      } catch (e) { loading = false; errorMsg = e.message;
-      }
+      } catch (e) { loading = false; errorMsg = e.message; }
   }
 
   // --- TÍNH NĂNG MỚI: KHÔI PHỤC LỊCH (CHỈ ADMIN) ---
   async function handleRestoreBackup() {
       if (!isAdmin) return;
       if (!confirm(`⚠️ CẢNH BÁO: Bạn muốn khôi phục lại phiên bản lịch CŨ của tháng ${viewMonth}/${viewYear}?\n\nDữ liệu hiện tại sẽ bị ghi đè!`)) return;
-      
       loading = true;
       try {
           const backupRef = doc(db, 'stores', selectedViewStore, 'schedules', `${currentMonthStr}_backup`);
@@ -102,6 +99,7 @@
   assign.originalShift : assign.shift }; editingShift = JSON.parse(JSON.stringify(tempEditingShift)); }
   function resetEditShift() { if (!editingShift) return; editingShift.shift = editingShift.originalShift;
   editingShift.role = editingShift.originalRole; editingShift.isOFF = editingShift.shift === 'OFF'; }
+  
   async function saveShiftChange() { if (!editingShift || !scheduleData) return;
   if (editingShift.role === 'GH' && editingShift.gender !== 'Nam') { if (!confirm(`⚠️ CẢNH BÁO: Nhân viên ${editingShift.name} là NỮ.\nVị trí Giao Hàng thường yêu cầu NAM.\n\nBạn có chắc chắn muốn gán không?`)) return;
   } const approvedCombos = scheduleData.config?.approvedCombos || []; if (approvedCombos.length > 0 && !editingShift.isOFF) { const dayKey = String(editingShift.day);
@@ -125,12 +123,49 @@
   editingShift = null; } catch (e) { alert("Lỗi: " + e.message);
   } } }
   
-  function showDayStats(day) { if (!scheduleData || !scheduleData.data[day]) return; const dayData = scheduleData.data[day];
-  const roles = ['Kho', 'Thu Ngân', 'GH', 'TV']; const matrix = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {}, 'TV': {} };
-  const activeShifts = new Set(); dayData.forEach(assign => { if (assign.shift !== 'OFF') activeShifts.add(assign.shift); }); const cols = Array.from(activeShifts).sort();
-  roles.forEach(r => { cols.forEach(c => matrix[r][c] = 0); matrix[r]['Total'] = 0; });
-  dayData.forEach(assign => { if (assign.shift === 'OFF') return; let r = assign.role || 'TV'; if (r === 'TN') r = 'Thu Ngân'; if (matrix[r]) { matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; matrix[r]['Total']++; } });
-  selectedDayStats = { day, weekday: getWeekday(day), cols, matrix, roles }; }
+  function showDayStats(day) { 
+      if (!scheduleData || !scheduleData.data[day]) return; 
+      const dayData = scheduleData.data[day];
+
+      // 1. Logic cũ: Ma trận số lượng
+      const roles = ['Kho', 'Thu Ngân', 'GH', 'TV']; 
+      const matrix = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {}, 'TV': {} };
+      const activeShifts = new Set(); 
+      dayData.forEach(assign => { if (assign.shift !== 'OFF') activeShifts.add(assign.shift); }); 
+      const cols = Array.from(activeShifts).sort();
+      roles.forEach(r => { cols.forEach(c => matrix[r][c] = 0); matrix[r]['Total'] = 0; });
+      
+      dayData.forEach(assign => { 
+          if (assign.shift === 'OFF') return; 
+          let r = assign.role || 'TV'; 
+          if (r === 'TN') r = 'Thu Ngân'; 
+          if (matrix[r]) { 
+              matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; 
+              matrix[r]['Total']++; 
+          } 
+      });
+
+      // 2. Logic Mới: Chi tiết tên nhân sự
+      const targetRoles = ['Kho', 'Thu Ngân', 'GH']; 
+      const details = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {} };
+
+      dayData.forEach(assign => {
+          if (assign.shift === 'OFF') return;
+          
+          let r = assign.role || 'TV';
+          if (r === 'TN') r = 'Thu Ngân';
+          if (r === 'K') r = 'Kho';
+          if (r === 'Giao Hàng') r = 'GH';
+
+          if (targetRoles.includes(r)) {
+              if (!details[r][assign.shift]) details[r][assign.shift] = [];
+              details[r][assign.shift].push(assign.name);
+          }
+      });
+
+      selectedDayStats = { day, weekday: getWeekday(day), cols, matrix, roles, details }; 
+  }
+
   function getDayColTotal(col) { return selectedDayStats ?
   selectedDayStats.roles.reduce((sum, r) => sum + (selectedDayStats.matrix[r][col]||0), 0) : 0; }
   function getDayGrandTotal() { return selectedDayStats ?
@@ -158,7 +193,7 @@
       const wsData = [];
       const row1 = ["NHÂN SỰ"];
       days.forEach(d => row1.push(d));
-      row1.push("Tổng Giờ", "GH", "TN", "K", "Ca cuối tuần"); // CẬP NHẬT TÊN CỘT
+      row1.push("Tổng Giờ", "GH", "TN", "K", "Ca cuối tuần"); 
       wsData.push(row1);
       const row2 = [""];
       days.forEach(d => row2.push(getWeekday(d)));
@@ -216,13 +251,13 @@
                 <button class="flex items-center gap-2 bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-slate-300 transition-all" on:click={handleRestoreBackup} title="Hoàn tác về phiên bản trước khi áp dụng">
                     <span class="material-icons-round text-sm">history</span> Khôi Phục
                 </button>
-            {/if}
+             {/if}
 
             <button class="flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-green-700 transition-all" on:click={exportToExcel}>
                 <span class="material-icons-round text-sm">download</span> Xuất Excel
             </button>
             <button class="flex items-center justify-center bg-purple-500 text-white w-8 h-8 rounded-lg shadow hover:bg-purple-600 transition-all" on:click={() => showScheduleTour = true} title="Hướng dẫn xem lịch">
-                <span class="material-icons-round text-lg">help_outline</span>
+                 <span class="material-icons-round text-lg">help_outline</span>
             </button>
         </div>
     {/if}
@@ -248,7 +283,7 @@
                 <tr>
                     <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-40 min-w-[140px] text-left pl-3 shadow">NHÂN SỰ</th>
                     {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
-                        <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-300' : ''}" on:click={()=>showDayStats(d)}>{d}</th>
+                         <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-300' : ''}" on:click={()=>showDayStats(d)}>{d}</th>
                     {/each}
                     <th rowspan="2" class="p-2 w-12 bg-amber-100 text-[10px] border-l border-amber-300 font-bold">Giờ</th>
                     <th rowspan="2" class="p-2 w-10 bg-blue-100 text-[10px] border-l border-amber-300 font-bold text-blue-800">GH</th>
@@ -256,12 +291,12 @@
                     <th rowspan="2" class="p-2 w-10 bg-orange-100 text-[10px] border-l border-amber-300 font-bold text-orange-800">K</th>
                     <th rowspan="2" class="p-2 w-14 bg-indigo-100 text-[10px] border-l border-amber-300 font-bold text-indigo-800" title="Số ca nghiệp vụ T7/CN">Ca<br>cuối tuần</th>
                 </tr>
-                <tr>
+                 <tr>
                     {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
                         <th class="p-0.5 border-l border-amber-500/30 text-[9px] {['T7','CN'].includes(getWeekday(d))?'bg-amber-300/80 text-amber-900':'bg-amber-200/50 text-slate-700'}">{getWeekday(d)}</th>
                     {/each}
                 </tr>
-            </thead>
+             </thead>
             <tbody class="divide-y text-xs">
                 {#each scheduleData.stats as staff, i}
                     {@const weCount = getWeekendHardRoleCount(staff.id)}
@@ -272,12 +307,12 @@
                         {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
                             {@const assign = (scheduleData.data[d]||[]).find(x => x.staffId === staff.id)}
                               <td class="p-0.5 border-l border-gray-100 h-10 align-middle {isAdmin ? 'cursor-pointer hover:bg-gray-100' : ''} {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-50/50' : ''}" on:click={() => openEditShift(d, staff.id, assign)}>
-                                  {#if assign}
+                                   {#if assign}
                                     {@const badge = getRoleBadge(assign.role)}
                                      <div class="w-full h-full rounded py-1 font-bold text-[10px] flex flex-col items-center justify-center shadow-sm {getShiftColor(assign.shift)}">
                                         <span>{assign.shift}</span>
                                          {#if badge}<span class="text-[8px] leading-none px-1 py-0.5 rounded mt-0.5 {badge.class}">{badge.text}</span>{/if}
-                                      </div>
+                                     </div>
                                 {:else}<div class="text-gray-200">.</div>{/if}
                               </td>
                         {/each}
@@ -299,7 +334,7 @@
             <div class="p-4 bg-indigo-500 text-white shrink-0">
                 <h3 class="font-bold text-lg">{selectedStaff.name}</h3>
                 <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded">
-                    <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
+                   <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
                     <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span>
                     <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span>
                     <span class="text-orange-100">K: {selectedStaff.stats.kho || 0}</span>
@@ -315,7 +350,7 @@
                         <div class="bg-white rounded border shadow-sm p-1 flex flex-col items-center justify-center aspect-square {d.shift==='OFF'?'opacity-60 bg-slate-100':''}">
                             <div class="text-[10px] text-gray-400 font-bold mb-1">{d.day}</div>
                             <div class="font-black text-slate-800 text-xs {d.shift==='OFF'?'text-slate-400':''}">{d.shift}</div>
-                            {#if d.shift !== 'OFF'}
+                             {#if d.shift !== 'OFF'}
                                 {@const badge = getRoleBadge(d.role)}
                                 {#if badge}<span class="text-[9px] font-bold px-1 rounded mt-0.5 leading-tight {badge.class}">{badge.text}</span>{/if}
                             {/if}
@@ -333,7 +368,7 @@
         <div class="bg-white w-full max-w-sm rounded-xl p-5 shadow-2xl" on:click|stopPropagation>
             <div class="flex justify-between items-start mb-4">
                 <div><h3 class="font-bold text-lg text-slate-800">Sửa Ca: {editingShift.name}</h3><p class="text-xs text-gray-500">Ngày {editingShift.day} - Hiện tại: <span class="font-bold">{tempEditingShift.shift}</span></p></div>
-                {#if editingShift.shift !== editingShift.originalShift || editingShift.role !== editingShift.originalRole}
+                 {#if editingShift.shift !== editingShift.originalShift || editingShift.role !== editingShift.originalRole}
                     <button class="text-xs text-red-600 hover:underline font-bold bg-red-50 px-2 py-1 rounded" on:click={resetEditShift}>Reset về gốc</button>
                 {/if}
             </div>
@@ -359,7 +394,7 @@
                                 </label>
                             {/each}
                         </div>
-                    </div>
+                     </div>
                  {/if}
             </div>
             <div class="flex gap-3 mt-6">
@@ -372,26 +407,115 @@
 
 {#if selectedDayStats}
     <div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>selectedDayStats=null}>
-        <div class="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl" on:click|stopPropagation>
-            <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                <h3 class="font-bold text-lg text-slate-800">Chi Tiết Ngày {selectedDayStats.day} ({selectedDayStats.weekday})</h3>
+        <div class="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation>
+            
+            <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                <h3 class="font-bold text-lg text-slate-800">Ngày {selectedDayStats.day} ({selectedDayStats.weekday})</h3>
                  <button on:click={()=>selectedDayStats=null} class="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center"><span class="material-icons-round text-slate-500">close</span></button>
             </div>
-            <div class="p-5 overflow-x-auto">
-                <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200">
-                    <thead class="bg-slate-50 text-slate-500"><tr><th class="p-3 text-left font-bold border-b border-r border-slate-200">Bộ Phận</th>{#each selectedDayStats.cols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[50px]"><div class="font-black text-slate-700">{col}</div></th>{/each}<th class="p-3 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700">Tổng</th></tr></thead>
-                    <tbody>
-                        {#each selectedDayStats.roles as role}
-                            <tr class="hover:bg-slate-50 transition-colors">
-                                 <td class="p-3 font-bold border-r border-slate-100 {role==='GH'?'text-blue-600':(role==='Thu Ngân'?'text-purple-600':(role==='Kho'?'text-orange-600':'text-gray-600'))}">{role}</td>
-                                {#each selectedDayStats.cols as col}<td class="p-2 border-r border-slate-100 text-center font-mono {selectedDayStats.matrix[role][col]>0?'font-bold text-slate-800':'text-gray-300'}">{selectedDayStats.matrix[role][col] || '-'}</td>{/each}
-                                <td class="p-3 text-center font-black text-slate-700 bg-slate-50 border-l border-slate-100">{selectedDayStats.matrix[role]['Total']}</td>
+
+            <div class="overflow-y-auto p-4 bg-white">
+                
+                <div class="mb-6 overflow-x-auto">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Tổng quan số lượng</h4>
+                    <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200">
+                        <thead class="bg-slate-50 text-slate-500">
+                            <tr>
+                                <th class="p-2 text-left font-bold border-b border-r border-slate-200 text-xs">Bộ Phận</th>
+                                {#each selectedDayStats.cols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[40px] text-xs"><div class="font-black text-slate-700">{col}</div></th>{/each}
+                                <th class="p-2 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700 text-xs">Tổng</th>
                             </tr>
-                        {/each}
-                    </tbody>
-                    <tfoot class="bg-slate-800 text-slate-300 font-bold"><tr><td class="p-3 text-right text-xs uppercase tracking-wider">Tổng Cộng</td>{#each selectedDayStats.cols as col}<td class="p-3 text-center text-yellow-400 font-mono text-lg">{getDayColTotal(col)}</td>{/each}<td class="p-3 text-center text-white text-xl bg-slate-900">{getDayGrandTotal()}</td></tr></tfoot>
-                </table>
+                        </thead>
+                        <tbody>
+                            {#each selectedDayStats.roles as role}
+                                <tr class="hover:bg-slate-50 transition-colors">
+                                    <td class="p-2 font-bold border-r border-slate-100 text-xs {role==='GH'?'text-blue-600':(role==='Thu Ngân'?'text-purple-600':(role==='Kho'?'text-orange-600':'text-gray-600'))}">{role}</td>
+                                    {#each selectedDayStats.cols as col}<td class="p-2 border-r border-slate-100 text-center font-mono text-xs {selectedDayStats.matrix[role][col]>0?'font-bold text-slate-800':'text-gray-300'}">{selectedDayStats.matrix[role][col] || '-'}</td>{/each}
+                                    <td class="p-2 text-center font-black text-slate-700 bg-slate-50 border-l border-slate-100 text-xs">{selectedDayStats.matrix[role]['Total']}</td>
+                                </tr>
+                            {/each}
+                        </tbody>
+                    </table>
+                </div>
+
+                <h4 class="text-xs font-bold text-gray-400 uppercase mb-3 sticky top-0 bg-white py-2 z-10 border-b">Chi tiết nhân sự</h4>
+                <div class="space-y-4">
+                    
+                    <div class="rounded-xl border border-orange-100 bg-orange-50/30 overflow-hidden">
+                        <div class="bg-orange-100 px-3 py-2 flex items-center justify-between">
+                            <span class="font-bold text-orange-700 text-sm flex items-center gap-2">
+                                <span class="material-icons-round text-base">inventory_2</span> KHO
+                            </span>
+                            <span class="bg-white text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">{selectedDayStats.matrix['Kho']['Total']} người</span>
+                        </div>
+                        <div class="p-3 grid gap-3">
+                            {#each Object.keys(selectedDayStats.details['Kho']).sort() as shift}
+                                <div class="flex items-start gap-2 text-sm border-b border-orange-100 last:border-0 pb-2 last:pb-0">
+                                    <div class="font-bold text-orange-600 bg-white border border-orange-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
+                                    <div class="flex flex-wrap gap-1.5 pt-0.5">
+                                        {#each selectedDayStats.details['Kho'][shift] as name}
+                                            <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['Kho'][shift][selectedDayStats.details['Kho'][shift].length - 1]}, {/if}</span>
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/each}
+                            {#if Object.keys(selectedDayStats.details['Kho']).length === 0}
+                                <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
+                            {/if}
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl border border-purple-100 bg-purple-50/30 overflow-hidden">
+                        <div class="bg-purple-100 px-3 py-2 flex items-center justify-between">
+                            <span class="font-bold text-purple-700 text-sm flex items-center gap-2">
+                                <span class="material-icons-round text-base">point_of_sale</span> THU NGÂN
+                            </span>
+                             <span class="bg-white text-purple-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-200">{selectedDayStats.matrix['Thu Ngân']['Total']} người</span>
+                        </div>
+                        <div class="p-3 grid gap-3">
+                            {#each Object.keys(selectedDayStats.details['Thu Ngân']).sort() as shift}
+                                <div class="flex items-start gap-2 text-sm border-b border-purple-100 last:border-0 pb-2 last:pb-0">
+                                    <div class="font-bold text-purple-600 bg-white border border-purple-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
+                                    <div class="flex flex-wrap gap-1.5 pt-0.5">
+                                         {#each selectedDayStats.details['Thu Ngân'][shift] as name}
+                                            <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['Thu Ngân'][shift][selectedDayStats.details['Thu Ngân'][shift].length - 1]}, {/if}</span>
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/each}
+                             {#if Object.keys(selectedDayStats.details['Thu Ngân']).length === 0}
+                                <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
+                            {/if}
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl border border-blue-100 bg-blue-50/30 overflow-hidden">
+                        <div class="bg-blue-100 px-3 py-2 flex items-center justify-between">
+                            <span class="font-bold text-blue-700 text-sm flex items-center gap-2">
+                                <span class="material-icons-round text-base">local_shipping</span> GIAO HÀNG
+                            </span>
+                             <span class="bg-white text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">{selectedDayStats.matrix['GH']['Total']} người</span>
+                        </div>
+                        <div class="p-3 grid gap-3">
+                            {#each Object.keys(selectedDayStats.details['GH']).sort() as shift}
+                                <div class="flex items-start gap-2 text-sm border-b border-blue-100 last:border-0 pb-2 last:pb-0">
+                                    <div class="font-bold text-blue-600 bg-white border border-blue-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
+                                    <div class="flex flex-wrap gap-1.5 pt-0.5">
+                                         {#each selectedDayStats.details['GH'][shift] as name}
+                                            <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['GH'][shift][selectedDayStats.details['GH'][shift].length - 1]}, {/if}</span>
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/each}
+                             {#if Object.keys(selectedDayStats.details['GH']).length === 0}
+                                <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
+                            {/if}
+                        </div>
+                    </div>
+
+                </div>
             </div>
+            
         </div>
     </div>
 {/if}

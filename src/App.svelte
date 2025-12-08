@@ -1,5 +1,5 @@
 <script>
-  // Version 10.5 - Fix Checklist Init Logic (Support Future Dates & Prevent Race Condition)
+  // Version 10.5 - Fix F5 Race Condition (Wait for Tasks Load)
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore'; 
@@ -20,7 +20,6 @@
   let showTaskModal = false;
   let selectedTask = null;
   let noteInput = '';
-  
   let selectedDate = getTodayStr();
   
   let activeStoreId = '';
@@ -39,6 +38,7 @@
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
   let hasCheckedInit = false; 
+  let isTasksLoaded = false; // [FIX]: Cờ kiểm soát việc tải dữ liệu
 
   // --- LOGIC HIỂN THỊ NGÀY THÁNG ---
   $: displayDateLabel = (() => {
@@ -71,6 +71,7 @@
   // Reset cờ khi đổi kho hoặc đổi ngày
   $: if (activeStoreId || selectedDate) {
       hasCheckedInit = false;
+      isTasksLoaded = false; // [FIX]: Reset cờ khi đổi ngữ cảnh
   }
 
   onMount(() => {
@@ -92,35 +93,25 @@
 
   $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
 
-  // --- FIX LOGIC KHỞI TẠO ---
-  // 1. Chỉ chạy khi TaskTemplate có dữ liệu thật (keys > 0)
-  // 2. hasCheckedInit chỉ bật khi đã chạy xong logic
-  $: if ($currentUser && activeStoreId && $taskTemplate && Object.keys($taskTemplate).length > 0 && $currentTasks) {
+  // TỰ ĐỘNG KHỞI TẠO (CHẠY NGẦM AN TOÀN)
+  // [FIX]: Thêm điều kiện && isTasksLoaded để đảm bảo chỉ chạy khi đã tải xong dữ liệu cũ
+  $: if ($currentUser && activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
-           // Truyền selectedDate vào để hỗ trợ tạo lịch cho tương lai
            initDailyTasksSafe(activeStoreId, selectedDate, $currentTasks, $taskTemplate);
        }
   }
 
-  // === HÀM SINH ID CỐ ĐỊNH (CHỐNG TRÙNG LẶP TUYỆT ĐỐI) ===
+  // === HÀM SINH ID CỐ ĐỊNH (CỐT LÕI CỦA VIỆC CHỐNG TRÙNG) ===
   function generateFixedID(storeId, dateStr, type, title) {
       const cleanTitle = title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
       return `${storeId}_${dateStr}_${type}_${cleanTitle}`;
   }
 
   async function initDailyTasksSafe(storeId, dateStr, currentTasks, template) {
-      // FIX: Cho phép tạo task cho hôm nay VÀ tương lai
-      // Không tạo lại quá khứ để bảo toàn lịch sử
-      if (dateStr < getTodayStr()) {
-          hasCheckedInit = true; // Đánh dấu đã check để không loop
-          return;
-      }
+      if (dateStr !== getTodayStr()) return;
+      hasCheckedInit = true;
 
-      hasCheckedInit = true; // Đánh dấu ngay để chặn các lần gọi dư thừa
-
-      const targetDate = new Date(dateStr);
-      const dayOfWeek = targetDate.getDay(); // Lấy thứ của ngày đang chọn (không phải hôm nay)
-      
+      const dayOfWeek = new Date().getDay();
       const batch = writeBatch(db);
       let hasUpdates = false;
       const types = ['warehouse', 'cashier'];
@@ -130,27 +121,24 @@
           templateItems.forEach(tpl => {
               if (tpl.days && tpl.days.includes(dayOfWeek)) {
                   
-                  // ID cố định -> Chìa khóa chống trùng lặp (x2, x3)
                   const fixedID = generateFixedID(storeId, dateStr, type, tpl.title);
-                  
-                  // Kiểm tra kỹ trong danh sách hiện tại
+      
+                  // Kiểm tra trùng lặp
                   const existsByID = currentTasks.some(t => t.id === fixedID);
-                  
-                  // (Optional) Kiểm tra theo Title đề phòng ID cũ khác format, nhưng ID fixed là quan trọng nhất
                   const existsByTitle = currentTasks.some(t => 
                       t.title.trim().toLowerCase() === tpl.title.trim().toLowerCase() && 
                       t.type === type
                   );
 
                   if (!existsByID && !existsByTitle) {
-                      const docRef = doc(db, 'tasks', fixedID); // Dùng set với ID cố định
+                      const docRef = doc(db, 'tasks', fixedID);
                       batch.set(docRef, {
                           title: tpl.title.trim(),
                           timeSlot: tpl.time,
                           isImportant: tpl.isImportant || false,
                           type: type,
                           storeId: storeId,
-                          date: dateStr, // Ngày của công việc (có thể là tương lai)
+                          date: dateStr,
                           completed: false,
                           createdBy: 'System',
                           timestamp: serverTimestamp()
@@ -162,10 +150,8 @@
       });
 
       if (hasUpdates) {
-          console.log(`⚡ Đang khởi tạo công việc cho ngày ${dateStr}...`);
+          console.log("⚡ Đang đồng bộ công việc thiếu...");
           try { await batch.commit(); } catch(e) { console.error(e); }
-      } else {
-          // console.log("✅ Đã đồng bộ, không có việc mới.");
       }
   }
 
@@ -173,13 +159,10 @@
       if(unsubTemplate) unsubTemplate();
       if(unsubTasks) unsubTasks();
 
-      // Load Template
       unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
-          // Luôn set object rỗng nếu chưa có data để tránh lỗi undefined
-          taskTemplate.set(docSnap.exists() ? docSnap.data() : {}); 
+          taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
       });
 
-      // Load Task theo ngày chọn
       const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
       unsubTasks = onSnapshot(q, (snapshot) => {
           const tasks = [];
@@ -188,6 +171,7 @@
               if (data.type) tasks.push({ id: doc.id, ...data });
           });
           currentTasks.set(tasks);
+          isTasksLoaded = true; // [FIX]: Báo hiệu đã tải dữ liệu xong
       });
   }
 
@@ -266,7 +250,7 @@
                  {/if}
               </h3>
               {#if activeTab !== 'schedule'}
-                <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+               <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
            </div>
            
