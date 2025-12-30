@@ -1,5 +1,5 @@
 <script>
-  // Version 54.5 - Fix Critical Syntax Error & Remove Garbage Text
+  // Version 37.7 - Fix History Modal Loading (Added missing props)
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import { db } from '../../lib/firebase';
   import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -48,13 +48,12 @@
   let showShortageAlert = false;
   let shortageCount = 0;
   let previewScheduleData = null;
-  let previewStats = []; 
+  let previewStats = [];
   let originalResult = null;
   let optimizationLogs = [];
   let inspectionMode = 'none';
   const shiftCols = [ { id: 'c1', label: 'C1 (08-09h)' }, { id: 'c2', label: 'C2 (09-12h)' }, { id: 'c3', label: 'C3 (12-15h)' }, { id: 'c4', label: 'C4 (15-18h)' }, { id: 'c5', label: 'C5 (18-21h)' }, { id: 'c6', label: 'C6 (21-21h30)' } ];
   const roleRows = [ { id: 'kho', label: 'Kho', color: 'text-orange-600 bg-orange-50 border-orange-100' }, { id: 'tn', label: 'Thu Ngân', color: 'text-purple-600 bg-purple-50 border-purple-100' }, { id: 'gh', label: 'Giao Hàng', color: 'text-blue-600 bg-blue-50 border-blue-100' }, { id: 'tv', label: 'Tư Vấn', color: 'text-gray-600 bg-gray-50 border-gray-200' } ];
-  
   const QUICK_SHIFTS = ['OFF', '123', '456', '23', '45', '2345'];
   const INSPECTION_OPTIONS = [ { val: 'none', label: 'Tắt soi lỗi', icon: 'visibility_off', color: 'text-gray-400' }, { val: 'gender', label: 'Soi Giới Tính', icon: 'wc', color: 'text-pink-500' }, { val: 'weekend', label: 'Công Bằng Cuối Tuần', icon: 'balance', color: 'text-indigo-600' }, { val: 'rotation', label: 'Soi Nhịp Sáng/Chiều', icon: 'sync_problem', color: 'text-orange-500' }, { val: 'fatigue', label: 'Soi Trùng Nghiệp Vụ', icon: 'battery_alert', color: 'text-red-600' } ];
   let editingShift = null; 
@@ -62,10 +61,8 @@
   let selectedStaff = null;
   let selectedDayStats = null;
   $: isDemoMode = targetStore?.includes('DEMO');
-  
   $: activeSuggestedCombos = activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos;
   $: totalCombos = activeSuggestedCombos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
-  
   let comboTotalsMap = {};
   $: { 
       const map = {};
@@ -88,33 +85,32 @@
   
   async function loadStoreData() { 
       if (!targetStore) return; 
-      scheduleStaffList = []; 
+      scheduleStaffList = [];
       shiftMatrix = JSON.parse(JSON.stringify(defaultMatrix)); 
       weekendMatrix = JSON.parse(JSON.stringify(defaultMatrix));
       suggestedCombos = []; 
       suggestedWeekendCombos = []; 
-      previewScheduleData = null; 
-      
+      previewScheduleData = null;
       try { 
           const staffSnap = await getDoc(doc(db, 'settings', `staff_list_${targetStore}`));
           if (staffSnap.exists()) scheduleStaffList = staffSnap.data().staffList || []; 
           
           const configSnap = await getDoc(doc(db, 'settings', `shift_matrix_${targetStore}`));
           if (configSnap.exists()) { 
-              const data = configSnap.data(); 
+              const data = configSnap.data();
               if (data.matrix) shiftMatrix = { ...defaultMatrix, ...data.matrix }; 
               if (data.approvedCombos) suggestedCombos = data.approvedCombos;
               if (data.weekendMatrix) weekendMatrix = { ...defaultMatrix, ...data.weekendMatrix }; 
               if (data.weekendCombos) suggestedWeekendCombos = data.weekendCombos; 
               if (data.genderConfig) genderConfig = data.genderConfig;
-              
               if (data.comboCols && Array.isArray(data.comboCols)) {
                   customComboCols = data.comboCols;
               } else {
                   customComboCols = [...DEFAULT_COLS];
               }
           } 
-      } catch (e) { console.error(e); } 
+      } catch (e) { console.error(e);
+      } 
   }
   
   function downloadScheduleSample() { const wb = utils.book_new();
@@ -125,9 +121,12 @@
   setTimeout(async () => { try { const data = await file.arrayBuffer(); const wb = read(data); const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]); let newStaff = []; for(let i=0; i<json.length; i++) { const row = json[i]; let name = row['Ho_Ten'] || row['Họ Tên'] || ''; let gender = row['Gioi_Tinh'] || row['Giới Tính'] || 'Nữ'; if(name) { newStaff.push({ id: String(newStaff.length+1), name: safeString(name), gender: String(gender).toLowerCase().includes('nam') ? 'Nam' : 'Nữ' }); } } if(newStaff.length > 0) { scheduleStaffList = newStaff; await setDoc(doc(db, 'settings', `staff_list_${targetStore}`), { staffList: scheduleStaffList, updatedAt: serverTimestamp() }); alert(`✅ Đã cập nhật danh sách: ${newStaff.length} nhân viên vào kho ${targetStore}.`); } else { alert(`⚠️ File không có dữ liệu hợp lệ!`); } } catch(e) { alert("Lỗi file: " + e.message); } finally { isLoading=false; e.target.value=null; } }, 100);
   }
   
-  function updateComboQty(roleLabel, comboCode, newQty) { const qtyVal = parseInt(newQty) || 0; let currentList = activeMatrixMode === 'weekday' ?
-  [...suggestedCombos] : [...suggestedWeekendCombos]; const targetRoles = [roleLabel]; if (roleLabel === 'Thu Ngân') targetRoles.push('TN', 'tn');
-  if (roleLabel === 'Giao Hàng') targetRoles.push('GH', 'gh'); if (roleLabel === 'Tư Vấn') targetRoles.push('TV', 'tv');
+  function updateComboQty(roleLabel, comboCode, newQty) { const qtyVal = parseInt(newQty) || 0;
+  let currentList = activeMatrixMode === 'weekday' ?
+  [...suggestedCombos] : [...suggestedWeekendCombos]; const targetRoles = [roleLabel];
+  if (roleLabel === 'Thu Ngân') targetRoles.push('TN', 'tn');
+  if (roleLabel === 'Giao Hàng') targetRoles.push('GH', 'gh');
+  if (roleLabel === 'Tư Vấn') targetRoles.push('TV', 'tv');
   const idx = currentList.findIndex(c => { const cRole = c.role || 'TV'; return c.code === comboCode && targetRoles.includes(cRole); });
   if (idx >= 0) { currentList[idx].qty = qtyVal; currentList[idx].role = roleLabel;
   } else if (qtyVal > 0) { currentList.push({ code: comboCode, role: roleLabel, label: `${roleLabel} ${comboCode}`, qty: qtyVal });
@@ -139,7 +138,7 @@
   } }
   
   function handleAddColumn() {
-      customComboCols = [...customComboCols, '']; 
+      customComboCols = [...customComboCols, ''];
   }
 
   function handleUpdateColumns(newCols) {
@@ -152,11 +151,11 @@
   return c; }; shiftMatrix = clean(shiftMatrix); weekendMatrix = clean(weekendMatrix); await tick(); showShortageAlert = false; shortageCount = 0;
   let tempWeekday = calculateCombosFromMatrix(shiftMatrix); let tempWeekend = calculateCombosFromMatrix(weekendMatrix); const checkShortage = (combos) => { const totalDemand = combos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
   return totalDemand > staffStats.total ? (totalDemand - staffStats.total) : 0; }; const s1 = checkShortage(tempWeekday); const s2 = checkShortage(tempWeekend);
-  
   suggestedCombos = tempWeekday; 
   suggestedWeekendCombos = tempWeekend;
   
-  if (s1 > 0 || s2 > 0) { shortageCount = Math.max(s1, s2); showShortageAlert = true; } 
+  if (s1 > 0 || s2 > 0) { shortageCount = Math.max(s1, s2);
+  showShortageAlert = true; } 
   
   if(save) { 
       await setDoc(doc(db, 'settings', `shift_matrix_${targetStore}`), { 
@@ -206,6 +205,7 @@
                 let h=0, tn=0, kho=0, gh=0;
                 Object.values(previewScheduleData).forEach(dayList => {
                     const assign = dayList.find(a => a.staffId === s.id);
+                    
                     if(assign && assign.shift !== 'OFF') {
                         if(assign.role==='Thu Ngân' || assign.role==='TN') tn++;
                         if(assign.role==='Kho' || assign.role==='K') kho++;
@@ -238,7 +238,7 @@
   function isWeekendDay(d) { const date = new Date(scheduleYear, scheduleMonth - 1, d); const dayOfWeek = date.getDay();
   return (dayOfWeek === 0 || dayOfWeek === 6); }
   function getShiftGroup(code) { 
-      return 'OFF'; 
+      return 'OFF';
   }
   function isHardRole(roleName) { return ['Kho', 'Thu Ngân', 'Giao Hàng', 'GH', 'TN', 'K'].includes(roleName);
   }
@@ -255,8 +255,8 @@
   return count; }
   function checkInspectionError(d, assign, currentMode) { const mode = currentMode || inspectionMode;
   if (mode === 'none') return false; if (!assign || assign.shift === 'OFF') return false;
-  if (mode === 'gender') { if (genderConfig.kho === 'none' && genderConfig.tn === 'none') return false; const dayAssignments = previewScheduleData[d] ||
-  []; const sameShiftRole = dayAssignments.filter(a => a.shift === assign.shift && a.role === assign.role && a.shift !== 'OFF');
+  if (mode === 'gender') { if (genderConfig.kho === 'none' && genderConfig.tn === 'none') return false; const dayAssignments = previewScheduleData[d] || []; 
+  const sameShiftRole = dayAssignments.filter(a => a.shift === assign.shift && a.role === assign.role && a.shift !== 'OFF');
   if (assign.role === 'Kho') { if (genderConfig.kho === 'male_only' && !assign.gender.toLowerCase().includes('nam')) return `Kho ca ${assign.shift} yêu cầu Nam`;
   if (genderConfig.kho === 'mixed') { const hasMale = sameShiftRole.some(a => a.gender === 'Nam');
   if (!hasMale) return `Kho ca ${assign.shift} thiếu Nam`; } } if (assign.role === 'Thu Ngân') { if (genderConfig.tn === 'female_only' && assign.gender === 'Nam') return `TN ca ${assign.shift} yêu cầu Nữ`;
@@ -266,15 +266,21 @@
   if (rowStatus === 1) return "Dư ca nghiệp vụ cuối tuần"; return false;
   } if (mode === 'rotation') { if (d == 1) return false; const prevAssign = previewScheduleData[d-1]?.find(a => a.staffId === assign.staffId);
   if (!prevAssign || prevAssign.shift === 'OFF') return false; 
-  return false; } if (mode === 'fatigue') { if (d == 1) return false;
-  const prevAssign = previewScheduleData[d-1]?.find(a => a.staffId === assign.staffId); if (!prevAssign || !prevAssign.role) return false;
-  if (isHardRole(prevAssign.role) && isHardRole(assign.role)) { return `Làm nghiệp vụ liên tiếp 2 ngày`; } return false; } return false;
+  return false;
+  } if (mode === 'fatigue') { if (d == 1) return false;
+  const prevAssign = previewScheduleData[d-1]?.find(a => a.staffId === assign.staffId);
+  if (!prevAssign || !prevAssign.role) return false;
+  if (isHardRole(prevAssign.role) && isHardRole(assign.role)) { return `Làm nghiệp vụ liên tiếp 2 ngày`;
+  } return false; } return false;
   }
-  function isCellRelevant(d, assign, currentMode) { const mode = currentMode || inspectionMode; if (mode === 'none') return true;
-  if (checkInspectionError(d, assign, mode)) return true; if (mode === 'weekend' && isWeekendDay(d)) return true; if (mode === 'rotation') return true;
+  function isCellRelevant(d, assign, currentMode) { const mode = currentMode || inspectionMode;
+  if (mode === 'none') return true;
+  if (checkInspectionError(d, assign, mode)) return true; if (mode === 'weekend' && isWeekendDay(d)) return true;
+  if (mode === 'rotation') return true;
   return false; }
   
-  function handleAutoFixRotation() { if (!previewScheduleData) return; isLoading = true;
+  function handleAutoFixRotation() { if (!previewScheduleData) return;
+  isLoading = true;
   setTimeout(() => { const result = autoFixRotation(previewScheduleData, scheduleMonth, scheduleYear); if (result.success) { previewScheduleData = result.schedule; optimizationLogs = [...optimizationLogs, ...result.logs]; alert(`✅ Đã sửa thành công ${result.count} lỗi!`); } else { alert("✅ Hệ thống đã tối ưu."); } isLoading = false; }, 300);
   }
   function handleAutoFixWeekend() { if (!previewScheduleData) return; isLoading = true;
@@ -389,7 +395,8 @@
     <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div class="flex items-center gap-2">
             <div id="toolbar-actions" class="flex items-center gap-2">
-                <button class="bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-blue-100" on:click={(e) => checkDemoAndBlock(e) || downloadScheduleSample()}>Tải Mẫu</button>
+                <button class="bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-blue-100" on:click={(e) => checkDemoAndBlock(e) ||
+                downloadScheduleSample()}>Tải Mẫu</button>
                 <label class="bg-blue-600 text-white hover:bg-blue-700 font-bold py-2 px-3 rounded-lg text-xs cursor-pointer flex items-center gap-1 shadow-lg shadow-blue-200 transition-all active:scale-95">
                     <span class="material-icons-round text-sm">upload</span> Upload
                     <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={(e) => handleStaffUpload(e)}>
@@ -426,7 +433,8 @@
             }}
             on:calculate={() => handleCalculateCombos(true)}
             on:updateCombo={(e) => updateComboQty(e.detail.role, e.detail.code, e.detail.qty)}
-            on:configChange={(e) => { const newConf = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
+            on:configChange={(e) => { const newConf = {...genderConfig};
+            newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
             on:preview={handleGeneratePreview}
             on:addCol={handleAddColumn}
             on:updateCols={(e) => handleUpdateColumns(e.detail)}
@@ -435,6 +443,10 @@
 
     <div id="combo-table-area">
         <SchedulePreview 
+            storeId={targetStore}          
+            viewMonth={scheduleMonth}      
+            viewYear={scheduleYear}        
+
             bind:inspectionMode
             {previewScheduleData}
             {previewStats}
@@ -474,7 +486,8 @@
                     <h3 class="font-bold text-lg text-slate-800">Sửa Ca: {editingShift.name}</h3>
                     <p class="text-xs text-gray-500">Ngày {editingShift.day} - Hiện tại: <span class="font-bold">{tempEditingShift.shift}</span></p>
                 </div> 
-                {#if editingShift.shift !== editingShift.originalShift || editingShift.role !== editingShift.originalRole} 
+                {#if editingShift.shift !== editingShift.originalShift ||
+                editingShift.role !== editingShift.originalRole} 
                     <button class="text-xs text-red-600 hover:underline font-bold bg-red-50 px-2 py-1 rounded" on:click={resetEditPreviewShift}>Reset về gốc</button> 
                 {/if} 
             </div> 
@@ -483,11 +496,15 @@
                     <label class="block text-xs font-bold text-gray-500 mb-2">Chọn Ca Nhanh</label> 
                     <div class="grid grid-cols-3 gap-2 mb-2"> 
                         {#each QUICK_SHIFTS as s} 
-                            <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true; editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s; } }}>{s}</button> 
+                            <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true;
+                            editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s;
+                            } }}>{s}</button> 
                         {/each} 
                     </div> 
                     <label class="block text-xs font-bold text-gray-500 mb-1 mt-3">Ca Tùy Chỉnh</label> 
-                    <input type="text" value={editingShift.isOFF ? 'OFF' : editingShift.shift} on:input={(e) => { if(!editingShift.isOFF) editingShift.shift = e.target.value; }} disabled={editingShift.isOFF} class="w-full p-2.5 border rounded-lg text-center font-bold text-sm transition-colors {editingShift.isOFF ? 'bg-red-600 text-yellow-300 border-red-600 cursor-not-allowed opacity-100' : 'bg-white text-slate-800 border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200'}" placeholder="Nhập mã ca (vd: 12-56)"> 
+                    <input type="text" value={editingShift.isOFF 
+                    ? 'OFF' : editingShift.shift} on:input={(e) => { if(!editingShift.isOFF) editingShift.shift = e.target.value;
+                    }} disabled={editingShift.isOFF} class="w-full p-2.5 border rounded-lg text-center font-bold text-sm transition-colors {editingShift.isOFF ? 'bg-red-600 text-yellow-300 border-red-600 cursor-not-allowed opacity-100' : 'bg-white text-slate-800 border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200'}" placeholder="Nhập mã ca (vd: 12-56)"> 
                 </div> 
                 {#if !editingShift.isOFF} 
                     <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-fadeIn"> 
@@ -517,10 +534,14 @@
             <div class="p-4 bg-indigo-500 text-white shrink-0"> 
                 <h3 class="font-bold text-lg">{selectedStaff.name}</h3> 
                 <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded"> 
-                    <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span> 
-                    <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span> 
-                    <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span> 
-                    <span class="text-orange-100">K: {selectedStaff.stats.kho || 0}</span> 
+                    <span>{Math.round(selectedStaff.stats.totalHours) ||
+                    0} Giờ</span> 
+                    <span class="text-blue-100">GH: {selectedStaff.stats.gh ||
+                    0}</span> 
+                    <span class="text-purple-100">TN: {selectedStaff.stats.tn ||
+                    0}</span> 
+                    <span class="text-orange-100">K: {selectedStaff.stats.kho ||
+                    0}</span> 
                 </div> 
             </div> 
             <div class="flex-1 overflow-y-auto p-3 bg-slate-100"> 

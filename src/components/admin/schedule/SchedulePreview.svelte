@@ -1,7 +1,8 @@
 <script>
-  // Version 54.5 - Remove Garbage Text
+  // Version 55.0 - Add Cumulative History Modal
   import { createEventDispatcher } from 'svelte';
   import { utils, writeFile } from 'xlsx';
+  import CumulativeHistoryModal from '../../CumulativeHistoryModal.svelte'; // [GEM IMPORT]
 
   export let previewScheduleData = null;
   export let previewStats = [];
@@ -16,22 +17,19 @@
   export let getRoleBadge = (role) => null;
   export let isCellRelevant = (d, assign, mode) => true;
 
+  // Cần truyền thêm storeId, month, year từ cha để Modal hoạt động
+  export let storeId = ''; 
+  export let viewMonth;
+  export let viewYear;
+
   const dispatch = createEventDispatcher();
   
   let showBalanceModal = false;
-  let balanceConfig = {
-      direction: 'male_to_female', 
-      role: 'tn',
-      qty: 1
-  };
-  function onInspectionChange(e) {
-      dispatch('inspectionChange', e.target.value);
-  }
+  let showHistoryModal = false; // [GEM STATE]
+  let balanceConfig = { direction: 'male_to_female', role: 'tn', qty: 1 };
 
-  function handleBalance() {
-      showBalanceModal = false;
-      dispatch('balanceGender', balanceConfig);
-  }
+  function onInspectionChange(e) { dispatch('inspectionChange', e.target.value); }
+  function handleBalance() { showBalanceModal = false; dispatch('balanceGender', balanceConfig); }
 
   function exportPreviewToExcel() {
       if (!previewScheduleData) return;
@@ -91,6 +89,10 @@
       </div>
 
       <div class="flex gap-2">
+          <button class="px-4 py-2 bg-indigo-50 text-indigo-700 font-bold rounded-lg shadow hover:bg-indigo-100 flex items-center gap-2 border border-indigo-100" on:click={() => showHistoryModal = true}>
+             <span class="material-icons-round text-sm">history</span> Lũy Kế
+          </button>
+
           <button id="btn-optimize" disabled={!previewScheduleData} class="px-4 py-2 bg-yellow-500 text-white font-bold rounded-lg shadow hover:bg-yellow-600 flex items-center gap-2 disabled:opacity-50" on:click={() => dispatch('optimize')}>
               <span class="material-icons-round text-sm">auto_fix_high</span> Tối Ưu
           </button>
@@ -123,7 +125,7 @@
                       <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-[70] min-w-[140px] text-left pl-3 shadow">NHÂN SỰ</th> 
                       {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d} 
                           <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none bg-amber-400 {['T7','CN'].includes(getWeekday(d))?'bg-amber-300':''} relative group" on:click={()=>dispatch('headerClick', d)}>
-                               {d}
+                              {d}
                               {#if inspectionMode !== 'none'}
                                   {@const hasError = previewScheduleData[d].some(assign => checkInspectionError(d, assign, inspectionMode))}
                                   {#if hasError}
@@ -158,7 +160,6 @@
                               {#if weekendStatus === 1}<span class="block text-[8px] text-red-500 font-normal animate-pulse">Quá tải cuối tuần</span>{/if}
                               {#if weekendStatus === -1}<span class="block text-[8px] text-green-600 font-normal animate-pulse">Thiếu ca cuối tuần</span>{/if}
                           </td> 
-                          
                           {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d} 
                               {@const assign = previewScheduleData[d].find(x => x.staffId === staff.id)} 
                               {@const errorMsg = checkInspectionError(d, assign, inspectionMode)}
@@ -175,7 +176,6 @@
                                   {/if} 
                               </td> 
                           {/each} 
-                          
                           <td class="p-2 border font-bold text-center bg-white text-slate-700 border-l {inspectionMode!=='none'?'opacity-100':''}">{Math.round(staff.totalHours)||0}</td>
                           <td class="p-2 border font-bold text-center bg-blue-50 text-blue-600 {inspectionMode!=='none'?'opacity-100':''}">{staff.gh||'-'}</td> 
                           <td class="p-2 border font-bold text-center bg-purple-50 text-purple-600 {inspectionMode!=='none'?'opacity-100':''}">{staff.tn||0}</td> 
@@ -190,6 +190,16 @@
       </div>
   {/if}
 </div>
+
+{#if showHistoryModal}
+    <CumulativeHistoryModal 
+        {storeId}
+        currentMonth={viewMonth}
+        currentYear={viewYear}
+        currentStats={previewStats}
+        on:close={() => showHistoryModal = false}
+    />
+{/if}
 
 {#if showBalanceModal}
     <div class="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => showBalanceModal = false}>
@@ -211,7 +221,7 @@
                         </label>
                         <label class="cursor-pointer">
                             <input type="radio" bind:group={balanceConfig.direction} value="female_to_male" class="peer sr-only">
-                            <div class="p-3 border rounded-lg text-center text-xs font-bold peer-checked:bg-pink-50 peer-checked:text-pink-700 peer-checked:border-pink-300 transition-all hover:bg-slate-50">
+                             <div class="p-3 border rounded-lg text-center text-xs font-bold peer-checked:bg-pink-50 peer-checked:text-pink-700 peer-checked:border-pink-300 transition-all hover:bg-slate-50">
                                 <span class="block text-lg mb-1">👩 ➔ 👨</span>
                                 Nữ sang Nam
                             </div>
