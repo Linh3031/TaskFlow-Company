@@ -13,16 +13,14 @@ const config = {
     outputFile: 'project_snapshot_svelte.txt',
     
     // (MỚI) Bỏ qua các thư mục này VÀ bất kỳ thư mục nào bắt đầu bằng '.'
-    excludeDirectories: [
-        'node_modules', 
-        // '.git', // Không cần nữa, logic mới sẽ bắt
-        // '.vscode', // Không cần nữa, logic mới sẽ bắt
-        '.svelte-kit', // Thư mục build của SvelteKit
-        'dist',         // Thư mục build chung
-        'build',        // Thư mục build chung
-        'public',       // Thư mục public (thường chứa assets)
-        'assets'        // Thường chứa ảnh/font, không cần cho logic
-    ],
+   excludeDirectories: [
+    'node_modules', 
+    '.svelte-kit', 
+    'dist',         
+    'build',        
+    'public',       
+    'assets' // Đã xong thư mục, không được để tên file ở đây
+],
     
     // (MỚI) Bỏ qua các đuôi file media/nhị phân không đọc được
     excludeExtensions: [
@@ -39,16 +37,22 @@ const config = {
     ],
     
     // (CẬP NHẬT) Bỏ qua các file cụ thể (chỉ cần tên file)
-    excludeFiles: [
-        'project_snapshot_svelte.txt', // Chính nó
-        'project_snapshot.txt',
-        'create_snapshot.cjs',  // File script này (sửa từ .js)
-        'package-lock.json',
-        'yarn.lock',
-        '.gitignore',
-        '.env',
-        '.env.local'
-    ]
+   excludeFiles: [
+    'project_snapshot_svelte.txt', 
+    'project_snapshot.txt',
+    'create_snapshot.cjs',  
+    'package-lock.json',
+    'yarn.lock',
+    '.gitignore',
+    '.env',
+    '.env.local',
+    
+    // --- CÁC FILE BẠN VỪA THÊM PHẢI NẰM Ở ĐÂY ---
+    'netlify.toml',
+    'jsconfig.json',
+    'README.md',
+    '.DS_Store' 
+]
 };
 
 // --- LOGIC CHÍNH ---

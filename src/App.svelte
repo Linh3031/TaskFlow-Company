@@ -1,15 +1,15 @@
 <script>
-  // Version 10.5 - Fix F5 Race Condition (Wait for Tasks Load)
+  // Version 10.6 - Add Installment Calc Feature
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
-  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore'; 
+  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
-
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
   import TaskList from './components/TaskList.svelte';
-  import HandoverInput from './components/HandoverInput.svelte';
+  // import HandoverInput from './components/HandoverInput.svelte'; // [HIDDEN]
+  import InstallmentCalc from './components/InstallmentCalc.svelte'; // [NEW IMPORT]
   import AdminModal from './components/AdminModal.svelte';
   import TaskModal from './components/TaskModal.svelte';
   import TourGuide from './components/TourGuide.svelte';
@@ -28,17 +28,16 @@
 
   const tourSteps = [
       { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow.' },
-      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: Kho, Thu Ngân, Bàn Giao, Lịch Ca.' },
+      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: Kho, Thu Ngân, Trả Góp, Lịch Ca.' },
       { target: '#date-navigator', title: 'Chọn Ngày', content: 'Bấm < hoặc > để chuyển ngày.' },
       { target: '#btn-notif', title: 'Thông Báo', content: 'Xem ai nhắc tên bạn.' },
       { target: '#btn-admin', title: 'Cài Đặt', content: 'Cấu hình hệ thống.' }
   ];
-
   let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
   let hasCheckedInit = false; 
-  let isTasksLoaded = false; // [FIX]: Cờ kiểm soát việc tải dữ liệu
+  let isTasksLoaded = false; 
 
   // --- LOGIC HIỂN THỊ NGÀY THÁNG ---
   $: displayDateLabel = (() => {
@@ -46,14 +45,12 @@
       const [y, m, d] = selectedDate.split('-');
       return `${d}/${m}`;
   })();
-
   $: displayDayOfWeek = (() => {
       if (!selectedDate) return '';
       const date = new Date(selectedDate);
       const days = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
       return days[date.getDay()];
   })();
-
   function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
@@ -71,7 +68,7 @@
   // Reset cờ khi đổi kho hoặc đổi ngày
   $: if (activeStoreId || selectedDate) {
       hasCheckedInit = false;
-      isTasksLoaded = false; // [FIX]: Reset cờ khi đổi ngữ cảnh
+      isTasksLoaded = false; 
   }
 
   onMount(() => {
@@ -80,7 +77,6 @@
     });
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
-
   onDestroy(() => { unsubStores(); unsubTemplate(); unsubTasks(); });
 
   $: if ($currentUser && !activeStoreId) {
@@ -92,16 +88,13 @@
   }
 
   $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
-
   // TỰ ĐỘNG KHỞI TẠO (CHẠY NGẦM AN TOÀN)
-  // [FIX]: Thêm điều kiện && isTasksLoaded để đảm bảo chỉ chạy khi đã tải xong dữ liệu cũ
   $: if ($currentUser && activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
            initDailyTasksSafe(activeStoreId, selectedDate, $currentTasks, $taskTemplate);
        }
   }
 
-  // === HÀM SINH ID CỐ ĐỊNH (CỐT LÕI CỦA VIỆC CHỐNG TRÙNG) ===
   function generateFixedID(storeId, dateStr, type, title) {
       const cleanTitle = title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
       return `${storeId}_${dateStr}_${type}_${cleanTitle}`;
@@ -114,7 +107,7 @@
       const dayOfWeek = new Date().getDay();
       const batch = writeBatch(db);
       let hasUpdates = false;
-      const types = ['warehouse', 'cashier'];
+      const types = ['warehouse', 'cashier']; // Bỏ handover khỏi auto-init nếu không cần thiết
 
       types.forEach(type => {
           const templateItems = template[type] || [];
@@ -132,6 +125,7 @@
 
                   if (!existsByID && !existsByTitle) {
                       const docRef = doc(db, 'tasks', fixedID);
+             
                       batch.set(docRef, {
                           title: tpl.title.trim(),
                           timeSlot: tpl.time,
@@ -162,7 +156,6 @@
       unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
           taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
       });
-
       const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
       unsubTasks = onSnapshot(q, (snapshot) => {
           const tasks = [];
@@ -171,7 +164,7 @@
               if (data.type) tasks.push({ id: doc.id, ...data });
           });
           currentTasks.set(tasks);
-          isTasksLoaded = true; // [FIX]: Báo hiệu đã tải dữ liệu xong
+          isTasksLoaded = true; 
       });
   }
 
@@ -227,7 +220,7 @@
         {#each [
             {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'},
             {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50'},
-            {id:'handover', icon:'campaign', label:'Bàn Giao', color:'#673ab7'},
+            {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7'}, // [CHANGED] Handover -> Installment
             {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'}
         ] as t}
             <button class="tab-btn {activeTab===t.id?'active':''}" on:click={() => activeTab=t.id} style="--theme-color: {t.color};">
@@ -241,26 +234,25 @@
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
                  {#if $currentUser.role === 'super_admin'}
-                     🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
+                      🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
-                    {#if activeTab==='handover'}📢 Bàn Giao Ca{/if}
-                    {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
+                    {#if activeTab==='installment'}🧮 Tính Trả Góp{/if} {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                  {/if}
               </h3>
-              {#if activeTab !== 'schedule'}
-               <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+              {#if activeTab !== 'schedule' && activeTab !== 'installment'}
+                <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
            </div>
            
-           {#if activeTab !== 'schedule'}
+           {#if activeTab !== 'schedule' && activeTab !== 'installment'}
             <div id="date-navigator" class="flex items-center gap-1 w-full sm:w-auto bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-sm">
-                <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
+                 <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
                     <span class="material-icons-round text-lg">chevron_left</span>
                 </button>
                 <button class="relative flex-1 sm:flex-none flex flex-col items-center justify-center px-3 cursor-pointer group min-w-[70px] bg-transparent border-none" on:click={openDatePicker}>
-                    <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
+                     <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
                     <span class="text-sm font-black text-gray-800 leading-tight group-hover:text-indigo-600 transition-colors">{displayDateLabel}</span>
                 </button>
                 <input id="hidden-date-input" type="date" bind:value={selectedDate} class="absolute opacity-0 pointer-events-none w-0 h-0">
@@ -271,8 +263,13 @@
           {/if}
         </div>
 
-        {#if activeTab === 'handover' && selectedDate === getTodayStr()} <HandoverInput /> {/if}
-        {#if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> {:else} <TaskList {activeTab} on:taskClick={handleTaskClick} /> {/if}
+        {#if activeTab === 'installment'} 
+            <InstallmentCalc /> 
+        {:else if activeTab === 'schedule'} 
+            <ShiftSchedule {activeTab} /> 
+        {:else} 
+            <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
+        {/if}
       </div>
       <footer>Design by 3031 | Kho đang xem: {activeStoreId}</footer>
     </div>
