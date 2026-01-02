@@ -1,21 +1,21 @@
 <script>
-    // Component: Tính Trả Góp (Compact Dashboard + Tách nhóm BH)
+    // Component: Tính Trả Góp (Compact Dashboard + Tách nhóm BH + Giá Gốc)
     
     // --- STATE ---
-    let productPrice = 0;
-    
+    let productPrice = 0; // Giá bán (dùng để tính trả trước)
+    let originalBasePrice = 0; // Giá gốc (dùng để tính BH 1-1)
+
     // Trả trước
     let downPaymentType = 'percent'; 
     let downPaymentPercent = 0; 
     let downPaymentAmount = 0;
-
+    
     // Cấu hình
     let interestPackage = 0; 
-    let termMonths = 6; 
-
-    // Bảo hiểm 1-1 (Tách riêng nhóm theo yêu cầu)
-    // 'none' | 'air_conditioner' | 'fridge' | 'washer' | 'water_purifier'
-    let selectedBh11Group = 'none'; 
+    let termMonths = 6;
+    
+    // Bảo hiểm 1-1
+    let selectedBh11Group = 'none';
 
     // --- FORMATTER ---
     const formatCurrency = (val) => {
@@ -27,8 +27,7 @@
         return Number(String(str).replace(/[^0-9]/g, '')) || 0;
     };
 
-    // --- LOGIC NHẬP LIỆU ---
-    
+    // --- LOGIC NHẬP LIỆU GIÁ BÁN ---
     let displayPrice = "";
     function handlePriceInput(e) {
         const raw = parseNumber(e.target.value);
@@ -37,6 +36,15 @@
         recalcDownPayment();
     }
 
+    // --- LOGIC NHẬP LIỆU GIÁ GỐC (CHO BH 1-1) ---
+    let displayBasePrice = "";
+    function handleBasePriceInput(e) {
+        const raw = parseNumber(e.target.value);
+        originalBasePrice = raw;
+        displayBasePrice = formatCurrency(raw);
+    }
+
+    // --- LOGIC TRẢ TRƯỚC ---
     function handleDownPaymentPercentInput(e) {
         let val = parseFloat(e.target.value);
         if (isNaN(val)) val = 0;
@@ -52,7 +60,6 @@
         downPaymentAmount = raw;
         if (downPaymentAmount > productPrice) downPaymentAmount = productPrice;
         displayDownPaymentAmount = formatCurrency(downPaymentAmount);
-        
         if (productPrice > 0) {
             downPaymentPercent = (downPaymentAmount / productPrice) * 100;
         } else {
@@ -67,7 +74,7 @@
         } else {
              if (productPrice > 0) {
                 downPaymentPercent = (downPaymentAmount / productPrice) * 100;
-             }
+            }
         }
     }
 
@@ -78,62 +85,76 @@
 
     // --- LOGIC TÍNH TOÁN ---
 
-    // 1. Phí BH 1-1 (Tách logic riêng từng nhóm)
+    // 1. Phí BH 1-1 (Dựa trên GIÁ GỐC - originalBasePrice)
     $: bh11Fee = (() => {
-        const p = productPrice;
+        const p = originalBasePrice; // Dùng giá gốc để tính phí
         if (selectedBh11Group === 'none' || p === 0) return 0;
 
+        // --- NHÓM CŨ (Theo mức giá cố định) ---
         // Nhóm 1: Máy Lạnh
         if (selectedBh11Group === 'air_conditioner') {
             return p <= 10000000 ? 250000 : 350000;
         }
-        
         // Nhóm 2: Tủ lạnh, đông, mát
         if (selectedBh11Group === 'fridge') {
             if (p <= 10000000) return 400000;
             if (p <= 25000000) return 700000;
             return 1350000;
         }
-
         // Nhóm 3: Máy giặt, sấy
         if (selectedBh11Group === 'washer') {
-            // Hiện tại giá giống nhóm Tủ lạnh, nhưng tách code để future-proof
             if (p <= 10000000) return 400000;
             if (p <= 25000000) return 700000;
             return 1350000;
         }
-
         // Nhóm 4: Máy lọc nước
         if (selectedBh11Group === 'water_purifier') {
             if (p <= 8000000) return 280000;
             if (p <= 11000000) return 380000;
             return 460000;
         }
+
+        // --- NHÓM MỚI (Theo % + Min 200k) ---
+        // Smartphone: 4.62%
+        if (selectedBh11Group === 'smartphone') {
+            const fee = p * 0.0462;
+            return fee < 200000 ? 200000 : fee;
+        }
+        // Laptop - Tablet: 6.0%
+        if (selectedBh11Group === 'laptop_tablet') {
+            const fee = p * 0.06;
+            return fee < 200000 ? 200000 : fee;
+        }
+        // Smart Watch: 5.5%
+        if (selectedBh11Group === 'smart_watch') {
+            const fee = p * 0.055;
+            return fee < 200000 ? 200000 : fee;
+        }
+        // Điện tử (Tivi): 7.0% (Không áp Min 200k theo đề bài, hoặc áp dụng nếu cần)
+        if (selectedBh11Group === 'tv') {
+            return p * 0.07;
+        }
+
         return 0;
     })();
 
-    // 2. Tính toán
+    // 2. Tính toán trả góp
     $: loanAmount = Math.max(0, productPrice - downPaymentAmount);
     $: bhkvBase = (loanAmount > 0 && loanAmount <= 5000000) ? 5000000 : loanAmount;
-
     $: bhkvRatePercent = (() => {
         if (termMonths <= 6) return 2.6;
         if (termMonths <= 9) return 2.9;
         return 3.5;
     })();
-
     $: bhkvValue = loanAmount > 0 ? (bhkvBase * bhkvRatePercent / 100) : 0;
-    
     $: monthlyBase = (loanAmount > 0 && termMonths > 0) ? (loanAmount / termMonths) : 0;
     $: monthlyFee = 12000;
     $: monthlyPayment = monthlyBase + monthlyFee;
 
     $: totalInstallmentAmount = monthlyPayment * termMonths;
     $: finalTotalPrice = downPaymentAmount + bhkvValue + bh11Fee + totalInstallmentAmount;
-    
-    // Tổng tiền phải đưa trước
+    // Tổng tiền phải đưa trước (Gồm BH 1-1)
     $: totalPrepaid = downPaymentAmount + bhkvValue + bh11Fee;
-
     $: diffPrice = finalTotalPrice - productPrice;
 
 </script>
@@ -144,7 +165,8 @@
         
         <div class="flex gap-2">
             <div class="bg-white p-2.5 rounded-lg shadow-sm border border-slate-200 flex-[2]">
-                <label class="text-[9px] font-bold text-slate-400 uppercase mb-0.5 block">Giá Sản Phẩm</label>
+                <label class="text-[9px] font-bold text-slate-400 uppercase mb-0.5 block">Giá Bán (Để tính vay)</label>
+                
                 <div class="relative">
                     <input 
                         type="text" 
@@ -254,6 +276,10 @@
                     <option value="fridge">Tủ lạnh, Đông, Mát</option>
                     <option value="washer">Máy Giặt, Sấy</option>
                     <option value="water_purifier">Máy Lọc Nước</option>
+                    <option value="smartphone">Smartphone (4.62%)</option>
+                    <option value="laptop_tablet">Laptop - Tablet (6.0%)</option>
+                    <option value="smart_watch">Smart Watch (5.5%)</option>
+                    <option value="tv">Điện tử - Tivi (7.0%)</option>
                 </select>
                 {#if bh11Fee > 0}
                     <div class="text-[10px] text-right font-bold text-indigo-600 mt-1">+{formatCurrency(bh11Fee)}đ</div>
@@ -261,9 +287,31 @@
             </div>
         </div>
 
+        {#if selectedBh11Group !== 'none'}
+            <div class="bg-indigo-50/50 p-2.5 rounded-lg shadow-sm border border-indigo-100 animate-slideUp">
+                <label class="text-[9px] font-bold text-indigo-500 uppercase mb-0.5 block flex items-center gap-1">
+                    <span class="material-icons-round text-[10px]">price_check</span> Nhập Giá Máy Gốc (Để tính phí BH)
+                </label>
+                
+                <div class="relative">
+                    <input 
+                        type="text" 
+                        inputmode="numeric"
+                        value={displayBasePrice} 
+                        on:input={handleBasePriceInput}
+                        class="w-full text-lg font-black text-indigo-700 outline-none border-b border-indigo-200 focus:border-indigo-500 py-0 bg-transparent placeholder-indigo-300"
+                        placeholder="Nhập giá gốc..."
+                    >
+                    <span class="absolute right-0 bottom-1 text-[10px] font-bold text-indigo-400">VNĐ</span>
+                </div>
+            </div>
+        {/if}
+
     </div>
 
-    <div class="fixed bottom-0 left-0 w-full bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-[60] rounded-t-xl animate-slideUp">
+    <div class="h-6"></div>
+
+    <div class="fixed bottom-0 left-0 w-full bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-[60] rounded-t-xl animate-slideUp pb-6">
         <div class="p-3 max-w-md mx-auto">
             
             <div class="flex justify-between items-end mb-2">
@@ -296,10 +344,14 @@
                 </div>
                 
                 <div class="flex justify-between items-center text-[10px] pt-1 px-1">
-                    <span class="text-slate-500">Giá gốc: <b class="text-slate-700">{formatCurrency(productPrice)}</b></span>
+                    <span class="text-slate-500">Giá bán: <b class="text-slate-700">{formatCurrency(productPrice)}</b></span>
                     <span class="text-slate-500">Tổng góp: <b class="text-indigo-700">{formatCurrency(Math.round(finalTotalPrice))}</b></span>
                     <span class="text-orange-600 font-bold">Lệch: +{formatCurrency(Math.round(diffPrice))}</span>
                 </div>
+            </div>
+
+            <div class="text-center mt-2 opacity-30">
+                <span class="text-[8px] font-mono font-bold text-slate-500">Design by 3031</span>
             </div>
 
         </div>

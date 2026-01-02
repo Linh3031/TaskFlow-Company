@@ -1,6 +1,5 @@
 // public/sw.js
-// Version 1.0 - Network First Strategy (Safe for Dev)
-
+// Version 2.1 - Fix Chrome Extension Error + Network First
 const CACHE_NAME = 'taskflow-cache-v1';
 const ASSETS_TO_CACHE = [
   '/',
@@ -9,7 +8,7 @@ const ASSETS_TO_CACHE = [
   '/logo.jpeg'
 ];
 
-// 1. Install Event: Cache các file tĩnh cơ bản
+// 1. Install Event: Cache file tĩnh
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -17,10 +16,10 @@ self.addEventListener('install', (event) => {
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
-  self.skipWaiting(); // Kích hoạt ngay lập tức
+  self.skipWaiting();
 });
 
-// 2. Activate Event: Dọn dẹp cache cũ
+// 2. Activate Event: Dọn cache cũ
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keyList) => {
@@ -35,16 +34,20 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// 3. Fetch Event: Network First (Ưu tiên mạng -> Fallback Cache)
+// 3. Fetch Event: Xử lý request mạng
 self.addEventListener('fetch', (event) => {
+  // --- [FIX] CHẶN LỖI CHROME EXTENSION ---
+  // Nếu request không bắt đầu bằng 'http' (vd: chrome-extension://, data://), bỏ qua ngay
+  if (!event.request.url.startsWith('http')) return;
+
   // Chỉ xử lý GET request
   if (event.request.method !== 'GET') return;
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Nếu lấy được từ mạng, copy vào cache cho lần sau (Dynamic Caching)
-        // Chỉ cache những request http/https thành công
+        // Nếu lấy được từ mạng, copy vào cache
+        // Kiểm tra kỹ response hợp lệ mới cache
         if (!response || response.status !== 200 || response.type !== 'basic') {
           return response;
         }
@@ -53,21 +56,21 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_NAME)
           .then((cache) => {
             cache.put(event.request, responseToCache);
+          })
+          .catch(err => {
+             // Bắt lỗi cache phụ (nếu có) để không crash app
+             console.warn('[SW] Cache Error:', err);
           });
 
         return response;
       })
       .catch(() => {
         // Nếu mất mạng (Offline), tìm trong cache
-        console.log('[SW] Network failed, serving from cache:', event.request.url);
         return caches.match(event.request)
           .then((response) => {
-             // Nếu có trong cache thì trả về
              if (response) return response;
-             
-             // Nếu không có trong cache (ví dụ ảnh mới), trả về fallback hoặc lỗi
-             // Ở đây ta đơn giản trả về null để browser tự xử lý lỗi
-             return null;
+             // Có thể trả về trang offline.html ở đây nếu muốn
+             return null; 
           });
       })
   );
