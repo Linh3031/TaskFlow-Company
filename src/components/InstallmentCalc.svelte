@@ -1,16 +1,16 @@
 <script>
-    // Component: Tính Trả Góp (Mobile Optimized v2 - Compact Layout)
+    // Component: Tính Trả Góp (Final Refined Version)
     
     // --- STATE ---
     let productPrice = 0;
     
     // Trả trước
     let downPaymentType = 'percent'; // 'percent' | 'amount'
-    let downPaymentPercent = 20; // Mặc định 20%
+    let downPaymentPercent = 0; // Mặc định 0% theo ý người dùng
     let downPaymentAmount = 0;
 
     // Gói lãi suất
-    let interestPackage = 0; // Mặc định 0%
+    let interestPackage = 0; 
 
     // Thời hạn
     let termMonths = 6; 
@@ -35,10 +35,14 @@
         recalcDownPayment();
     }
 
-    function handleDownPaymentPercentChange(e) {
-        let val = Number(e.target.value);
+    function handleDownPaymentPercentInput(e) {
+        // Fix lỗi hiển thị 010: Ép kiểu số ngay lập tức
+        let val = parseFloat(e.target.value);
+        if (isNaN(val)) val = 0;
+        
         if (val > 100) val = 100;
         if (val < 0) val = 0;
+        
         downPaymentPercent = val;
         recalcDownPayment();
     }
@@ -93,11 +97,15 @@
 
     $: totalInstallmentAmount = monthlyPayment * termMonths;
     $: finalTotalPrice = downPaymentAmount + bhkvValue + totalInstallmentAmount;
+    
+    // Tổng tiền trả trước = Tiền gốc trả trước + Bảo hiểm khoản vay
+    $: totalPrepaid = downPaymentAmount + bhkvValue;
+
     $: diffPrice = finalTotalPrice - productPrice;
 
 </script>
 
-<div class="h-full flex flex-col bg-slate-50 relative pb-60 overflow-y-auto">
+<div class="h-full flex flex-col bg-slate-50 relative pb-72 overflow-y-auto">
     
     <div class="p-3 space-y-3">
         
@@ -152,7 +160,8 @@
                         <input 
                             type="number" 
                             bind:value={downPaymentPercent}
-                            on:input={(e)=>handleDownPaymentPercentChange(e)}
+                            on:input={handleDownPaymentPercentInput}
+                            on:focus={(e) => e.target.select()} 
                             class="w-full text-xl font-bold text-indigo-600 outline-none border-b-2 border-indigo-100 focus:border-indigo-500 py-1 text-center bg-transparent"
                         >
                         <span class="absolute right-0 bottom-2 text-[10px] font-bold text-indigo-300">%</span>
@@ -236,8 +245,12 @@
                     <span class="text-indigo-900 font-bold">Tổng Giá Mua Góp:</span>
                     <span class="font-black text-indigo-700">{formatCurrency(Math.round(finalTotalPrice))} đ</span>
                 </div>
-                
-                <div class="flex justify-between items-center text-xs pt-2 border-t border-slate-200 border-dashed">
+
+                <div class="flex justify-between items-center text-sm bg-teal-50 -mx-3 px-3 py-1 border-y border-teal-100/50">
+                    <span class="text-teal-700 font-bold">Tiền Cần Đưa Trước:</span>
+                    <span class="font-black text-teal-700">{formatCurrency(Math.round(totalPrepaid))} đ</span>
+                </div>
+                <div class="flex justify-between items-center text-xs pt-1">
                     <span class="text-orange-600 font-bold">Chênh Lệch:</span>
                     <span class="font-black text-orange-600">+{formatCurrency(Math.round(diffPrice))} đ</span>
                 </div>
