@@ -1,21 +1,48 @@
 <script>
-    // Component: Tính Trả Góp (Compact Dashboard + Tách nhóm BH + Giá Gốc)
-    
+    // Component: Tính Trả Góp (File 2 - Integrated History v2.0)
+    import { onMount } from 'svelte'; // [ADDED] Cần cho LocalStorage
+
     // --- STATE ---
-    let productPrice = 0; // Giá bán (dùng để tính trả trước)
-    let originalBasePrice = 0; // Giá gốc (dùng để tính BH 1-1)
+    let productPrice = 0;
+    // Giá bán (dùng để tính trả trước)
+    let originalBasePrice = 0;
+    // Giá gốc (dùng để tính BH 1-1)
 
     // Trả trước
-    let downPaymentType = 'percent'; 
+    let downPaymentType = 'percent';
     let downPaymentPercent = 0; 
     let downPaymentAmount = 0;
     
     // Cấu hình
-    let interestPackage = 0; 
+    let interestPackage = 0;
     let termMonths = 6;
     
     // Bảo hiểm 1-1
     let selectedBh11Group = 'none';
+
+    // --- [NEW] STATE HISTORY & TABS ---
+    let activeTab = 'calc'; 
+    let history = [];
+
+    // --- [NEW] LOGIC HISTORY (From File Mau) ---
+    onMount(() => {
+        // NẠP LỊCH SỬ TỪ TRÌNH DUYỆT (LocalStorage)
+        const savedHistory = localStorage.getItem('installment_history_v2'); // Đổi key một chút để không đụng file cũ nếu chạy chung domain
+        if (savedHistory) {
+            try {
+                history = JSON.parse(savedHistory);
+            } catch (e) {
+                console.error('Lỗi đọc lịch sử cũ', e);
+            }
+        }
+    });
+
+    // TỰ ĐỘNG LƯU VÀO TRÌNH DUYỆT
+    $: {
+        if (history) {
+            localStorage.setItem('installment_history_v2', JSON.stringify(history));
+        }
+    }
 
     // --- FORMATTER ---
     const formatCurrency = (val) => {
@@ -24,7 +51,8 @@
     };
 
     const parseNumber = (str) => {
-        return Number(String(str).replace(/[^0-9]/g, '')) || 0;
+        return Number(String(str).replace(/[^0-9]/g, '')) ||
+        0;
     };
 
     // --- LOGIC NHẬP LIỆU GIÁ BÁN ---
@@ -83,7 +111,7 @@
         recalcDownPayment();
     }
 
-    // --- LOGIC TÍNH TOÁN ---
+    // --- LOGIC TÍNH TOÁN (Giữ nguyên của File 2) ---
 
     // 1. Phí BH 1-1 (Dựa trên GIÁ GỐC - originalBasePrice)
     $: bh11Fee = (() => {
@@ -157,16 +185,68 @@
     $: totalPrepaid = downPaymentAmount + bhkvValue + bh11Fee;
     $: diffPrice = finalTotalPrice - productPrice;
 
+    // --- [NEW] LOGIC HISTORY ACTIONS ---
+    function saveToHistory() {
+        if (productPrice === 0) return;
+        const newItem = {
+            id: Date.now(),
+            timestamp: new Date().toLocaleString('vi-VN', { hour: '2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'}),
+            price: productPrice,
+            prepaid: totalPrepaid,
+            monthly: monthlyPayment,
+            term: termMonths,
+            diff: diffPrice,
+            selected: false 
+        };
+        history = [newItem, ...history].slice(0, 10);
+    }
+
+    function deleteHistoryItem(id) {
+        history = history.filter(item => item.id !== id);
+    }
+
+    function clearHistory() {
+        if(confirm('Xóa toàn bộ lịch sử?')) {
+            history = [];
+        }
+    }
+
+    function clearSelection() {
+        history = history.map(item => ({...item, selected: false}));
+    }
+
+    $: selectedItems = history.filter(h => h.selected);
+    $: comboTotalProductPrice = selectedItems.reduce((sum, item) => sum + item.price, 0);
+    $: comboTotalPrepaid = selectedItems.reduce((sum, item) => sum + item.prepaid, 0);
+    $: comboTotalMonthly = selectedItems.reduce((sum, item) => sum + item.monthly, 0);
+
 </script>
 
 <div class="h-full flex flex-col bg-slate-50 relative pb-64 overflow-y-auto">
     
-    <div class="p-2 space-y-2">
+    <div class="bg-white px-2 pt-1 pb-0 z-10 flex gap-2 border-b border-slate-200 sticky top-0">
+        <button 
+            class="flex-1 pb-2 text-sm font-bold uppercase transition-all border-b-2 {activeTab === 'calc' ?
+            'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}"
+            on:click={() => activeTab = 'calc'}
+        >
+            Tính Toán
+        </button>
+        <button 
+            class="flex-1 pb-2 text-sm font-bold uppercase transition-all border-b-2 {activeTab === 'history' ?
+            'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}"
+            on:click={() => activeTab = 'history'}
+        >
+            Lịch Sử <span class="ml-1 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{history.length}</span>
+        </button>
+    </div>
+
+    {#if activeTab === 'calc'}
+    <div class="p-2 space-y-2 animate-fadeIn">
         
         <div class="flex gap-2">
             <div class="bg-white p-2.5 rounded-lg shadow-sm border border-slate-200 flex-[2]">
                 <label class="text-[9px] font-bold text-slate-400 uppercase mb-0.5 block">Giá Bán (Để tính vay)</label>
-                
                 <div class="relative">
                     <input 
                         type="text" 
@@ -199,11 +279,13 @@
                 <label class="text-[9px] font-bold text-slate-400 uppercase">Trả Trước (Gốc)</label>
                 <div class="flex bg-slate-100 rounded p-0.5 border border-slate-200">
                     <button 
-                        class="px-2 py-0.5 rounded text-[9px] font-bold transition-all {downPaymentType==='percent' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}"
+                        class="px-2 py-0.5 rounded text-[9px] font-bold transition-all {downPaymentType==='percent' ?
+                        'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}"
                         on:click={()=>setDownType('percent')}
                     >%</button>
                     <button 
-                        class="px-2 py-0.5 rounded text-[9px] font-bold transition-all {downPaymentType==='amount' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}"
+                        class="px-2 py-0.5 rounded text-[9px] font-bold transition-all {downPaymentType==='amount' 
+                        ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}"
                         on:click={()=>setDownType('amount')}
                     >VNĐ</button>
                 </div>
@@ -232,7 +314,8 @@
                             inputmode="numeric"
                             value={displayDownPaymentAmount}
                             on:input={handleDownPaymentAmountInput}
-                            class="w-full text-lg font-bold text-indigo-600 outline-none border-b-2 border-indigo-100 focus:border-indigo-500 py-0 bg-transparent"
+                            class="w-full text-lg font-bold text-indigo-600 outline-none border-b-2 border-indigo-100 focus:border-indigo-500 py-0 
+                            bg-transparent"
                             placeholder="0"
                         >
                         <span class="absolute right-0 bottom-1 text-[9px] font-bold text-indigo-300">VNĐ</span>
@@ -308,9 +391,70 @@
         {/if}
 
     </div>
+    {/if}
+
+    {#if activeTab === 'history'}
+        <div class="p-2 space-y-2 animate-fadeIn pb-24">
+            {#if history.length === 0}
+                <div class="text-center py-10 opacity-40">
+                    <span class="material-icons-round text-4xl mb-2 text-slate-300">history</span>
+                    <p class="text-xs font-bold text-slate-400">Chưa có lịch sử tính toán</p>
+                </div>
+            {:else}
+                <div class="flex justify-between items-center px-1 mb-2">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase">Chọn để tính Combo</span>
+                    <button on:click={clearHistory} class="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Xóa hết</button>
+                </div>
+                {#each history as item (item.id)}
+                    <label class="bg-white p-3 rounded-lg shadow-sm border {item.selected ?
+                    'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-200'} relative group animate-slideIn flex gap-3 cursor-pointer select-none transition-all">
+                        
+                        <div class="flex items-center justify-center">
+                            <input 
+                                type="checkbox" 
+                                bind:checked={item.selected}
+                                class="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
+                            >
+                        </div>
+
+                        <div class="flex-1">
+                            <button 
+                                class="absolute top-2 right-2 text-slate-300 hover:text-red-500 p-1 z-10"
+                                on:click|preventDefault|stopPropagation={() => deleteHistoryItem(item.id)}
+                            >
+                                <span class="material-icons-round text-base">close</span>
+                            </button>
+                            
+                            <div class="flex items-center gap-2 mb-2 pr-6">
+                                <span class="text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{item.timestamp}</span>
+                                <span class="text-[10px] font-bold text-slate-500">Giá bán:</span>
+                                <span class="text-xs font-black text-indigo-700">{formatCurrency(item.price)} đ</span>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-2 text-center bg-slate-50 rounded p-2 border border-slate-100">
+                                <div>
+                                    <div class="text-[8px] font-bold text-slate-400 uppercase">Trả Trước</div>
+                                    <div class="text-[10px] font-bold text-slate-700">{formatCurrency(item.prepaid)}</div>
+                                </div>
+                                <div>
+                                    <div class="text-[8px] font-bold text-slate-400 uppercase">Góp/Tháng</div>
+                                    <div class="text-[10px] font-bold text-indigo-600">{formatCurrency(item.monthly)}</div>
+                                </div>
+                                <div>
+                                    <div class="text-[8px] font-bold text-slate-400 uppercase">Kỳ Hạn</div>
+                                    <div class="text-[10px] font-bold text-slate-700">{item.term} Th</div>
+                                </div>
+                            </div>
+                        </div>
+                    </label>
+                {/each}
+            {/if}
+        </div>
+    {/if}
 
     <div class="h-6"></div>
 
+    {#if activeTab === 'calc'}
     <div class="fixed bottom-0 left-0 w-full bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-[60] rounded-t-xl animate-slideUp pb-6">
         <div class="p-3 max-w-md mx-auto">
             
@@ -321,6 +465,14 @@
                         {formatCurrency(Math.round(monthlyPayment))} <small class="text-sm text-slate-500 font-bold">đ</small>
                     </div>
                 </div>
+                <button 
+                    on:click={saveToHistory}
+                    class="bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-600 p-2 rounded-lg flex flex-col items-center justify-center transition-all border border-indigo-100"
+                    title="Lưu vào lịch sử"
+                >
+                    <span class="material-icons-round text-xl">save</span>
+                    <span class="text-[8px] font-bold uppercase mt-0.5">Lưu</span>
+                </button>
             </div>
 
             <div class="flex gap-2 mb-2">
@@ -328,7 +480,6 @@
                     <div class="text-[8px] font-bold text-slate-400 uppercase">BHKV ({bhkvRatePercent}%)</div>
                     <div class="text-xs font-bold text-slate-700">{formatCurrency(Math.round(bhkvValue))}</div>
                 </div>
-                
                 {#if bh11Fee > 0}
                     <div class="flex-1 bg-indigo-50 rounded p-1.5 border border-indigo-100 text-center">
                         <div class="text-[8px] font-bold text-indigo-400 uppercase">BH 1 Đổi 1</div>
@@ -356,11 +507,51 @@
 
         </div>
     </div>
+    {/if}
+
+    {#if activeTab === 'history' && selectedItems.length > 0}
+    <div class="fixed bottom-0 left-0 w-full bg-white border-t border-indigo-200 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] z-[60] rounded-t-xl animate-slideUp pb-6 bg-indigo-50">
+        <div class="p-3 max-w-md mx-auto">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-[10px] font-bold text-indigo-400 uppercase">Đang chọn: {selectedItems.length} đơn</span>
+                <button 
+                    on:click={clearSelection}
+                    class="text-[10px] font-bold text-red-500 hover:text-red-700 uppercase bg-white px-2 py-0.5 rounded shadow-sm border border-red-100"
+                >
+                    Bỏ chọn tất cả
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-3 gap-2">
+                <div class="bg-white p-2 rounded shadow-sm border border-indigo-100 text-center">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase">Tổng Giá Bán</div>
+                    <div class="text-[13px] font-black text-slate-700">{formatCurrency(comboTotalProductPrice)}<small>đ</small></div>
+                </div>
+                <div class="bg-white p-2 rounded shadow-sm border border-indigo-100 text-center">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase">Tổng Trả Trước</div>
+                    <div class="text-[13px] font-black text-teal-600">{formatCurrency(comboTotalPrepaid)}<small>đ</small></div>
+                </div>
+                <div class="bg-white p-2 rounded shadow-sm border border-indigo-100 text-center">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase">Tổng Góp/Th</div>
+                    <div class="text-[13px] font-black text-indigo-600">{formatCurrency(comboTotalMonthly)}<small>đ</small></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {/if}
 
 </div>
 
 <style>
     .animate-slideUp { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
     @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    
+    /* [NEW] Thêm animation cho History */
+    .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .animate-slideIn { animation: slideInLeft 0.3s ease-out; }
+    @keyframes slideInLeft { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
     input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 </style>
