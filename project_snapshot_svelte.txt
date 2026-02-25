@@ -135,17 +135,17 @@ export default {
 
 --- START FILE: ./src/App.svelte ---
 <script>
-  // Version 10.5 - Fix F5 Race Condition (Wait for Tasks Load)
+  // Version 10.6 - Add Installment Calc Feature
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
-  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore'; 
+  import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
-
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
   import TaskList from './components/TaskList.svelte';
-  import HandoverInput from './components/HandoverInput.svelte';
+  // import HandoverInput from './components/HandoverInput.svelte'; // [HIDDEN]
+  import InstallmentCalc from './components/InstallmentCalc.svelte'; // [NEW IMPORT]
   import AdminModal from './components/AdminModal.svelte';
   import TaskModal from './components/TaskModal.svelte';
   import TourGuide from './components/TourGuide.svelte';
@@ -164,17 +164,16 @@ export default {
 
   const tourSteps = [
       { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow.' },
-      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: Kho, Thu Ngân, Bàn Giao, Lịch Ca.' },
+      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: Kho, Thu Ngân, Trả Góp, Lịch Ca.' },
       { target: '#date-navigator', title: 'Chọn Ngày', content: 'Bấm < hoặc > để chuyển ngày.' },
       { target: '#btn-notif', title: 'Thông Báo', content: 'Xem ai nhắc tên bạn.' },
       { target: '#btn-admin', title: 'Cài Đặt', content: 'Cấu hình hệ thống.' }
   ];
-
   let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
   let hasCheckedInit = false; 
-  let isTasksLoaded = false; // [FIX]: Cờ kiểm soát việc tải dữ liệu
+  let isTasksLoaded = false; 
 
   // --- LOGIC HIỂN THỊ NGÀY THÁNG ---
   $: displayDateLabel = (() => {
@@ -182,14 +181,12 @@ export default {
       const [y, m, d] = selectedDate.split('-');
       return `${d}/${m}`;
   })();
-
   $: displayDayOfWeek = (() => {
       if (!selectedDate) return '';
       const date = new Date(selectedDate);
       const days = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
       return days[date.getDay()];
   })();
-
   function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
@@ -207,7 +204,7 @@ export default {
   // Reset cờ khi đổi kho hoặc đổi ngày
   $: if (activeStoreId || selectedDate) {
       hasCheckedInit = false;
-      isTasksLoaded = false; // [FIX]: Reset cờ khi đổi ngữ cảnh
+      isTasksLoaded = false; 
   }
 
   onMount(() => {
@@ -216,7 +213,6 @@ export default {
     });
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
-
   onDestroy(() => { unsubStores(); unsubTemplate(); unsubTasks(); });
 
   $: if ($currentUser && !activeStoreId) {
@@ -228,16 +224,13 @@ export default {
   }
 
   $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
-
   // TỰ ĐỘNG KHỞI TẠO (CHẠY NGẦM AN TOÀN)
-  // [FIX]: Thêm điều kiện && isTasksLoaded để đảm bảo chỉ chạy khi đã tải xong dữ liệu cũ
   $: if ($currentUser && activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
            initDailyTasksSafe(activeStoreId, selectedDate, $currentTasks, $taskTemplate);
        }
   }
 
-  // === HÀM SINH ID CỐ ĐỊNH (CỐT LÕI CỦA VIỆC CHỐNG TRÙNG) ===
   function generateFixedID(storeId, dateStr, type, title) {
       const cleanTitle = title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
       return `${storeId}_${dateStr}_${type}_${cleanTitle}`;
@@ -250,7 +243,7 @@ export default {
       const dayOfWeek = new Date().getDay();
       const batch = writeBatch(db);
       let hasUpdates = false;
-      const types = ['warehouse', 'cashier'];
+      const types = ['warehouse', 'cashier']; // Bỏ handover khỏi auto-init nếu không cần thiết
 
       types.forEach(type => {
           const templateItems = template[type] || [];
@@ -268,6 +261,7 @@ export default {
 
                   if (!existsByID && !existsByTitle) {
                       const docRef = doc(db, 'tasks', fixedID);
+             
                       batch.set(docRef, {
                           title: tpl.title.trim(),
                           timeSlot: tpl.time,
@@ -298,7 +292,6 @@ export default {
       unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
           taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
       });
-
       const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
       unsubTasks = onSnapshot(q, (snapshot) => {
           const tasks = [];
@@ -307,7 +300,7 @@ export default {
               if (data.type) tasks.push({ id: doc.id, ...data });
           });
           currentTasks.set(tasks);
-          isTasksLoaded = true; // [FIX]: Báo hiệu đã tải dữ liệu xong
+          isTasksLoaded = true; 
       });
   }
 
@@ -363,7 +356,7 @@ export default {
         {#each [
             {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'},
             {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50'},
-            {id:'handover', icon:'campaign', label:'Bàn Giao', color:'#673ab7'},
+            {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7'}, // [CHANGED] Handover -> Installment
             {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'}
         ] as t}
             <button class="tab-btn {activeTab===t.id?'active':''}" on:click={() => activeTab=t.id} style="--theme-color: {t.color};">
@@ -377,26 +370,25 @@ export default {
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
                  {#if $currentUser.role === 'super_admin'}
-                     🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
+                      🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
-                    {#if activeTab==='handover'}📢 Bàn Giao Ca{/if}
-                    {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
+                    {#if activeTab==='installment'}🧮 Tính Trả Góp{/if} {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                  {/if}
               </h3>
-              {#if activeTab !== 'schedule'}
-               <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
+              {#if activeTab !== 'schedule' && activeTab !== 'installment'}
+                <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
            </div>
            
-           {#if activeTab !== 'schedule'}
+           {#if activeTab !== 'schedule' && activeTab !== 'installment'}
             <div id="date-navigator" class="flex items-center gap-1 w-full sm:w-auto bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-sm">
-                <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
+                 <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
                     <span class="material-icons-round text-lg">chevron_left</span>
                 </button>
                 <button class="relative flex-1 sm:flex-none flex flex-col items-center justify-center px-3 cursor-pointer group min-w-[70px] bg-transparent border-none" on:click={openDatePicker}>
-                    <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
+                     <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
                     <span class="text-sm font-black text-gray-800 leading-tight group-hover:text-indigo-600 transition-colors">{displayDateLabel}</span>
                 </button>
                 <input id="hidden-date-input" type="date" bind:value={selectedDate} class="absolute opacity-0 pointer-events-none w-0 h-0">
@@ -407,8 +399,13 @@ export default {
           {/if}
         </div>
 
-        {#if activeTab === 'handover' && selectedDate === getTodayStr()} <HandoverInput /> {/if}
-        {#if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> {:else} <TaskList {activeTab} on:taskClick={handleTaskClick} /> {/if}
+        {#if activeTab === 'installment'} 
+            <InstallmentCalc /> 
+        {:else if activeTab === 'schedule'} 
+            <ShiftSchedule {activeTab} /> 
+        {:else} 
+            <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
+        {/if}
       </div>
       <footer>Design by 3031 | Kho đang xem: {activeStoreId}</footer>
     </div>
@@ -1210,6 +1207,566 @@ input[type="time"] {
 </style>
 --- END FILE: ./src/components/Header.svelte ---
 
+--- START FILE: ./src/components/InstallmentCalc.svelte ---
+<script>
+    // Component: Tính Trả Góp (File 2 - Integrated History v2.0)
+    import { onMount } from 'svelte'; // [ADDED] Cần cho LocalStorage
+
+    // --- STATE ---
+    let productPrice = 0;
+    // Giá bán (dùng để tính trả trước)
+    let originalBasePrice = 0;
+    // Giá gốc (dùng để tính BH 1-1)
+
+    // Trả trước
+    let downPaymentType = 'percent';
+    let downPaymentPercent = 0; 
+    let downPaymentAmount = 0;
+    
+    // Cấu hình
+    let interestPackage = 0;
+    let termMonths = 6;
+    
+    // Bảo hiểm 1-1
+    let selectedBh11Group = 'none';
+
+    // --- [NEW] STATE HISTORY & TABS ---
+    let activeTab = 'calc'; 
+    let history = [];
+
+    // --- [NEW] LOGIC HISTORY (From File Mau) ---
+    onMount(() => {
+        // NẠP LỊCH SỬ TỪ TRÌNH DUYỆT (LocalStorage)
+        const savedHistory = localStorage.getItem('installment_history_v2'); // Đổi key một chút để không đụng file cũ nếu chạy chung domain
+        if (savedHistory) {
+            try {
+                history = JSON.parse(savedHistory);
+            } catch (e) {
+                console.error('Lỗi đọc lịch sử cũ', e);
+            }
+        }
+    });
+
+    // TỰ ĐỘNG LƯU VÀO TRÌNH DUYỆT
+    $: {
+        if (history) {
+            localStorage.setItem('installment_history_v2', JSON.stringify(history));
+        }
+    }
+
+    // --- FORMATTER ---
+    const formatCurrency = (val) => {
+        if (!val || isNaN(val)) return '0';
+        return Math.round(val).toLocaleString('vi-VN');
+    };
+
+    const parseNumber = (str) => {
+        return Number(String(str).replace(/[^0-9]/g, '')) ||
+        0;
+    };
+
+    // --- LOGIC NHẬP LIỆU GIÁ BÁN ---
+    let displayPrice = "";
+    function handlePriceInput(e) {
+        const raw = parseNumber(e.target.value);
+        productPrice = raw;
+        displayPrice = formatCurrency(raw);
+        recalcDownPayment();
+    }
+
+    // --- LOGIC NHẬP LIỆU GIÁ GỐC (CHO BH 1-1) ---
+    let displayBasePrice = "";
+    function handleBasePriceInput(e) {
+        const raw = parseNumber(e.target.value);
+        originalBasePrice = raw;
+        displayBasePrice = formatCurrency(raw);
+    }
+
+    // --- LOGIC TRẢ TRƯỚC ---
+    function handleDownPaymentPercentInput(e) {
+        let val = parseFloat(e.target.value);
+        if (isNaN(val)) val = 0;
+        if (val > 100) val = 100;
+        if (val < 0) val = 0;
+        downPaymentPercent = val;
+        recalcDownPayment();
+    }
+
+    let displayDownPaymentAmount = "";
+    function handleDownPaymentAmountInput(e) {
+        const raw = parseNumber(e.target.value);
+        downPaymentAmount = raw;
+        if (downPaymentAmount > productPrice) downPaymentAmount = productPrice;
+        displayDownPaymentAmount = formatCurrency(downPaymentAmount);
+        if (productPrice > 0) {
+            downPaymentPercent = (downPaymentAmount / productPrice) * 100;
+        } else {
+            downPaymentPercent = 0;
+        }
+    }
+
+    function recalcDownPayment() {
+        if (downPaymentType === 'percent') {
+            downPaymentAmount = (productPrice * downPaymentPercent) / 100;
+            displayDownPaymentAmount = formatCurrency(downPaymentAmount);
+        } else {
+             if (productPrice > 0) {
+                downPaymentPercent = (downPaymentAmount / productPrice) * 100;
+            }
+        }
+    }
+
+    function setDownType(type) {
+        downPaymentType = type;
+        recalcDownPayment();
+    }
+
+    // --- LOGIC TÍNH TOÁN (Giữ nguyên của File 2) ---
+
+    // 1. Phí BH 1-1 (Dựa trên GIÁ GỐC - originalBasePrice)
+    $: bh11Fee = (() => {
+        const p = originalBasePrice; // Dùng giá gốc để tính phí
+        if (selectedBh11Group === 'none' || p === 0) return 0;
+
+        // --- NHÓM CŨ (Theo mức giá cố định) ---
+        // Nhóm 1: Máy Lạnh
+        if (selectedBh11Group === 'air_conditioner') {
+            return p <= 10000000 ? 250000 : 350000;
+        }
+        // Nhóm 2: Tủ lạnh, đông, mát
+        if (selectedBh11Group === 'fridge') {
+            if (p <= 10000000) return 400000;
+            if (p <= 25000000) return 700000;
+            return 1350000;
+        }
+        // Nhóm 3: Máy giặt, sấy
+        if (selectedBh11Group === 'washer') {
+            if (p <= 10000000) return 400000;
+            if (p <= 25000000) return 700000;
+            return 1350000;
+        }
+        // Nhóm 4: Máy lọc nước
+        if (selectedBh11Group === 'water_purifier') {
+            if (p <= 8000000) return 280000;
+            if (p <= 11000000) return 380000;
+            return 460000;
+        }
+
+        // --- NHÓM MỚI (Theo % + Min 200k) ---
+        // Smartphone: 4.62%
+        if (selectedBh11Group === 'smartphone') {
+            const fee = p * 0.0462;
+            return fee < 200000 ? 200000 : fee;
+        }
+        // Laptop - Tablet: 6.0%
+        if (selectedBh11Group === 'laptop_tablet') {
+            const fee = p * 0.06;
+            return fee < 200000 ? 200000 : fee;
+        }
+        // Smart Watch: 5.5%
+        if (selectedBh11Group === 'smart_watch') {
+            const fee = p * 0.055;
+            return fee < 200000 ? 200000 : fee;
+        }
+        // Điện tử (Tivi): 7.0% (Không áp Min 200k theo đề bài, hoặc áp dụng nếu cần)
+        if (selectedBh11Group === 'tv') {
+            return p * 0.07;
+        }
+
+        return 0;
+    })();
+
+    // 2. Tính toán trả góp
+    $: loanAmount = Math.max(0, productPrice - downPaymentAmount);
+    $: bhkvBase = (loanAmount > 0 && loanAmount <= 5000000) ? 5000000 : loanAmount;
+    $: bhkvRatePercent = (() => {
+        if (termMonths <= 6) return 2.6;
+        if (termMonths <= 9) return 2.9;
+        return 3.5;
+    })();
+    $: bhkvValue = loanAmount > 0 ? (bhkvBase * bhkvRatePercent / 100) : 0;
+    $: monthlyBase = (loanAmount > 0 && termMonths > 0) ? (loanAmount / termMonths) : 0;
+    $: monthlyFee = 12000;
+    $: monthlyPayment = monthlyBase + monthlyFee;
+
+    $: totalInstallmentAmount = monthlyPayment * termMonths;
+    $: finalTotalPrice = downPaymentAmount + bhkvValue + bh11Fee + totalInstallmentAmount;
+    // Tổng tiền phải đưa trước (Gồm BH 1-1)
+    $: totalPrepaid = downPaymentAmount + bhkvValue + bh11Fee;
+    $: diffPrice = finalTotalPrice - productPrice;
+
+    // --- [NEW] LOGIC HISTORY ACTIONS ---
+    function saveToHistory() {
+        if (productPrice === 0) return;
+        const newItem = {
+            id: Date.now(),
+            timestamp: new Date().toLocaleString('vi-VN', { hour: '2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'}),
+            price: productPrice,
+            prepaid: totalPrepaid,
+            monthly: monthlyPayment,
+            term: termMonths,
+            diff: diffPrice,
+            selected: false 
+        };
+        history = [newItem, ...history].slice(0, 10);
+    }
+
+    function deleteHistoryItem(id) {
+        history = history.filter(item => item.id !== id);
+    }
+
+    function clearHistory() {
+        if(confirm('Xóa toàn bộ lịch sử?')) {
+            history = [];
+        }
+    }
+
+    function clearSelection() {
+        history = history.map(item => ({...item, selected: false}));
+    }
+
+    $: selectedItems = history.filter(h => h.selected);
+    $: comboTotalProductPrice = selectedItems.reduce((sum, item) => sum + item.price, 0);
+    $: comboTotalPrepaid = selectedItems.reduce((sum, item) => sum + item.prepaid, 0);
+    $: comboTotalMonthly = selectedItems.reduce((sum, item) => sum + item.monthly, 0);
+
+</script>
+
+<div class="h-full flex flex-col bg-slate-50 relative pb-64 overflow-y-auto">
+    
+    <div class="bg-white px-2 pt-1 pb-0 z-10 flex gap-2 border-b border-slate-200 sticky top-0">
+        <button 
+            class="flex-1 pb-2 text-sm font-bold uppercase transition-all border-b-2 {activeTab === 'calc' ?
+            'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}"
+            on:click={() => activeTab = 'calc'}
+        >
+            Tính Toán
+        </button>
+        <button 
+            class="flex-1 pb-2 text-sm font-bold uppercase transition-all border-b-2 {activeTab === 'history' ?
+            'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}"
+            on:click={() => activeTab = 'history'}
+        >
+            Lịch Sử <span class="ml-1 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{history.length}</span>
+        </button>
+    </div>
+
+    {#if activeTab === 'calc'}
+    <div class="p-2 space-y-2 animate-fadeIn">
+        
+        <div class="flex gap-2">
+            <div class="bg-white p-2.5 rounded-lg shadow-sm border border-slate-200 flex-[2]">
+                <label class="text-[9px] font-bold text-slate-400 uppercase mb-0.5 block">Giá Bán (Để tính vay)</label>
+                <div class="relative">
+                    <input 
+                        type="text" 
+                        inputmode="numeric"
+                        value={displayPrice} 
+                        on:input={handlePriceInput}
+                        class="w-full text-xl font-black text-indigo-700 outline-none border-b border-slate-200 focus:border-indigo-500 py-0 bg-transparent placeholder-slate-300"
+                        placeholder="0"
+                    >
+                    <span class="absolute right-0 bottom-1 text-[10px] font-bold text-slate-400">VNĐ</span>
+                </div>
+            </div>
+
+            <div class="bg-white p-2.5 rounded-lg shadow-sm border border-slate-200 flex-1 min-w-[80px] opacity-70">
+                <label class="text-[9px] font-bold text-slate-400 uppercase mb-0.5 block">Lãi Suất</label>
+                <div class="relative">
+                    <input 
+                        type="number" 
+                        bind:value={interestPackage}
+                        class="w-full text-xl font-bold text-slate-700 outline-none border-b border-slate-200 py-0 bg-transparent text-center"
+                        readonly
+                    >
+                    <span class="absolute right-0 bottom-1 text-[10px] font-bold text-slate-400">%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white p-2.5 rounded-lg shadow-sm border border-slate-200">
+            <div class="flex justify-between items-center mb-1">
+                <label class="text-[9px] font-bold text-slate-400 uppercase">Trả Trước (Gốc)</label>
+                <div class="flex bg-slate-100 rounded p-0.5 border border-slate-200">
+                    <button 
+                        class="px-2 py-0.5 rounded text-[9px] font-bold transition-all {downPaymentType==='percent' ?
+                        'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}"
+                        on:click={()=>setDownType('percent')}
+                    >%</button>
+                    <button 
+                        class="px-2 py-0.5 rounded text-[9px] font-bold transition-all {downPaymentType==='amount' 
+                        ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}"
+                        on:click={()=>setDownType('amount')}
+                    >VNĐ</button>
+                </div>
+            </div>
+
+            <div class="flex items-end gap-2">
+                {#if downPaymentType === 'percent'}
+                    <div class="w-16 relative shrink-0">
+                        <input 
+                            type="number" 
+                            bind:value={downPaymentPercent}
+                            on:input={handleDownPaymentPercentInput}
+                            on:focus={(e) => e.target.select()} 
+                            class="w-full text-lg font-bold text-indigo-600 outline-none border-b-2 border-indigo-100 focus:border-indigo-500 py-0 text-center bg-transparent"
+                        >
+                        <span class="absolute right-0 bottom-1 text-[9px] font-bold text-indigo-300">%</span>
+                    </div>
+                    <div class="flex-1 text-right pb-1 border-b border-slate-100">
+                        <div class="text-[9px] font-bold text-slate-400">Thành tiền:</div>
+                        <div class="text-sm font-black text-slate-700">{formatCurrency(downPaymentAmount)}</div>
+                    </div>
+                {:else}
+                    <div class="flex-1 relative">
+                        <input 
+                            type="text" 
+                            inputmode="numeric"
+                            value={displayDownPaymentAmount}
+                            on:input={handleDownPaymentAmountInput}
+                            class="w-full text-lg font-bold text-indigo-600 outline-none border-b-2 border-indigo-100 focus:border-indigo-500 py-0 
+                            bg-transparent"
+                            placeholder="0"
+                        >
+                        <span class="absolute right-0 bottom-1 text-[9px] font-bold text-indigo-300">VNĐ</span>
+                    </div>
+                {/if}
+            </div>
+            
+            <div class="mt-1 flex justify-between items-center bg-orange-50 px-2 py-0.5 rounded">
+                <span class="text-[9px] font-bold text-orange-400 uppercase">Cần Vay</span>
+                <span class="text-xs font-black text-orange-600">{formatCurrency(loanAmount)}</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+            
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+                <label class="text-[9px] font-bold text-slate-400 uppercase mb-1 block">Kỳ Hạn</label>
+                <div class="flex items-center gap-1">
+                    <button class="w-8 h-8 rounded bg-slate-100 text-indigo-600 font-bold flex items-center justify-center active:scale-90" on:click={()=>termMonths = Math.max(1, termMonths-1)}>-</button>
+                    <div class="flex-1 relative text-center">
+                         <input 
+                            type="number" 
+                            bind:value={termMonths}
+                            min="1"
+                            class="w-full text-xl font-black text-slate-700 outline-none border-none bg-transparent text-center p-0 m-0"
+                        >
+                         <span class="text-[9px] text-slate-400 font-bold block -mt-1">Tháng</span>
+                    </div>
+                    <button class="w-8 h-8 rounded bg-slate-100 text-indigo-600 font-bold flex items-center justify-center active:scale-90" on:click={()=>termMonths++}>+</button>
+                </div>
+            </div>
+
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-slate-200 flex flex-col justify-between">
+                <label class="text-[9px] font-bold text-slate-400 uppercase mb-1 block">Bảo Hiểm 1-1</label>
+                <select 
+                    bind:value={selectedBh11Group}
+                    class="w-full text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded py-1.5 px-1 outline-none focus:border-indigo-500"
+                >
+                    <option value="none">Không chọn</option>
+                    <option value="air_conditioner">Máy Lạnh</option>
+                    <option value="fridge">Tủ lạnh, Đông, Mát</option>
+                    <option value="washer">Máy Giặt, Sấy</option>
+                    <option value="water_purifier">Máy Lọc Nước</option>
+                    <option value="smartphone">Smartphone (4.62%)</option>
+                    <option value="laptop_tablet">Laptop - Tablet (6.0%)</option>
+                    <option value="smart_watch">Smart Watch (5.5%)</option>
+                    <option value="tv">Điện tử - Tivi (7.0%)</option>
+                </select>
+                {#if bh11Fee > 0}
+                    <div class="text-[10px] text-right font-bold text-indigo-600 mt-1">+{formatCurrency(bh11Fee)}đ</div>
+                {/if}
+            </div>
+        </div>
+
+        {#if selectedBh11Group !== 'none'}
+            <div class="bg-indigo-50/50 p-2.5 rounded-lg shadow-sm border border-indigo-100 animate-slideUp">
+                <label class="text-[9px] font-bold text-indigo-500 uppercase mb-0.5 block flex items-center gap-1">
+                    <span class="material-icons-round text-[10px]">price_check</span> Nhập Giá Máy Gốc (Để tính phí BH)
+                </label>
+                
+                <div class="relative">
+                    <input 
+                        type="text" 
+                        inputmode="numeric"
+                        value={displayBasePrice} 
+                        on:input={handleBasePriceInput}
+                        class="w-full text-lg font-black text-indigo-700 outline-none border-b border-indigo-200 focus:border-indigo-500 py-0 bg-transparent placeholder-indigo-300"
+                        placeholder="Nhập giá gốc..."
+                    >
+                    <span class="absolute right-0 bottom-1 text-[10px] font-bold text-indigo-400">VNĐ</span>
+                </div>
+            </div>
+        {/if}
+
+    </div>
+    {/if}
+
+    {#if activeTab === 'history'}
+        <div class="p-2 space-y-2 animate-fadeIn pb-24">
+            {#if history.length === 0}
+                <div class="text-center py-10 opacity-40">
+                    <span class="material-icons-round text-4xl mb-2 text-slate-300">history</span>
+                    <p class="text-xs font-bold text-slate-400">Chưa có lịch sử tính toán</p>
+                </div>
+            {:else}
+                <div class="flex justify-between items-center px-1 mb-2">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase">Chọn để tính Combo</span>
+                    <button on:click={clearHistory} class="text-[10px] font-bold text-red-400 hover:text-red-600 uppercase">Xóa hết</button>
+                </div>
+                {#each history as item (item.id)}
+                    <label class="bg-white p-3 rounded-lg shadow-sm border {item.selected ?
+                    'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-200'} relative group animate-slideIn flex gap-3 cursor-pointer select-none transition-all">
+                        
+                        <div class="flex items-center justify-center">
+                            <input 
+                                type="checkbox" 
+                                bind:checked={item.selected}
+                                class="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
+                            >
+                        </div>
+
+                        <div class="flex-1">
+                            <button 
+                                class="absolute top-2 right-2 text-slate-300 hover:text-red-500 p-1 z-10"
+                                on:click|preventDefault|stopPropagation={() => deleteHistoryItem(item.id)}
+                            >
+                                <span class="material-icons-round text-base">close</span>
+                            </button>
+                            
+                            <div class="flex items-center gap-2 mb-2 pr-6">
+                                <span class="text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{item.timestamp}</span>
+                                <span class="text-[10px] font-bold text-slate-500">Giá bán:</span>
+                                <span class="text-xs font-black text-indigo-700">{formatCurrency(item.price)} đ</span>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-2 text-center bg-slate-50 rounded p-2 border border-slate-100">
+                                <div>
+                                    <div class="text-[8px] font-bold text-slate-400 uppercase">Trả Trước</div>
+                                    <div class="text-[10px] font-bold text-slate-700">{formatCurrency(item.prepaid)}</div>
+                                </div>
+                                <div>
+                                    <div class="text-[8px] font-bold text-slate-400 uppercase">Góp/Tháng</div>
+                                    <div class="text-[10px] font-bold text-indigo-600">{formatCurrency(item.monthly)}</div>
+                                </div>
+                                <div>
+                                    <div class="text-[8px] font-bold text-slate-400 uppercase">Kỳ Hạn</div>
+                                    <div class="text-[10px] font-bold text-slate-700">{item.term} Th</div>
+                                </div>
+                            </div>
+                        </div>
+                    </label>
+                {/each}
+            {/if}
+        </div>
+    {/if}
+
+    <div class="h-6"></div>
+
+    {#if activeTab === 'calc'}
+    <div class="fixed bottom-0 left-0 w-full bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-[60] rounded-t-xl animate-slideUp pb-6">
+        <div class="p-3 max-w-md mx-auto">
+            
+            <div class="flex justify-between items-end mb-2">
+                <div>
+                    <div class="text-[9px] font-bold text-slate-400 uppercase">Góp mỗi tháng (Đã +12k phí thu hộ)</div>
+                    <div class="text-3xl font-black text-indigo-600 tracking-tighter leading-none">
+                        {formatCurrency(Math.round(monthlyPayment))} <small class="text-sm text-slate-500 font-bold">đ</small>
+                    </div>
+                </div>
+                <button 
+                    on:click={saveToHistory}
+                    class="bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-600 p-2 rounded-lg flex flex-col items-center justify-center transition-all border border-indigo-100"
+                    title="Lưu vào lịch sử"
+                >
+                    <span class="material-icons-round text-xl">save</span>
+                    <span class="text-[8px] font-bold uppercase mt-0.5">Lưu</span>
+                </button>
+            </div>
+
+            <div class="flex gap-2 mb-2">
+                <div class="flex-1 bg-slate-50 rounded p-1.5 border border-slate-100 text-center">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase">BHKV ({bhkvRatePercent}%)</div>
+                    <div class="text-xs font-bold text-slate-700">{formatCurrency(Math.round(bhkvValue))}</div>
+                </div>
+                {#if bh11Fee > 0}
+                    <div class="flex-1 bg-indigo-50 rounded p-1.5 border border-indigo-100 text-center">
+                        <div class="text-[8px] font-bold text-indigo-400 uppercase">BH 1 Đổi 1</div>
+                        <div class="text-xs font-bold text-indigo-700">{formatCurrency(bh11Fee)}</div>
+                    </div>
+                {/if}
+            </div>
+
+            <div class="space-y-1">
+                <div class="flex justify-between items-center text-sm bg-teal-50 -mx-3 px-3 py-1.5 border-y border-teal-100">
+                    <span class="text-teal-800 font-bold text-xs uppercase">Tổng Tiền Đưa Trước:</span>
+                    <span class="font-black text-teal-700 text-base">{formatCurrency(Math.round(totalPrepaid))} đ</span>
+                </div>
+                
+                <div class="flex justify-between items-center text-[10px] pt-1 px-1">
+                    <span class="text-slate-500">Giá bán: <b class="text-slate-700">{formatCurrency(productPrice)}</b></span>
+                    <span class="text-slate-500">Tổng góp: <b class="text-indigo-700">{formatCurrency(Math.round(finalTotalPrice))}</b></span>
+                    <span class="text-orange-600 font-bold">Lệch: +{formatCurrency(Math.round(diffPrice))}</span>
+                </div>
+            </div>
+
+            <div class="text-center mt-2 opacity-30">
+                <span class="text-[8px] font-mono font-bold text-slate-500">Design by 3031</span>
+            </div>
+
+        </div>
+    </div>
+    {/if}
+
+    {#if activeTab === 'history' && selectedItems.length > 0}
+    <div class="fixed bottom-0 left-0 w-full bg-white border-t border-indigo-200 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] z-[60] rounded-t-xl animate-slideUp pb-6 bg-indigo-50">
+        <div class="p-3 max-w-md mx-auto">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-[10px] font-bold text-indigo-400 uppercase">Đang chọn: {selectedItems.length} đơn</span>
+                <button 
+                    on:click={clearSelection}
+                    class="text-[10px] font-bold text-red-500 hover:text-red-700 uppercase bg-white px-2 py-0.5 rounded shadow-sm border border-red-100"
+                >
+                    Bỏ chọn tất cả
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-3 gap-2">
+                <div class="bg-white p-2 rounded shadow-sm border border-indigo-100 text-center">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase">Tổng Giá Bán</div>
+                    <div class="text-[13px] font-black text-slate-700">{formatCurrency(comboTotalProductPrice)}<small>đ</small></div>
+                </div>
+                <div class="bg-white p-2 rounded shadow-sm border border-indigo-100 text-center">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase">Tổng Trả Trước</div>
+                    <div class="text-[13px] font-black text-teal-600">{formatCurrency(comboTotalPrepaid)}<small>đ</small></div>
+                </div>
+                <div class="bg-white p-2 rounded shadow-sm border border-indigo-100 text-center">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase">Tổng Góp/Th</div>
+                    <div class="text-[13px] font-black text-indigo-600">{formatCurrency(comboTotalMonthly)}<small>đ</small></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {/if}
+
+</div>
+
+<style>
+    .animate-slideUp { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    
+    /* [NEW] Thêm animation cho History */
+    .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .animate-slideIn { animation: slideInLeft 0.3s ease-out; }
+    @keyframes slideInLeft { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+</style>
+--- END FILE: ./src/components/InstallmentCalc.svelte ---
+
 --- START FILE: ./src/components/Login.svelte ---
 <script>
   // Version 7.4 - Fix Invalid ID Error (Sanitize Slash Character)
@@ -1568,14 +2125,23 @@ input[type="time"] {
 
 --- START FILE: ./src/components/ShiftSchedule.svelte ---
 <script>
-  // Version 40.0 - Add Cumulative History View
+  // Version 40.5 - Refactored (Phase 4.1: Extracted Excel Export) [Surgical Fix]
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
   import { currentUser } from '../lib/stores';
-  import { utils, writeFile } from 'xlsx';
   import TourGuide from './TourGuide.svelte';
-  import CumulativeHistoryModal from './CumulativeHistoryModal.svelte'; // [GEM IMPORT]
+  import CumulativeHistoryModal from './CumulativeHistoryModal.svelte'; 
+  
+  // Tích hợp các mảnh ghép giao diện
+  import ScheduleControls from './ShiftScheduleParts/ScheduleControls.svelte';
+  import ScheduleTable from './ShiftScheduleParts/ScheduleTable.svelte';
+  import DayStatsModal from './ShiftScheduleParts/DayStatsModal.svelte';
+  import EditShiftModal from './ShiftScheduleParts/EditShiftModal.svelte';
+  import PersonalScheduleModal from './ShiftScheduleParts/PersonalScheduleModal.svelte';
+
+  // [NEW] Import Service Xuất Excel
+  import { exportScheduleToExcel } from '../utils/excelExport.js';
 
   export let activeTab;
   let scheduleData = null, loading = false, errorMsg = '';
@@ -1586,10 +2152,12 @@ input[type="time"] {
   let selectedStaff = null;
   let editingShift = null;
   let selectedDayStats = null;
-  let showHistoryModal = false; // [GEM STATE]
+  let showHistoryModal = false; 
   
-  const QUICK_SHIFTS = ['OFF', '123', '456', '23', '45', '2345'];
+  let showPastDays = false;
+  let highlightedDay = null;
   let tempEditingShift = null;
+
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
   let selectedViewStore = '';
@@ -1598,9 +2166,23 @@ input[type="time"] {
   let unsubscribe = () => {};
   $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr) { loadSchedule(currentMonthStr, selectedViewStore); }
 
+  function isPastDay(d) {
+      const today = new Date();
+      if (viewYear > today.getFullYear()) return false;
+      if (viewYear < today.getFullYear()) return true;
+      if (viewMonth > today.getMonth() + 1) return false;
+      if (viewMonth < today.getMonth() + 1) return true;
+      return Number(d) < today.getDate(); 
+  }
+
+  function handleDayHeaderClick(d) {
+      if (highlightedDay === d) highlightedDay = null; 
+      else highlightedDay = d;
+      showDayStats(d);
+  }
+
   async function loadSchedule(monthStr, storeId) {
-      scheduleData = null; loading = true;
-      errorMsg = '';
+      scheduleData = null; loading = true; errorMsg = '';
       if (unsubscribe) unsubscribe();
       try {
           const ref = doc(db, 'stores', storeId, 'schedules', monthStr);
@@ -1640,44 +2222,92 @@ input[type="time"] {
       return { text: role.charAt(0), class: 'bg-gray-500 text-white' };
   }
 
-  function getWeekday(day) { const date = new Date(viewYear, viewMonth - 1, day);
-  return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()]; }
-  
-  function viewPersonalSchedule(staffId, staffName) { if(!scheduleData?.data) return;
-  let days = []; Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)).forEach(d => { const assign = scheduleData.data[d].find(x => x.staffId === staffId); if(assign) days.push({ day: d, weekday: getWeekday(d), ...assign }); });
-  const firstDayDate = new Date(viewYear, viewMonth - 1, 1); let startDayIdx = firstDayDate.getDay(); if (startDayIdx === 0) startDayIdx = 6;
-  else startDayIdx = startDayIdx - 1; let blankCells = Array(startDayIdx).fill(null); const stat = scheduleData.stats.find(s => s.id === staffId) ||
-  { totalHours:0, gh:0, tn:0, kho:0 }; selectedStaff = { id: staffId, name: staffName, days, blankCells, stats: stat };
+  function getWeekday(day) { 
+      const date = new Date(viewYear, viewMonth - 1, day);
+      return ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][date.getDay()]; 
   }
   
-  function openEditShift(day, staffId, assign) { if (!isAdmin) return; const staffInfo = scheduleData.stats.find(s => s.id === staffId);
-  tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo ?
-  staffInfo.gender : 'Nữ', originalRole: assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV'), originalShift: assign.originalShift !== undefined ?
-  assign.originalShift : assign.shift }; editingShift = JSON.parse(JSON.stringify(tempEditingShift)); }
-  function resetEditShift() { if (!editingShift) return; editingShift.shift = editingShift.originalShift;
-  editingShift.role = editingShift.originalRole; editingShift.isOFF = editingShift.shift === 'OFF'; }
+  function viewPersonalSchedule(staffId, staffName) { 
+      if(!scheduleData?.data) return;
+      let days = []; 
+      Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)).forEach(d => { 
+          const assign = scheduleData.data[d].find(x => x.staffId === staffId); 
+          if(assign) days.push({ day: d, weekday: getWeekday(d), ...assign }); 
+      });
+      const firstDayDate = new Date(viewYear, viewMonth - 1, 1); 
+      let startDayIdx = firstDayDate.getDay(); 
+      if (startDayIdx === 0) startDayIdx = 6; else startDayIdx = startDayIdx - 1; 
+      let blankCells = Array(startDayIdx).fill(null); 
+      const stat = scheduleData.stats.find(s => s.id === staffId) || { totalHours:0, gh:0, tn:0, kho:0 }; 
+      selectedStaff = { id: staffId, name: staffName, days, blankCells, stats: stat };
+  }
   
-  async function saveShiftChange() { if (!editingShift || !scheduleData) return;
-  if (editingShift.role === 'GH' && editingShift.gender !== 'Nam') { if (!confirm(`⚠️ CẢNH BÁO: Nhân viên ${editingShift.name} là NỮ.\nVị trí Giao Hàng thường yêu cầu NAM.\n\nBạn có chắc chắn muốn gán không?`)) return;
-  } const approvedCombos = scheduleData.config?.approvedCombos || []; if (approvedCombos.length > 0 && !editingShift.isOFF) { const dayKey = String(editingShift.day);
-  const currentDayAssignments = scheduleData.data[dayKey]; let targetRoleCode = 'TV'; if (editingShift.role === 'GH') targetRoleCode = 'GH';
-  else if (editingShift.role === 'Thu Ngân') targetRoleCode = 'TN'; else if (editingShift.role === 'Kho') targetRoleCode = 'Kho';
-  const comboConfig = approvedCombos.find(c => { let cRole = c.role || 'TV'; if (cRole === 'Thu Ngân') cRole = 'TN'; return c.code === editingShift.shift && cRole === targetRoleCode; });
-  const quota = comboConfig ? (parseInt(comboConfig.qty) || 0) : 0;
-  const currentCount = currentDayAssignments.filter(a => { if (a.staffId === editingShift.staffId) return false; let r = a.role || 'TV'; if (r === 'Giao Hàng') r = 'GH'; if (r === 'Thu Ngân') r = 'TN'; if (r === 'Kho') r = 'Kho'; return a.shift === editingShift.shift && r === targetRoleCode; }).length;
-  if (currentCount + 1 > quota) { const msg = quota === 0 ?
-  `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
-  if (!confirm(msg)) return; } } const dayKey = String(editingShift.day); const dayList = [...scheduleData.data[dayKey]];
-  const idx = dayList.findIndex(x => x.staffId === editingShift.staffId); if (idx !== -1) { const oldRole = dayList[idx].role || 'TV';
-  const newRole = editingShift.isOFF ? '' : (editingShift.role === 'TV' ? '' : editingShift.role);
-  const updatedAssignment = { ...dayList[idx], shift: editingShift.isOFF ? 'OFF' : editingShift.shift, role: newRole }; dayList[idx] = updatedAssignment;
-  const newStats = [...scheduleData.stats]; const statIdx = newStats.findIndex(s => s.id === editingShift.staffId);
-  if (statIdx !== -1) { const s = newStats[statIdx]; let rOld = oldRole === 'Giao Hàng' ?
-  'gh' : (oldRole === 'Thu Ngân' ? 'tn' : (oldRole === 'Kho' ? 'kho' : ''));
-  if(rOld) s[rOld] = Math.max(0, (s[rOld]||0) - 1); let rNew = newRole === 'Giao Hàng' ?
-  'gh' : (newRole === 'Thu Ngân' ? 'tn' : (newRole === 'Kho' ? 'kho' : ''));
-  if(rNew) s[rNew] = (s[rNew]||0) + 1; } try { await updateDoc(doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
-  editingShift = null; } catch (e) { alert("Lỗi: " + e.message); } } }
+  function openEditShift(day, staffId, assign) { 
+      if (!isAdmin) return; 
+      const staffInfo = scheduleData.stats.find(s => s.id === staffId);
+      tempEditingShift = { 
+          day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', 
+          isOFF: assign.shift === 'OFF', gender: staffInfo ? staffInfo.gender : 'Nữ', 
+          originalRole: assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV'), 
+          originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift 
+      }; 
+      editingShift = JSON.parse(JSON.stringify(tempEditingShift)); 
+  }
+  
+  async function saveShiftChange() { 
+      if (!editingShift || !scheduleData) return;
+      if (editingShift.role === 'GH' && editingShift.gender !== 'Nam') { 
+          if (!confirm(`⚠️ CẢNH BÁO: Nhân viên ${editingShift.name} là NỮ.\nVị trí Giao Hàng thường yêu cầu NAM.\n\nBạn có chắc chắn muốn gán không?`)) return;
+      } 
+      const approvedCombos = scheduleData.config?.approvedCombos || []; 
+      if (approvedCombos.length > 0 && !editingShift.isOFF) { 
+          const dayKey = String(editingShift.day);
+          const currentDayAssignments = scheduleData.data[dayKey]; 
+          let targetRoleCode = 'TV'; 
+          if (editingShift.role === 'GH') targetRoleCode = 'GH';
+          else if (editingShift.role === 'Thu Ngân') targetRoleCode = 'TN'; 
+          else if (editingShift.role === 'Kho') targetRoleCode = 'Kho';
+          
+          const comboConfig = approvedCombos.find(c => { 
+              let cRole = c.role || 'TV'; if (cRole === 'Thu Ngân') cRole = 'TN'; 
+              return c.code === editingShift.shift && cRole === targetRoleCode; 
+          });
+          const quota = comboConfig ? (parseInt(comboConfig.qty) || 0) : 0;
+          const currentCount = currentDayAssignments.filter(a => { 
+              if (a.staffId === editingShift.staffId) return false; 
+              let r = a.role || 'TV'; if (r === 'Giao Hàng') r = 'GH'; if (r === 'Thu Ngân') r = 'TN'; if (r === 'Kho') r = 'Kho'; 
+              return a.shift === editingShift.shift && r === targetRoleCode; 
+          }).length;
+          
+          if (currentCount + 1 > quota) { 
+              const msg = quota === 0 ? `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
+              if (!confirm(msg)) return; 
+          } 
+      } 
+      
+      const dayKey = String(editingShift.day); const dayList = [...scheduleData.data[dayKey]];
+      const idx = dayList.findIndex(x => x.staffId === editingShift.staffId); 
+      if (idx !== -1) { 
+          const oldRole = dayList[idx].role || 'TV';
+          const newRole = editingShift.isOFF ? '' : (editingShift.role === 'TV' ? '' : editingShift.role);
+          const updatedAssignment = { ...dayList[idx], shift: editingShift.isOFF ? 'OFF' : editingShift.shift, role: newRole }; 
+          dayList[idx] = updatedAssignment;
+          
+          const newStats = [...scheduleData.stats]; 
+          const statIdx = newStats.findIndex(s => s.id === editingShift.staffId);
+          if (statIdx !== -1) { 
+              const s = newStats[statIdx]; 
+              let rOld = oldRole === 'Giao Hàng' ? 'gh' : (oldRole === 'Thu Ngân' ? 'tn' : (oldRole === 'Kho' ? 'kho' : ''));
+              if(rOld) s[rOld] = Math.max(0, (s[rOld]||0) - 1); 
+              let rNew = newRole === 'Giao Hàng' ? 'gh' : (newRole === 'Thu Ngân' ? 'tn' : (newRole === 'Kho' ? 'kho' : ''));
+              if(rNew) s[rNew] = (s[rNew]||0) + 1; 
+          } 
+          try { 
+              await updateDoc(doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
+              editingShift = null; 
+          } catch (e) { alert("Lỗi: " + e.message); } 
+      } 
+  }
   
   function showDayStats(day) { 
       if (!scheduleData || !scheduleData.data[day]) return;
@@ -1692,29 +2322,21 @@ input[type="time"] {
           if (assign.shift === 'OFF') return; 
           let r = assign.role || 'TV'; 
           if (r === 'TN') r = 'Thu Ngân'; 
-          if (matrix[r]) { 
-              matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; 
-              matrix[r]['Total']++; 
-          } 
+          if (matrix[r]) { matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; matrix[r]['Total']++; } 
       });
       const targetRoles = ['Kho', 'Thu Ngân', 'GH'];
       const details = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {} };
       dayData.forEach(assign => {
           if (assign.shift === 'OFF') return;
           let r = assign.role || 'TV';
-          if (r === 'TN') r = 'Thu Ngân';
-          if (r === 'K') r = 'Kho';
-          if (r === 'Giao Hàng') r = 'GH';
+          if (r === 'TN') r = 'Thu Ngân'; if (r === 'K') r = 'Kho'; if (r === 'Giao Hàng') r = 'GH';
           if (targetRoles.includes(r)) {
-              if (!details[r][assign.shift]) details[r][assign.shift] = [];
+               if (!details[r][assign.shift]) details[r][assign.shift] = [];
               details[r][assign.shift].push(assign.name);
           }
       });
       selectedDayStats = { day, weekday: getWeekday(day), cols, matrix, roles, details }; 
   }
-
-  function getDayColTotal(col) { return selectedDayStats ? selectedDayStats.roles.reduce((sum, r) => sum + (selectedDayStats.matrix[r][col]||0), 0) : 0; }
-  function getDayGrandTotal() { return selectedDayStats ? selectedDayStats.roles.reduce((sum, r) => sum + selectedDayStats.matrix[r]['Total'], 0) : 0; }
 
   function getWeekendHardRoleCount(staffId) {
       if (!scheduleData || !scheduleData.data) return 0;
@@ -1730,43 +2352,325 @@ input[type="time"] {
       return count;
   }
 
-  function exportToExcel() {
-      if (!scheduleData) return;
-      const wb = utils.book_new();
-      const days = Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b));
-      const wsData = [];
-      const row1 = ["NHÂN SỰ"];
-      days.forEach(d => row1.push(d));
-      row1.push("Tổng Giờ", "GH", "TN", "K", "Ca cuối tuần"); 
-      wsData.push(row1);
-      const row2 = [""];
-      days.forEach(d => row2.push(getWeekday(d)));
-      row2.push("", "", "", "", "");
-      wsData.push(row2);
-      scheduleData.stats.forEach(staff => {
-          const row = [staff.name];
-          days.forEach(d => {
-              const assign = scheduleData.data[d].find(x => x.staffId === staff.id);
-              if (assign) {
-                  let cell = assign.shift;
-                  if (assign.role && assign.role !== 'TV') cell += ` (${assign.role})`;
-                  row.push(cell);
-              } else { row.push(""); }
-          });
-          row.push(Math.round(staff.totalHours), staff.gh, staff.tn, staff.kho, getWeekendHardRoleCount(staff.id));
-          wsData.push(row);
+  // [SURGICAL] Gọi hàm xuất Excel từ file util
+  function handleExportExcel() {
+      exportScheduleToExcel({
+          scheduleData,
+          viewMonth,
+          viewYear,
+          selectedViewStore,
+          getWeekday,
+          getWeekendHardRoleCount
       });
-      const ws = utils.aoa_to_sheet(wsData);
-      utils.book_append_sheet(wb, ws, `Lich_T${viewMonth}`);
-      writeFile(wb, `Lich_Lam_Viec_Kho_${selectedViewStore}_T${viewMonth}_${viewYear}.xlsx`);
   }
   
   let showScheduleTour = false;
-  const scheduleSteps = [ { target: '.overflow-x-auto', title: '1. Bảng Lịch Tổng', content: 'Đây là toàn bộ lịch làm việc trong tháng.'
-  }, { target: '#store-view-selector', title: '2. Chọn Kho Xem', content: 'Nếu quản lý nhiều kho, hãy chọn kho tại đây để xem lịch tương ứng.'
-  }, { target: '#tour-staff-name', title: '3. Xem Chi Tiết Cá Nhân', content: 'Bấm vào <b>Tên Nhân Viên</b> để mở popup xem lịch riêng.'
-  }, { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng để xem tổng giờ công.', action: () => { const tableContainer = document.querySelector('.overflow-x-auto');
-  if(tableContainer) tableContainer.scrollLeft = tableContainer.scrollWidth; } } ];
+  const scheduleSteps = [ 
+      { target: '.overflow-x-auto', title: '1. Bảng Lịch Tổng', content: 'Đây là toàn bộ lịch làm việc trong tháng.' }, 
+      { target: '#store-view-selector', title: '2. Chọn Kho Xem', content: 'Nếu quản lý nhiều kho, hãy chọn kho tại đây để xem lịch tương ứng.' }, 
+      { target: '#tour-staff-name', title: '3. Xem Chi Tiết Cá Nhân', content: 'Bấm vào <b>Tên Nhân Viên</b> để mở popup xem lịch riêng.' }, 
+      { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng để xem tổng giờ công.', action: () => { const tableContainer = document.querySelector('.overflow-x-auto'); if(tableContainer) tableContainer.scrollLeft = tableContainer.scrollWidth; } } 
+  ];
+</script>
+
+<ScheduleControls 
+    {myStores} {scheduleData} {isAdmin}
+    bind:selectedViewStore bind:viewMonth bind:viewYear bind:showPastDays
+    on:openHistory={() => showHistoryModal = true}
+    on:restoreBackup={handleRestoreBackup}
+    on:exportExcel={handleExportExcel}
+    on:startTour={() => showScheduleTour = true}
+/>
+
+{#if loading} 
+    <div class="p-10 text-center text-gray-400 animate-pulse bg-white rounded-xl border border-dashed flex flex-col items-center">
+        <span class="material-icons-round text-4xl animate-spin text-indigo-300">sync</span>
+        <p class="mt-2 text-sm font-bold">Đang tải lịch tháng {viewMonth}...</p>
+    </div>
+{:else if !scheduleData} 
+    <div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed flex flex-col items-center">
+        <span class="material-icons-round text-4xl text-gray-300">calendar_today</span>
+        <p class="mt-2 text-sm">Chưa có lịch làm việc tháng {viewMonth}/{viewYear}.</p>
+        {#if isAdmin}<p class="text-xs text-indigo-500 mt-1">Vui lòng vào mục "Quản trị" để tạo.</p>{/if}
+    </div>
+{:else}
+    <ScheduleTable 
+        {scheduleData} {showPastDays} {highlightedDay} {isAdmin}
+        {isPastDay} {getWeekday} {getRoleBadge} {getShiftColor} {getWeekendHardRoleCount}
+        on:clickDayHeader={(e) => handleDayHeaderClick(e.detail)}
+        on:clickStaff={(e) => viewPersonalSchedule(e.detail.id, e.detail.name)}
+        on:clickCell={(e) => openEditShift(e.detail.day, e.detail.staffId, e.detail.assign)}
+    />
+{/if}
+
+{#if showHistoryModal && scheduleData}
+    <CumulativeHistoryModal storeId={selectedViewStore} currentMonth={viewMonth} currentYear={viewYear} currentStats={scheduleData.stats} on:close={() => showHistoryModal = false} />
+{/if}
+
+{#if selectedStaff}
+    <PersonalScheduleModal {selectedStaff} {getRoleBadge} on:close={() => selectedStaff = null} />
+{/if}
+
+{#if editingShift}
+    <EditShiftModal bind:editingShift {tempEditingShift} on:close={() => editingShift = null} on:save={saveShiftChange} />
+{/if}
+
+{#if selectedDayStats}
+    <DayStatsModal {selectedDayStats} on:close={() => selectedDayStats = null} />
+{/if}
+
+{#if showScheduleTour}
+    <TourGuide steps={scheduleSteps} on:complete={() => showScheduleTour = false} />
+{/if}
+--- END FILE: ./src/components/ShiftSchedule.svelte ---
+
+--- START FILE: ./src/components/ShiftScheduleParts/DayStatsModal.svelte ---
+<script>
+    import { createEventDispatcher } from 'svelte';
+    const dispatch = createEventDispatcher();
+    export let selectedDayStats;
+</script>
+
+<div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => dispatch('close')}>
+    <div class="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation>
+        
+        <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+            <h3 class="font-bold text-lg text-slate-800">Ngày {selectedDayStats.day} ({selectedDayStats.weekday})</h3>
+             <button on:click={() => dispatch('close')} class="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center"><span class="material-icons-round text-slate-500">close</span></button>
+        </div>
+
+        <div class="overflow-y-auto p-4 bg-white">
+            <div class="mb-6 overflow-x-auto">
+                 <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Tổng quan số lượng</h4>
+                <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200">
+                    <thead class="bg-slate-50 text-slate-500">
+                        <tr>
+                            <th class="p-2 text-left font-bold border-b border-r border-slate-200 text-xs">Bộ Phận</th>
+                            {#each selectedDayStats.cols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[40px] text-xs"><div class="font-black text-slate-700">{col}</div></th>{/each}
+                            <th class="p-2 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700 text-xs">Tổng</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {#each selectedDayStats.roles as role}
+                            <tr class="hover:bg-slate-50 transition-colors">
+                                <td class="p-2 font-bold border-r border-slate-100 text-xs {role==='GH'?'text-blue-600':(role==='Thu Ngân'?'text-purple-600':(role==='Kho'?'text-orange-600':'text-gray-600'))}">{role}</td>
+                                {#each selectedDayStats.cols as col}<td class="p-2 border-r border-slate-100 text-center font-mono text-xs {selectedDayStats.matrix[role][col]>0?'font-bold text-slate-800':'text-gray-300'}">{selectedDayStats.matrix[role][col] || '-'}</td>{/each}
+                                <td class="p-2 text-center font-black text-slate-700 bg-slate-50 border-l border-slate-100 text-xs">{selectedDayStats.matrix[role]['Total']}</td>
+                            </tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+
+            <h4 class="text-xs font-bold text-gray-400 uppercase mb-3 sticky top-0 bg-white py-2 z-10 border-b">Chi tiết nhân sự</h4>
+            <div class="space-y-4">
+                
+                <div class="rounded-xl border border-orange-100 bg-orange-50/30 overflow-hidden">
+                    <div class="bg-orange-100 px-3 py-2 flex items-center justify-between">
+                        <span class="font-bold text-orange-700 text-sm flex items-center gap-2">
+                            <span class="material-icons-round text-base">inventory_2</span> KHO
+                        </span>
+                        <span class="bg-white text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">{selectedDayStats.matrix['Kho']['Total']} người</span>
+                    </div>
+                    <div class="p-3 grid gap-3">
+                        {#each Object.keys(selectedDayStats.details['Kho']).sort() as shift}
+                            <div class="flex items-start gap-2 text-sm border-b border-orange-100 last:border-0 pb-2 last:pb-0">
+                                <div class="font-bold text-orange-600 bg-white border border-orange-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
+                                <div class="flex flex-wrap gap-1.5 pt-0.5">
+                                    {#each selectedDayStats.details['Kho'][shift] as name}
+                                        <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['Kho'][shift][selectedDayStats.details['Kho'][shift].length - 1]}, {/if}</span>
+                                    {/each}
+                                </div>
+                            </div>
+                        {/each}
+                        {#if Object.keys(selectedDayStats.details['Kho']).length === 0}
+                            <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
+                        {/if}
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-purple-100 bg-purple-50/30 overflow-hidden">
+                    <div class="bg-purple-100 px-3 py-2 flex items-center justify-between">
+                        <span class="font-bold text-purple-700 text-sm flex items-center gap-2">
+                            <span class="material-icons-round text-base">point_of_sale</span> THU NGÂN
+                        </span>
+                         <span class="bg-white text-purple-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-200">{selectedDayStats.matrix['Thu Ngân']['Total']} người</span>
+                    </div>
+                    <div class="p-3 grid gap-3">
+                        {#each Object.keys(selectedDayStats.details['Thu Ngân']).sort() as shift}
+                            <div class="flex items-start gap-2 text-sm border-b border-purple-100 last:border-0 pb-2 last:pb-0">
+                                <div class="font-bold text-purple-600 bg-white border border-purple-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
+                                <div class="flex flex-wrap gap-1.5 pt-0.5">
+                                     {#each selectedDayStats.details['Thu Ngân'][shift] as name}
+                                        <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['Thu Ngân'][shift][selectedDayStats.details['Thu Ngân'][shift].length - 1]}, {/if}</span>
+                                    {/each}
+                                </div>
+                            </div>
+                        {/each}
+                         {#if Object.keys(selectedDayStats.details['Thu Ngân']).length === 0}
+                            <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
+                        {/if}
+                    </div>
+                </div>
+
+                <div class="rounded-xl border border-blue-100 bg-blue-50/30 overflow-hidden">
+                    <div class="bg-blue-100 px-3 py-2 flex items-center justify-between">
+                        <span class="font-bold text-blue-700 text-sm flex items-center gap-2">
+                            <span class="material-icons-round text-base">local_shipping</span> GIAO HÀNG
+                        </span>
+                         <span class="bg-white text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">{selectedDayStats.matrix['GH']['Total']} người</span>
+                    </div>
+                    <div class="p-3 grid gap-3">
+                        {#each Object.keys(selectedDayStats.details['GH']).sort() as shift}
+                            <div class="flex items-start gap-2 text-sm border-b border-blue-100 last:border-0 pb-2 last:pb-0">
+                                <div class="font-bold text-blue-600 bg-white border border-blue-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
+                                <div class="flex flex-wrap gap-1.5 pt-0.5">
+                                    {#each selectedDayStats.details['GH'][shift] as name}
+                                        <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['GH'][shift][selectedDayStats.details['GH'][shift].length - 1]}, {/if}</span>
+                                    {/each}
+                                </div>
+                            </div>
+                        {/each}
+                         {#if Object.keys(selectedDayStats.details['GH']).length === 0}
+                            <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
+                         {/if}
+                    </div>
+                </div>
+
+            </div>
+        </div>
+         
+    </div>
+</div>
+--- END FILE: ./src/components/ShiftScheduleParts/DayStatsModal.svelte ---
+
+--- START FILE: ./src/components/ShiftScheduleParts/EditShiftModal.svelte ---
+<script>
+    import { createEventDispatcher } from 'svelte';
+    const dispatch = createEventDispatcher();
+    
+    export let editingShift;
+    export let tempEditingShift;
+    
+    const QUICK_SHIFTS = ['OFF', '123', '456', '23', '45', '2345'];
+
+    function resetEditShift() { 
+        if (!editingShift) return; 
+        editingShift.shift = editingShift.originalShift;
+        editingShift.role = editingShift.originalRole; 
+        editingShift.isOFF = editingShift.shift === 'OFF'; 
+    }
+</script>
+
+<div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => dispatch('close')}>
+    <div class="bg-white w-full max-w-sm rounded-xl p-5 shadow-2xl" on:click|stopPropagation>
+        <div class="flex justify-between items-start mb-4">
+            <div><h3 class="font-bold text-lg text-slate-800">Sửa Ca: {editingShift.name}</h3><p class="text-xs text-gray-500">Ngày {editingShift.day} - Hiện tại: <span class="font-bold">{tempEditingShift.shift}</span></p></div>
+            {#if editingShift.shift !== editingShift.originalShift || editingShift.role !== editingShift.originalRole}
+                <button class="text-xs text-red-600 hover:underline font-bold bg-red-50 px-2 py-1 rounded" on:click={resetEditShift}>Reset về gốc</button>
+            {/if}
+        </div>
+        <div class="space-y-4">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-2">Chọn Ca Nhanh</label>
+                <div class="grid grid-cols-3 gap-2 mb-2">
+                    {#each QUICK_SHIFTS as s}
+                        <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true; editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s; } }}>{s}</button>
+                    {/each}
+                </div>
+                 <label class="block text-xs font-bold text-gray-500 mb-1 mt-3">Ca Tùy Chỉnh</label>
+                <input type="text" value={editingShift.isOFF ? 'OFF' : editingShift.shift} on:input={(e) => { if(!editingShift.isOFF) editingShift.shift = e.target.value; }} disabled={editingShift.isOFF} class="w-full p-2.5 border rounded-lg text-center font-bold text-sm transition-colors {editingShift.isOFF ? 'bg-red-600 text-yellow-300 border-red-600 cursor-not-allowed opacity-100' : 'bg-white text-slate-800 border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200'}" placeholder="Nhập mã ca (vd: 12-56)">
+            </div>
+            {#if !editingShift.isOFF}
+                <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-fadeIn">
+                    <label class="block text-xs font-bold text-gray-500 mb-2">Vai Trò Mới</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        {#each ['TV', 'Thu Ngân', 'Kho', 'GH'] as r}
+                            <label class="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-gray-200 hover:border-indigo-300 transition-colors">
+                                <input type="radio" bind:group={editingShift.role} value={r} class="accent-indigo-600 w-4 h-4">
+                                <span class="text-xs font-bold {r==='GH'?'text-blue-600':(r==='Thu Ngân'?'text-purple-600':(r==='Kho'?'text-orange-600':'text-gray-600'))}">{r}</span>
+                            </label>
+                        {/each}
+                    </div>
+                </div>
+             {/if}
+        </div>
+        <div class="flex gap-3 mt-6">
+            <button class="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-bold text-sm hover:bg-slate-200 transition-colors" on:click={() => dispatch('close')}>Hủy Bỏ</button>
+            <button class="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-0.5 transition-all" on:click={() => dispatch('save')}>Lưu Thay Đổi</button>
+        </div>
+    </div>
+</div>
+--- END FILE: ./src/components/ShiftScheduleParts/EditShiftModal.svelte ---
+
+--- START FILE: ./src/components/ShiftScheduleParts/PersonalScheduleModal.svelte ---
+<script>
+    import { createEventDispatcher } from 'svelte';
+    const dispatch = createEventDispatcher();
+    
+    export let selectedStaff;
+    export let getRoleBadge; // Hàm lấy nhãn chức vụ truyền từ cha xuống
+</script>
+
+<div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => dispatch('close')}>
+    <div class="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation>
+        <div class="p-4 bg-indigo-500 text-white shrink-0">
+            <h3 class="font-bold text-lg">{selectedStaff.name}</h3>
+            <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded">
+               <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
+                <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span>
+                <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span>
+                <span class="text-orange-100">K: {selectedStaff.stats.kho || 0}</span>
+            </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-3 bg-slate-100">
+            <div class="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-bold text-gray-400 uppercase">
+                {#each ['T2','T3','T4','T5','T6','T7','CN'] as day}<div>{day}</div>{/each}
+            </div>
+            <div class="grid grid-cols-7 gap-1">
+                {#each selectedStaff.blankCells as _}<div class="bg-transparent"></div>{/each}
+                {#each selectedStaff.days as d}
+                    <div class="bg-white rounded border shadow-sm p-1 flex flex-col items-center justify-center aspect-square {d.shift==='OFF'?'opacity-60 bg-slate-100':''}">
+                        <div class="text-[10px] text-gray-400 font-bold mb-1">{d.day}</div>
+                        <div class="font-black text-slate-800 text-xs {d.shift==='OFF'?'text-slate-400':''}">{d.shift}</div>
+                        {#if d.shift !== 'OFF'}
+                            {@const badge = getRoleBadge(d.role)}
+                            {#if badge}<span class="text-[9px] font-bold px-1 rounded mt-0.5 leading-tight {badge.class}">{badge.text}</span>{/if}
+                        {/if}
+                    </div>
+                {/each}
+            </div>
+        </div>
+        <div class="p-3 border-t bg-white text-center"><button class="w-full py-2 bg-gray-100 rounded text-gray-600 font-bold text-sm" on:click={() => dispatch('close')}>Đóng</button></div>
+    </div>
+</div>
+--- END FILE: ./src/components/ShiftScheduleParts/PersonalScheduleModal.svelte ---
+
+--- START FILE: ./src/components/ShiftScheduleParts/ScheduleControls.svelte ---
+<script>
+    import { createEventDispatcher } from 'svelte';
+    const dispatch = createEventDispatcher();
+
+    // Nhận dữ liệu từ component cha truyền xuống
+    export let myStores = [];
+    export let scheduleData = null;
+    export let isAdmin = false;
+
+    // Các biến dùng bind: (có thể thay đổi giá trị và báo ngược lại cho cha)
+    export let selectedViewStore = '';
+    export let viewMonth;
+    export let viewYear;
+    export let showPastDays;
+
+    function prevMonth() {
+        if (viewMonth === 1) { viewMonth = 12; viewYear--; } 
+        else { viewMonth--; }
+    }
+
+    function nextMonth() {
+        if (viewMonth === 12) { viewMonth = 1; viewYear++; } 
+        else { viewMonth++; }
+    }
 </script>
 
 <div class="flex items-center justify-between mb-3 px-1">
@@ -1783,304 +2687,118 @@ input[type="time"] {
         {/if}
 
         <div class="flex items-center gap-2 bg-white p-1 rounded-lg border shadow-sm">
-            <button class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded" on:click={()=>{ if(viewMonth==1){viewMonth=12;viewYear--}else{viewMonth--} }}><span class="material-icons-round text-gray-500">chevron_left</span></button>
+            <button class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded" on:click={prevMonth}>
+                <span class="material-icons-round text-gray-500">chevron_left</span>
+            </button>
             <span class="font-bold text-indigo-700 px-2 min-w-[90px] text-center text-sm">T{viewMonth}/{viewYear}</span>
-            <button class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded" on:click={()=>{ if(viewMonth==12){viewMonth=1;viewYear++}else{viewMonth++} }}><span class="material-icons-round text-gray-500">chevron_right</span></button>
+            <button class="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded" on:click={nextMonth}>
+                <span class="material-icons-round text-gray-500">chevron_right</span>
+            </button>
         </div>
     </div>
     
     {#if scheduleData}
         <div class="flex gap-2">
-            <button class="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-indigo-100 transition-all border border-indigo-100" on:click={() => showHistoryModal = true} title="Xem lịch sử giờ công các tháng trước">
+            <button class="flex items-center gap-1 bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-slate-200 transition-all border border-slate-200" on:click={() => showPastDays = !showPastDays} title="Ẩn/Hiện các ngày trước hôm nay">
+                <span class="material-icons-round text-sm">{showPastDays ? 'visibility_off' : 'visibility'}</span>
+                <span class="hidden sm:inline">{showPastDays ? 'Ẩn ngày cũ' : 'Hiện ngày cũ'}</span>
+            </button>
+            
+            <button class="flex items-center gap-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-indigo-100 transition-all border border-indigo-100" on:click={() => dispatch('openHistory')} title="Xem lịch sử giờ công các tháng trước">
                 <span class="material-icons-round text-sm">history</span> Lũy Kế
             </button>
-
+            
             {#if isAdmin}
-                <button class="flex items-center gap-2 bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-slate-300 transition-all" on:click={handleRestoreBackup} title="Hoàn tác về phiên bản trước khi áp dụng">
+                 <button class="flex items-center gap-2 bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-slate-300 transition-all" on:click={() => dispatch('restoreBackup')} title="Hoàn tác về phiên bản trước khi áp dụng">
                     <span class="material-icons-round text-sm">history</span> Khôi Phục
                 </button>
             {/if}
-
-            <button class="flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-green-700 transition-all" on:click={exportToExcel}>
+            
+            <button class="flex items-center gap-2 bg-green-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow hover:bg-green-700 transition-all" on:click={() => dispatch('exportExcel')}>
                 <span class="material-icons-round text-sm">download</span> Xuất Excel
             </button>
-            <button class="flex items-center justify-center bg-purple-500 text-white w-8 h-8 rounded-lg shadow hover:bg-purple-600 transition-all" on:click={() => showScheduleTour = true} title="Hướng dẫn xem lịch">
+            
+            <button class="flex items-center justify-center bg-purple-500 text-white w-8 h-8 rounded-lg shadow hover:bg-purple-600 transition-all" on:click={() => dispatch('startTour')} title="Hướng dẫn xem lịch">
                 <span class="material-icons-round text-lg">help_outline</span>
             </button>
         </div>
     {/if}
 </div>
+--- END FILE: ./src/components/ShiftScheduleParts/ScheduleControls.svelte ---
 
-{#if loading} 
-    <div class="p-10 text-center text-gray-400 animate-pulse bg-white rounded-xl border border-dashed flex flex-col items-center">
-        <span class="material-icons-round text-4xl animate-spin text-indigo-300">sync</span>
-        <p class="mt-2 text-sm font-bold">Đang tải lịch tháng {viewMonth}...</p>
-    </div>
-{:else if !scheduleData} 
-    <div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed flex flex-col items-center">
-        <span class="material-icons-round text-4xl text-gray-300">calendar_today</span>
-        <p class="mt-2 text-sm">Chưa có lịch làm việc tháng {viewMonth}/{viewYear}.</p>
-        {#if isAdmin}
-            <p class="text-xs text-indigo-500 mt-1">Vui lòng vào mục "Quản trị" để tạo.</p>
-        {/if}
-    </div>
-{:else}
-    <div class="overflow-x-auto border rounded-xl bg-white shadow-sm max-h-[75vh] relative scroll-smooth">
-        <table class="w-full text-sm text-center border-collapse min-w-[1500px]">
-            <thead class="bg-amber-400 text-slate-900 sticky top-0 z-30 shadow-md">
-                <tr>
-                    <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-40 min-w-[140px] text-left pl-3 shadow">NHÂN SỰ</th>
-                    {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
-                         <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-300' : ''}" on:click={()=>showDayStats(d)}>{d}</th>
-                    {/each}
-                    <th rowspan="2" class="p-2 w-12 bg-amber-100 text-[10px] border-l border-amber-300 font-bold">Giờ</th>
-                    <th rowspan="2" class="p-2 w-10 bg-blue-100 text-[10px] border-l border-amber-300 font-bold text-blue-800">GH</th>
-                    <th rowspan="2" class="p-2 w-10 bg-purple-100 text-[10px] border-l border-amber-300 font-bold text-purple-800">TN</th>
-                    <th rowspan="2" class="p-2 w-10 bg-orange-100 text-[10px] border-l border-amber-300 font-bold text-orange-800">K</th>
-                    <th rowspan="2" class="p-2 w-14 bg-indigo-100 text-[10px] border-l border-amber-300 font-bold text-indigo-800" title="Số ca nghiệp vụ T7/CN">Ca<br>cuối tuần</th>
-                </tr>
-                <tr>
-                    {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
-                        <th class="p-0.5 border-l border-amber-500/30 text-[9px] {['T7','CN'].includes(getWeekday(d))?'bg-amber-300/80 text-amber-900':'bg-amber-200/50 text-slate-700'}">{getWeekday(d)}</th>
-                    {/each}
-                </tr>
-            </thead>
-            <tbody class="divide-y text-xs">
-                {#each scheduleData.stats as staff, i}
-                    {@const weCount = getWeekendHardRoleCount(staff.id)}
-                    <tr class="hover:bg-blue-50 transition-colors">
-                        <td id={i===0 ? 'tour-staff-name' : ''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-20 cursor-pointer hover:text-indigo-600 shadow pl-3 truncate max-w-[140px] {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}" on:click={() => viewPersonalSchedule(staff.id, staff.name)}>
-                            {staff.name}
-                        </td>
-                        {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
-                            {@const assign = (scheduleData.data[d]||[]).find(x => x.staffId === staff.id)}
-                              <td class="p-0.5 border-l border-gray-100 h-10 align-middle {isAdmin ? 'cursor-pointer hover:bg-gray-100' : ''} {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-50/50' : ''}" on:click={() => openEditShift(d, staff.id, assign)}>
-                                   {#if assign}
-                                    {@const badge = getRoleBadge(assign.role)}
-                                     <div class="w-full h-full rounded py-1 font-bold text-[10px] flex flex-col items-center justify-center shadow-sm {getShiftColor(assign.shift)}">
-                                        <span>{assign.shift}</span>
-                                         {#if badge}<span class="text-[8px] leading-none px-1 py-0.5 rounded mt-0.5 {badge.class}">{badge.text}</span>{/if}
-                                     </div>
-                                {:else}<div class="text-gray-200">.</div>{/if}
-                              </td>
-                        {/each}
-                        <td class="p-2 font-bold text-center bg-amber-50 text-gray-700 border-l">{Math.round(staff.totalHours) || 0}</td>
-                        <td class="p-2 font-bold text-center bg-blue-50 text-blue-600 border-l">{staff.gh || '-'}</td>
-                        <td class="p-2 font-bold text-center bg-purple-50 text-purple-600 border-l">{staff.tn || 0}</td>
-                        <td id={i===0 ? 'tour-total-col' : ''} class="p-2 font-bold text-center bg-orange-50 text-orange-600 border-l">{staff.kho || 0}</td>
-                        <td class="p-2 font-bold text-center bg-indigo-50 text-indigo-700 border-l">{weCount}</td>
-                    </tr>
+--- START FILE: ./src/components/ShiftScheduleParts/ScheduleTable.svelte ---
+<script>
+    import { createEventDispatcher } from 'svelte';
+    const dispatch = createEventDispatcher();
+
+    // Dữ liệu từ cha truyền xuống
+    export let scheduleData;
+    export let showPastDays;
+    export let highlightedDay;
+    export let isAdmin;
+
+    // Các hàm tính toán từ cha truyền xuống để dùng chung, không code lặp lại
+    export let isPastDay;
+    export let getWeekday;
+    export let getShiftColor;
+    export let getRoleBadge;
+    export let getWeekendHardRoleCount;
+</script>
+
+<div class="overflow-x-auto border rounded-xl bg-white shadow-sm max-h-[75vh] relative scroll-smooth">
+    <table class="w-full text-sm text-center border-collapse min-w-[1500px]">
+        <thead class="bg-amber-400 text-slate-900 sticky top-0 z-30 shadow-md">
+            <tr>
+                <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-40 min-w-[140px] text-left pl-3 shadow">NHÂN SỰ</th>
+                {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
+                    {#if showPastDays || !isPastDay(d)}
+                        <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-300' : ''} {highlightedDay === d ? '!bg-indigo-300 !text-indigo-900 ring-2 ring-indigo-500 z-50 relative' : ''}" on:click={() => dispatch('clickDayHeader', d)}>{d}</th>
+                    {/if}
                 {/each}
-            </tbody>
-        </table>
-    </div>
-{/if}
-
-{#if showHistoryModal && scheduleData}
-    <CumulativeHistoryModal 
-        storeId={selectedViewStore}
-        currentMonth={viewMonth}
-        currentYear={viewYear}
-        currentStats={scheduleData.stats}
-        on:close={() => showHistoryModal = false}
-    />
-{/if}
-
-{#if selectedStaff}
-    <div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>selectedStaff=null}>
-        <div class="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation>
-            <div class="p-4 bg-indigo-500 text-white shrink-0">
-                <h3 class="font-bold text-lg">{selectedStaff.name}</h3>
-                <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded">
-                   <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
-                    <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span>
-                    <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span>
-                    <span class="text-orange-100">K: {selectedStaff.stats.kho || 0}</span>
-                </div>
-            </div>
-            <div class="flex-1 overflow-y-auto p-3 bg-slate-100">
-                <div class="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] font-bold text-gray-400 uppercase">
-                    {#each ['T2','T3','T4','T5','T6','T7','CN'] as day}<div>{day}</div>{/each}
-                </div>
-                <div class="grid grid-cols-7 gap-1">
-                    {#each selectedStaff.blankCells as _}<div class="bg-transparent"></div>{/each}
-                    {#each selectedStaff.days as d}
-                        <div class="bg-white rounded border shadow-sm p-1 flex flex-col items-center justify-center aspect-square {d.shift==='OFF'?'opacity-60 bg-slate-100':''}">
-                            <div class="text-[10px] text-gray-400 font-bold mb-1">{d.day}</div>
-                            <div class="font-black text-slate-800 text-xs {d.shift==='OFF'?'text-slate-400':''}">{d.shift}</div>
-                            {#if d.shift !== 'OFF'}
-                                {@const badge = getRoleBadge(d.role)}
-                                {#if badge}<span class="text-[9px] font-bold px-1 rounded mt-0.5 leading-tight {badge.class}">{badge.text}</span>{/if}
-                            {/if}
-                        </div>
+                <th rowspan="2" class="p-2 w-12 bg-amber-100 text-[10px] border-l border-amber-300 font-bold">Giờ</th>
+                <th rowspan="2" class="p-2 w-10 bg-blue-100 text-[10px] border-l border-amber-300 font-bold text-blue-800">GH</th>
+                <th rowspan="2" class="p-2 w-10 bg-purple-100 text-[10px] border-l border-amber-300 font-bold text-purple-800">TN</th>
+                <th rowspan="2" class="p-2 w-10 bg-orange-100 text-[10px] border-l border-amber-300 font-bold text-orange-800">K</th>
+                <th rowspan="2" class="p-2 w-14 bg-indigo-100 text-[10px] border-l border-amber-300 font-bold text-indigo-800" title="Số ca nghiệp vụ T7/CN">Ca<br>cuối tuần</th>
+            </tr>
+            <tr>
+                {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
+                    {#if showPastDays || !isPastDay(d)}
+                        <th class="p-0.5 border-l border-amber-500/30 text-[9px] {['T7','CN'].includes(getWeekday(d))?'bg-amber-300/80 text-amber-900':'bg-amber-200/50 text-slate-700'} {highlightedDay === d ? '!bg-indigo-200 !text-indigo-900 border-x-2 border-indigo-400 relative z-40' : ''}">{getWeekday(d)}</th>
+                    {/if}
+                {/each}
+            </tr>
+        </thead>
+        <tbody class="divide-y text-xs">
+            {#each scheduleData.stats as staff, i}
+                {@const weCount = getWeekendHardRoleCount(staff.id)}
+                <tr class="hover:bg-blue-50 transition-colors">
+                    <td id={i===0 ? 'tour-staff-name' : ''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-20 cursor-pointer hover:text-indigo-600 shadow pl-3 truncate max-w-[140px] {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}" on:click={() => dispatch('clickStaff', { id: staff.id, name: staff.name })}>{staff.name}</td>
+                    {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
+                        {#if showPastDays || !isPastDay(d)}
+                            {@const assign = (scheduleData.data[d]||[]).find(x => x.staffId === staff.id)}
+                            <td class="p-0.5 border-l border-gray-100 h-10 align-middle {isAdmin ? 'cursor-pointer hover:bg-gray-100' : ''} {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-50/50' : ''} {highlightedDay === d ? '!bg-indigo-50 border-x-2 border-indigo-300 relative z-10' : ''}" on:click={() => dispatch('clickCell', { day: d, staffId: staff.id, assign })}>
+                                {#if assign}
+                                    {@const badge = getRoleBadge(assign.role)}
+                                    <div class="w-full h-full rounded py-1 font-bold text-[10px] flex flex-col items-center justify-center shadow-sm {getShiftColor(assign.shift)}">
+                                        <span>{assign.shift}</span>
+                                        {#if badge}<span class="text-[8px] leading-none px-1 py-0.5 rounded mt-0.5 {badge.class}">{badge.text}</span>{/if}
+                                    </div>
+                                {:else}<div class="text-gray-200">.</div>{/if}
+                            </td>
+                        {/if}
                     {/each}
-                </div>
-            </div>
-            <div class="p-3 border-t bg-white text-center"><button class="w-full py-2 bg-gray-100 rounded text-gray-600 font-bold text-sm" on:click={()=>selectedStaff=null}>Đóng</button></div>
-        </div>
-    </div>
-{/if}
-
-{#if editingShift}
-    <div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>editingShift=null}>
-        <div class="bg-white w-full max-w-sm rounded-xl p-5 shadow-2xl" on:click|stopPropagation>
-            <div class="flex justify-between items-start mb-4">
-                <div><h3 class="font-bold text-lg text-slate-800">Sửa Ca: {editingShift.name}</h3><p class="text-xs text-gray-500">Ngày {editingShift.day} - Hiện tại: <span class="font-bold">{tempEditingShift.shift}</span></p></div>
-                {#if editingShift.shift !== editingShift.originalShift || editingShift.role !== editingShift.originalRole}
-                    <button class="text-xs text-red-600 hover:underline font-bold bg-red-50 px-2 py-1 rounded" on:click={resetEditShift}>Reset về gốc</button>
-                {/if}
-            </div>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-500 mb-2">Chọn Ca Nhanh</label>
-                    <div class="grid grid-cols-3 gap-2 mb-2">
-                        {#each QUICK_SHIFTS as s}
-                            <button class="py-2 border rounded-lg font-bold text-xs transition-all shadow-sm {editingShift.isOFF && s==='OFF' ? 'bg-red-600 text-yellow-300 border-red-600 ring-2 ring-red-200' : (!editingShift.isOFF && editingShift.shift === s ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-200' : 'bg-white hover:bg-gray-50 text-gray-600 border-gray-200')}" on:click={() => { if(s === 'OFF') { editingShift.isOFF = true; editingShift.shift = 'OFF'; } else { editingShift.isOFF = false; editingShift.shift = s; } }}>{s}</button>
-                        {/each}
-                    </div>
-                     <label class="block text-xs font-bold text-gray-500 mb-1 mt-3">Ca Tùy Chỉnh</label>
-                    <input type="text" value={editingShift.isOFF ? 'OFF' : editingShift.shift} on:input={(e) => { if(!editingShift.isOFF) editingShift.shift = e.target.value; }} disabled={editingShift.isOFF} class="w-full p-2.5 border rounded-lg text-center font-bold text-sm transition-colors {editingShift.isOFF ? 'bg-red-600 text-yellow-300 border-red-600 cursor-not-allowed opacity-100' : 'bg-white text-slate-800 border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200'}" placeholder="Nhập mã ca (vd: 12-56)">
-                </div>
-                {#if !editingShift.isOFF}
-                    <div class="p-3 bg-gray-50 rounded-lg border border-gray-200 animate-fadeIn">
-                        <label class="block text-xs font-bold text-gray-500 mb-2">Vai Trò Mới</label>
-                        <div class="grid grid-cols-2 gap-2">
-                            {#each ['TV', 'Thu Ngân', 'Kho', 'GH'] as r}
-                                <label class="flex items-center gap-2 cursor-pointer bg-white p-2 rounded border border-gray-200 hover:border-indigo-300 transition-colors">
-                                    <input type="radio" bind:group={editingShift.role} value={r} class="accent-indigo-600 w-4 h-4">
-                                    <span class="text-xs font-bold {r==='GH'?'text-blue-600':(r==='Thu Ngân'?'text-purple-600':(r==='Kho'?'text-orange-600':'text-gray-600'))}">{r}</span>
-                                </label>
-                            {/each}
-                        </div>
-                    </div>
-                 {/if}
-            </div>
-            <div class="flex gap-3 mt-6">
-                <button class="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-bold text-sm hover:bg-slate-200 transition-colors" on:click={()=>editingShift=null}>Hủy Bỏ</button>
-                <button class="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold text-sm shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-0.5 transition-all" on:click={saveShiftChange}>Lưu Thay Đổi</button>
-            </div>
-        </div>
-    </div>
-{/if}
-
-{#if selectedDayStats}
-    <div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={()=>selectedDayStats=null}>
-        <div class="bg-white w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation>
-            
-            <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-                <h3 class="font-bold text-lg text-slate-800">Ngày {selectedDayStats.day} ({selectedDayStats.weekday})</h3>
-                 <button on:click={()=>selectedDayStats=null} class="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center"><span class="material-icons-round text-slate-500">close</span></button>
-            </div>
-
-            <div class="overflow-y-auto p-4 bg-white">
-                <div class="mb-6 overflow-x-auto">
-                    <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Tổng quan số lượng</h4>
-                    <table class="w-full text-sm border-separate border-spacing-0 rounded-xl overflow-hidden border border-slate-200">
-                        <thead class="bg-slate-50 text-slate-500">
-                            <tr>
-                                <th class="p-2 text-left font-bold border-b border-r border-slate-200 text-xs">Bộ Phận</th>
-                                {#each selectedDayStats.cols as col}<th class="p-2 text-center border-b border-slate-200 border-l border-white min-w-[40px] text-xs"><div class="font-black text-slate-700">{col}</div></th>{/each}
-                                <th class="p-2 text-center font-bold bg-slate-100 border-b border-l border-slate-200 text-slate-700 text-xs">Tổng</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {#each selectedDayStats.roles as role}
-                                <tr class="hover:bg-slate-50 transition-colors">
-                                    <td class="p-2 font-bold border-r border-slate-100 text-xs {role==='GH'?'text-blue-600':(role==='Thu Ngân'?'text-purple-600':(role==='Kho'?'text-orange-600':'text-gray-600'))}">{role}</td>
-                                    {#each selectedDayStats.cols as col}<td class="p-2 border-r border-slate-100 text-center font-mono text-xs {selectedDayStats.matrix[role][col]>0?'font-bold text-slate-800':'text-gray-300'}">{selectedDayStats.matrix[role][col] || '-'}</td>{/each}
-                                    <td class="p-2 text-center font-black text-slate-700 bg-slate-50 border-l border-slate-100 text-xs">{selectedDayStats.matrix[role]['Total']}</td>
-                                </tr>
-                            {/each}
-                        </tbody>
-                    </table>
-                </div>
-
-                <h4 class="text-xs font-bold text-gray-400 uppercase mb-3 sticky top-0 bg-white py-2 z-10 border-b">Chi tiết nhân sự</h4>
-                <div class="space-y-4">
-                    
-                    <div class="rounded-xl border border-orange-100 bg-orange-50/30 overflow-hidden">
-                        <div class="bg-orange-100 px-3 py-2 flex items-center justify-between">
-                            <span class="font-bold text-orange-700 text-sm flex items-center gap-2">
-                                <span class="material-icons-round text-base">inventory_2</span> KHO
-                            </span>
-                             <span class="bg-white text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">{selectedDayStats.matrix['Kho']['Total']} người</span>
-                        </div>
-                        <div class="p-3 grid gap-3">
-                            {#each Object.keys(selectedDayStats.details['Kho']).sort() as shift}
-                                <div class="flex items-start gap-2 text-sm border-b border-orange-100 last:border-0 pb-2 last:pb-0">
-                                    <div class="font-bold text-orange-600 bg-white border border-orange-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
-                                    <div class="flex flex-wrap gap-1.5 pt-0.5">
-                                        {#each selectedDayStats.details['Kho'][shift] as name}
-                                            <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['Kho'][shift][selectedDayStats.details['Kho'][shift].length - 1]}, {/if}</span>
-                                        {/each}
-                                    </div>
-                                </div>
-                            {/each}
-                            {#if Object.keys(selectedDayStats.details['Kho']).length === 0}
-                                <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
-                            {/if}
-                        </div>
-                    </div>
-
-                    <div class="rounded-xl border border-purple-100 bg-purple-50/30 overflow-hidden">
-                        <div class="bg-purple-100 px-3 py-2 flex items-center justify-between">
-                            <span class="font-bold text-purple-700 text-sm flex items-center gap-2">
-                                 <span class="material-icons-round text-base">point_of_sale</span> THU NGÂN
-                            </span>
-                             <span class="bg-white text-purple-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-200">{selectedDayStats.matrix['Thu Ngân']['Total']} người</span>
-                        </div>
-                        <div class="p-3 grid gap-3">
-                            {#each Object.keys(selectedDayStats.details['Thu Ngân']).sort() as shift}
-                                <div class="flex items-start gap-2 text-sm border-b border-purple-100 last:border-0 pb-2 last:pb-0">
-                                    <div class="font-bold text-purple-600 bg-white border border-purple-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
-                                    <div class="flex flex-wrap gap-1.5 pt-0.5">
-                                         {#each selectedDayStats.details['Thu Ngân'][shift] as name}
-                                            <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['Thu Ngân'][shift][selectedDayStats.details['Thu Ngân'][shift].length - 1]}, {/if}</span>
-                                        {/each}
-                                    </div>
-                                </div>
-                            {/each}
-                             {#if Object.keys(selectedDayStats.details['Thu Ngân']).length === 0}
-                                <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
-                            {/if}
-                        </div>
-                    </div>
-
-                    <div class="rounded-xl border border-blue-100 bg-blue-50/30 overflow-hidden">
-                        <div class="bg-blue-100 px-3 py-2 flex items-center justify-between">
-                            <span class="font-bold text-blue-700 text-sm flex items-center gap-2">
-                                <span class="material-icons-round text-base">local_shipping</span> GIAO HÀNG
-                            </span>
-                             <span class="bg-white text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">{selectedDayStats.matrix['GH']['Total']} người</span>
-                        </div>
-                        <div class="p-3 grid gap-3">
-                            {#each Object.keys(selectedDayStats.details['GH']).sort() as shift}
-                                <div class="flex items-start gap-2 text-sm border-b border-blue-100 last:border-0 pb-2 last:pb-0">
-                                    <div class="font-bold text-blue-600 bg-white border border-blue-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
-                                    <div class="flex flex-wrap gap-1.5 pt-0.5">
-                                        {#each selectedDayStats.details['GH'][shift] as name}
-                                            <span class="text-slate-700 font-bold">{name}{#if name !== selectedDayStats.details['GH'][shift][selectedDayStats.details['GH'][shift].length - 1]}, {/if}</span>
-                                        {/each}
-                                    </div>
-                                </div>
-                            {/each}
-                             {#if Object.keys(selectedDayStats.details['GH']).length === 0}
-                                <span class="text-xs text-gray-400 italic">Không có nhân sự</span>
-                            {/if}
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-            
-        </div>
-    </div>
-{/if}
-
-{#if showScheduleTour}
-    <TourGuide steps={scheduleSteps} on:complete={() => showScheduleTour = false} />
-{/if}
---- END FILE: ./src/components/ShiftSchedule.svelte ---
+                    <td class="p-2 font-bold text-center bg-amber-50 text-gray-700 border-l">{Math.round(staff.totalHours) || 0}</td>
+                    <td class="p-2 font-bold text-center bg-blue-50 text-blue-600 border-l">{staff.gh || '-'}</td>
+                    <td class="p-2 font-bold text-center bg-purple-50 text-purple-600 border-l">{staff.tn || 0}</td>
+                    <td id={i===0 ? 'tour-total-col' : ''} class="p-2 font-bold text-center bg-orange-50 text-orange-600 border-l">{staff.kho || 0}</td>
+                    <td class="p-2 font-bold text-center bg-indigo-50 text-indigo-700 border-l">{weCount}</td>
+                </tr>
+            {/each}
+        </tbody>
+    </table>
+</div>
+--- END FILE: ./src/components/ShiftScheduleParts/ScheduleTable.svelte ---
 
 --- START FILE: ./src/components/StoreConfig.svelte ---
 <script>
@@ -5481,46 +6199,28 @@ export function getCurrentTimeShort() {
 --- END FILE: ./src/lib/utils.js ---
 
 --- START FILE: ./src/main.js ---
-// src/main.js
-// Version 1.2 - Fix PWA Error on Localhost
-import { mount } from 'svelte'
+// Version 3.0 - Svelte 5 Mount Fix + PWA Debug Mode
+import { mount } from 'svelte' // BẮT BUỘC CHO SVELTE 5
 import './app.css'
 import App from './App.svelte'
 
-// --- ĐĂNG KÝ PWA (CẬP NHẬT AN TOÀN) ---
-// Chỉ chạy khi trình duyệt hỗ trợ VÀ ĐANG Ở CHẾ ĐỘ PRODUCTION (Đã Build)
-// import.meta.env.PROD trả về true khi build, false khi chạy dev (localhost)
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+// --- PWA LOGIC (Chế độ Debug cho phép chạy Local) ---
+if ('serviceWorker' in navigator) {
+  // Logic: Chạy SW kể cả khi ở Localhost để fix lỗi hiển thị
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
-      .then(registration => {
-        console.log('✅ PWA Registered:', registration.scope);
-        
-        // Kiểm tra update
-        registration.onupdatefound = () => {
-          const installingWorker = registration.installing;
-          if (installingWorker == null) return;
-          
-          installingWorker.onstatechange = () => {
-            if (installingWorker.state === 'installed') {
-              if (navigator.serviceWorker.controller) {
-                console.log('🔄 New content available, please refresh.');
-              } else {
-                console.log('✅ Content is cached for offline use.');
-              }
-            }
-          };
-        };
+      .then((registration) => {
+        console.log('✅ Service Worker Active:', registration.scope);
       })
-      .catch(err => {
-        console.error('❌ SW Registration Failed:', err);
+      .catch((err) => {
+        console.log('❌ Service Worker Fail:', err);
       });
   });
-} else {
-  console.log('🚧 PWA Service Worker is disabled in Development mode.');
 }
-// ----------------------------------
+// ----------------------------------------------------
 
+// KHỞI TẠO APP (CÚ PHÁP SVELTE 5)
+// Thay thế cho new App(...) gây lỗi
 const app = mount(App, {
   target: document.getElementById('app'),
 })
@@ -5555,45 +6255,64 @@ console.log("EmployeeService: Active.");
 export default {};
 --- END FILE: ./src/services/employeeService.js ---
 
---- START FILE: ./structure.txt ---
-src
-src/app.css
-src/App.svelte
-src/main.js
-src/components
-src/components/Login.svelte
-src/components/ShiftSchedule.svelte
-src/components/StoreConfig.svelte
-src/components/HandoverInput.svelte
-src/components/Header.svelte
-src/components/admin
-src/components/admin/schedule
-src/components/admin/schedule/ScheduleMatrix.svelte
-src/components/admin/schedule/SchedulePreview.svelte
-src/components/admin/AdminSchedule.svelte
-src/components/admin/AdminAccounts.svelte
-src/components/admin/AdminTemplate.svelte
-src/components/TaskModal.svelte
-src/components/NotificationDropdown.svelte
-src/components/TaskList.svelte
-src/components/AdminModal.svelte
-src/components/TourGuide.svelte
-src/lib
-src/lib/stores.js
-src/lib/optimization.js
-src/lib/Counter.svelte
-src/lib/scheduleLogic.js
-src/lib/utils.js
-src/lib/firebase.js
-src/modules
-src/modules/settings.service.js
-src/assets
-src/assets/svelte.svg
-src/services
-src/services/dataService.js
-src/services/employeeService.js
+--- START FILE: ./src/utils/excelExport.js ---
+import { utils, writeFile } from 'xlsx';
 
---- END FILE: ./structure.txt ---
+export function exportScheduleToExcel({
+    scheduleData,
+    viewMonth,
+    viewYear,
+    selectedViewStore,
+    getWeekday,
+    getWeekendHardRoleCount
+}) {
+    if (!scheduleData) return;
+    
+    const wb = utils.book_new();
+    const days = Object.keys(scheduleData.data).sort((a, b) => Number(a) - Number(b));
+    const wsData = [];
+    
+    // Dòng 1: Tiêu đề ngày và các cột tổng kết
+    const row1 = ["NHÂN SỰ"]; 
+    days.forEach(d => row1.push(d)); 
+    row1.push("Tổng Giờ", "GH", "TN", "K", "Ca cuối tuần"); 
+    wsData.push(row1);
+    
+    // Dòng 2: Thứ trong tuần
+    const row2 = [""]; 
+    days.forEach(d => row2.push(getWeekday(d))); 
+    row2.push("", "", "", "", ""); 
+    wsData.push(row2);
+    
+    // Các dòng dữ liệu nhân sự
+    scheduleData.stats.forEach(staff => {
+        const row = [staff.name];
+        days.forEach(d => {
+            const assign = scheduleData.data[d].find(x => x.staffId === staff.id);
+            if (assign) { 
+                let cell = assign.shift; 
+                if (assign.role && assign.role !== 'TV') cell += ` (${assign.role})`; 
+                row.push(cell); 
+            } else { 
+                row.push(""); 
+            }
+        });
+        row.push(
+            Math.round(staff.totalHours), 
+            staff.gh, 
+            staff.tn, 
+            staff.kho, 
+            getWeekendHardRoleCount(staff.id)
+        );
+        wsData.push(row);
+    });
+    
+    // Tạo sheet và xuất file
+    const ws = utils.aoa_to_sheet(wsData);
+    utils.book_append_sheet(wb, ws, `Lich_T${viewMonth}`);
+    writeFile(wb, `Lich_Lam_Viec_Kho_${selectedViewStore}_T${viewMonth}_${viewYear}.xlsx`);
+}
+--- END FILE: ./src/utils/excelExport.js ---
 
 --- START FILE: ./svelte.config.js ---
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte'
