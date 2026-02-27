@@ -11,7 +11,8 @@
         const today = new Date();
         const start = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
         const threeDaysLater = new Date(today);
-        threeDaysLater.setDate(today.getDate() + 2); // Chọn khoảng 3 ngày
+        threeDaysLater.setDate(today.getDate() + 2);
+        // Chọn khoảng 3 ngày
         const end = `${threeDaysLater.getFullYear()}-${String(threeDaysLater.getMonth()+1).padStart(2,'0')}-${String(threeDaysLater.getDate()).padStart(2,'0')}`;
         return { start, end };
     }
@@ -21,12 +22,12 @@
     let roadshowDays = [];
     
     // Data lưu trữ dưới dạng: { '2026-03-04': { morning: [], afternoon: [] }, ... }
-    let roadshowData = {}; 
+    let roadshowData = {};
     let allStaff = []; 
     let loading = false;
     let isSaving = false;
     let unsubscribe = null;
-
+    
     // State cho Modal Search
     let showSearchModal = false;
     let targetDate = '';
@@ -114,7 +115,7 @@
     async function autoGenerate() {
         if (!isAdmin) return;
         if (!confirm('Hệ thống sẽ XÓA và TỰ ĐỘNG XẾP LẠI toàn bộ các ngày bạn đang chọn. Bạn chắc chắn chứ?')) return;
-
+        
         loading = true;
         
         try {
@@ -167,6 +168,7 @@
                         if (shift === 'Chiều') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
                     }
                 });
+                
                 newRoadshowData[dStr] = dayObj;
             }
 
@@ -207,7 +209,8 @@
     function addUser(user) {
         // Kiểm tra xem đã có chưa
         if (roadshowData[targetDate][targetSlot].some(u => u.id === user.id)) {
-            alert("Nhân sự này đã có trong danh sách!"); return;
+            alert("Nhân sự này đã có trong danh sách!");
+            return;
         }
         
         roadshowData[targetDate][targetSlot].push({ 
@@ -225,6 +228,7 @@
     function triggerAutoSave(dateStr) {
         isSaving = true;
         if (saveTimeout[dateStr]) clearTimeout(saveTimeout[dateStr]);
+        
         saveTimeout[dateStr] = setTimeout(async () => {
             const ref = doc(db, 'stores', selectedViewStore, 'roadshows', dateStr);
             await setDoc(ref, { 
@@ -282,101 +286,96 @@
         </div>
     </div>
 
-    <div class="flex-1 overflow-auto relative bg-slate-100">
+    <div class="flex-1 overflow-x-auto overflow-y-hidden bg-slate-100/60 p-4">
         {#if roadshowDays.length === 0}
-            <div class="text-center p-10 flex flex-col items-center justify-center opacity-60">
+            <div class="h-full w-full flex flex-col items-center justify-center opacity-60">
                 <span class="material-icons-round text-5xl text-amber-300 mb-2">date_range</span>
                 <p class="text-slate-500 font-bold">Khoảng ngày không hợp lệ.</p>
                 <p class="text-xs text-amber-600 mt-1">Vui lòng chọn ngày Bắt đầu nhỏ hơn hoặc bằng ngày Kết thúc.</p>
             </div>
         {:else}
-            <table class="w-full text-left text-xs border-collapse bg-white relative">
-                <thead class="bg-amber-100/50 text-slate-700 sticky top-0 z-20 shadow-sm border-b border-amber-200">
-                    <tr>
-                        <th class="p-2 border-r border-amber-200 w-[60px] min-w-[60px] sticky left-0 bg-amber-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-center text-[10px] font-black uppercase text-amber-800">
-                            Buổi
-                        </th>
-                        {#each roadshowDays as d}
-                            <th class="p-2 min-w-[140px] border-r border-amber-200 align-top">
-                                <div class="font-bold text-sm text-slate-800 text-center">{formatDate(d)}</div>
-                                <div class="flex justify-center gap-1.5 mt-1.5 text-[9px] font-bold">
-                                    <span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 shadow-sm flex items-center gap-0.5">
-                                        🌞: {roadshowData[d]?.morning?.length || 0}
-                                    </span>
-                                    <span class="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 shadow-sm flex items-center gap-0.5">
-                                        🌛: {roadshowData[d]?.afternoon?.length || 0}
-                                    </span>
-                                </div>
-                            </th>
-                        {/each}
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    
-                    <tr class="hover:bg-slate-50/50 transition-colors">
-                        <td class="p-1 font-black text-blue-700 border-r border-amber-200 z-10 sticky left-0 bg-blue-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-center text-xs">
-                            🌞<br>SÁNG
-                        </td>
-                        {#each roadshowDays as d}
-                            <td class="p-1.5 border-r border-slate-200 align-top bg-white">
-                                <div class="flex flex-wrap gap-1 mb-1">
-                                    {#each roadshowData[d]?.morning || [] as p}
-                                        <div class="inline-flex items-center gap-0.5 {p.type==='pg' ? 'bg-pink-50 border-pink-200 text-pink-700' : 'bg-slate-50 border-slate-200 text-slate-700'} border px-1 py-0.5 rounded text-[10px] shadow-sm font-semibold">
-                                            <span class="opacity-70 font-black">{p.type==='pg'?'[PG]':'[NV]'}</span>
-                                            <span>{p.displayName}</span>
-                                            {#if isAdmin}
-                                                <button class="text-red-300 hover:text-red-600 ml-0.5" on:click={() => removeUser(d, 'morning', p.id)}>
-                                                    <span class="material-icons-round text-[10px]">close</span>
-                                                </button>
-                                            {/if}
-                                        </div>
-                                    {/each}
-                                </div>
-                                {#if (roadshowData[d]?.morning || []).length === 0}
-                                    <div class="text-[10px] text-slate-300 italic text-center py-2">Trống</div>
-                                {/if}
-                                {#if isAdmin}
-                                    <button class="w-full py-1 mt-1 text-[9px] font-bold text-blue-500 bg-blue-50/50 border border-blue-100 border-dashed rounded hover:bg-blue-100 hover:border-blue-300 transition-colors flex items-center justify-center gap-0.5" on:click={() => openSearchModal(d, 'morning')}>
-                                        <span class="material-icons-round text-[10px]">add</span> Thêm
-                                    </button>
-                                {/if}
-                            </td>
-                        {/each}
-                    </tr>
+            <div class="flex gap-4 h-full min-w-max items-start">
+                {#each roadshowDays as d}
+                    <div class="w-[320px] flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 h-full max-h-full overflow-hidden shrink-0">
+                        
+                        <div class="p-2.5 bg-amber-50/80 border-b border-amber-100 flex justify-between items-center shrink-0">
+                            <span class="font-bold text-slate-800 text-[13px]">{formatDate(d)}</span>
+                            <div class="flex gap-1 text-[10px] font-bold">
+                                <span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 shadow-sm">🌞 {roadshowData[d]?.morning?.length || 0}</span>
+                                <span class="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 shadow-sm">🌛 {roadshowData[d]?.afternoon?.length || 0}</span>
+                            </div>
+                        </div>
 
-                    <tr class="hover:bg-slate-50/50 transition-colors">
-                        <td class="p-1 font-black text-orange-700 border-r border-amber-200 z-10 sticky left-0 bg-orange-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-center text-xs">
-                            🌛<br>CHIỀU
-                        </td>
-                        {#each roadshowDays as d}
-                            <td class="p-1.5 border-r border-slate-200 align-top bg-white">
-                                <div class="flex flex-wrap gap-1 mb-1">
-                                    {#each roadshowData[d]?.afternoon || [] as p}
-                                        <div class="inline-flex items-center gap-0.5 {p.type==='pg' ? 'bg-pink-50 border-pink-200 text-pink-700' : 'bg-slate-50 border-slate-200 text-slate-700'} border px-1 py-0.5 rounded text-[10px] shadow-sm font-semibold">
-                                            <span class="opacity-70 font-black">{p.type==='pg'?'[PG]':'[NV]'}</span>
-                                            <span>{p.displayName}</span>
-                                            {#if isAdmin}
-                                                <button class="text-red-300 hover:text-red-600 ml-0.5" on:click={() => removeUser(d, 'afternoon', p.id)}>
-                                                    <span class="material-icons-round text-[10px]">close</span>
-                                                </button>
-                                            {/if}
-                                        </div>
-                                    {/each}
+                        <div class="flex-1 overflow-y-auto p-2 space-y-2">
+                            
+                            <div class="bg-blue-50/40 rounded border border-blue-100 p-1.5">
+                                <div class="flex justify-between items-center mb-1.5 px-0.5">
+                                    <div class="text-[10px] font-black text-blue-700 flex items-center gap-1 uppercase tracking-wide">
+                                        <span>🌞</span> CA SÁNG
+                                    </div>
+                                    {#if isAdmin}
+                                        <button class="text-[9px] font-bold text-blue-600 bg-white hover:bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => openSearchModal(d, 'morning')}>
+                                            <span class="material-icons-round text-[11px]">add</span> Thêm
+                                        </button>
+                                    {/if}
                                 </div>
-                                {#if (roadshowData[d]?.afternoon || []).length === 0}
-                                    <div class="text-[10px] text-slate-300 italic text-center py-2">Trống</div>
-                                {/if}
-                                {#if isAdmin}
-                                    <button class="w-full py-1 mt-1 text-[9px] font-bold text-orange-500 bg-orange-50/50 border border-orange-100 border-dashed rounded hover:bg-orange-100 hover:border-orange-300 transition-colors flex items-center justify-center gap-0.5" on:click={() => openSearchModal(d, 'afternoon')}>
-                                        <span class="material-icons-round text-[10px]">add</span> Thêm
-                                    </button>
-                                {/if}
-                            </td>
-                        {/each}
-                    </tr>
 
-                </tbody>
-            </table>
+                                <div class="flex flex-wrap gap-1.5">
+                                    {#if (roadshowData[d]?.morning || []).length === 0}
+                                        <div class="w-full text-[10px] text-slate-400 italic text-center py-2 bg-white/50 rounded border border-dashed border-slate-200">Chưa có nhân sự</div>
+                                    {:else}
+                                        {#each (roadshowData[d]?.morning || []) as p}
+                                            <div class="group relative flex items-center gap-1 {p.type==='pg' ? 'bg-pink-50/80 text-pink-700' : 'bg-white text-slate-700'} border {p.type==='pg' ? 'border-pink-200' : 'border-slate-200'} px-1.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] text-[11px] hover:border-slate-300 hover:shadow-sm w-auto max-w-full transition-all">
+                                                <span class="w-1.5 h-1.5 rounded-full {p.type==='pg' ? 'bg-pink-400' : 'bg-blue-400'} shrink-0"></span>
+                                                <span class="font-semibold truncate tracking-tight">{p.displayName}</span>
+                                                
+                                                {#if isAdmin}
+                                                    <button class="absolute -top-1.5 -right-1.5 bg-white rounded-full text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm border border-slate-100 flex items-center justify-center z-10" on:click={() => removeUser(d, 'morning', p.id)} title="Xóa nhân sự">
+                                                        <span class="material-icons-round text-[12px] block leading-none">cancel</span>
+                                                    </button>
+                                                {/if}
+                                            </div>
+                                        {/each}
+                                    {/if}
+                                </div>
+                            </div>
+
+                            <div class="bg-orange-50/40 rounded border border-orange-100 p-1.5">
+                                <div class="flex justify-between items-center mb-1.5 px-0.5">
+                                    <div class="text-[10px] font-black text-orange-700 flex items-center gap-1 uppercase tracking-wide">
+                                        <span>🌛</span> CA CHIỀU
+                                    </div>
+                                    {#if isAdmin}
+                                        <button class="text-[9px] font-bold text-orange-600 bg-white hover:bg-orange-100 border border-orange-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => openSearchModal(d, 'afternoon')}>
+                                            <span class="material-icons-round text-[11px]">add</span> Thêm
+                                        </button>
+                                    {/if}
+                                </div>
+
+                                <div class="flex flex-wrap gap-1.5">
+                                    {#if (roadshowData[d]?.afternoon || []).length === 0}
+                                        <div class="w-full text-[10px] text-slate-400 italic text-center py-2 bg-white/50 rounded border border-dashed border-slate-200">Chưa có nhân sự</div>
+                                    {:else}
+                                        {#each (roadshowData[d]?.afternoon || []) as p}
+                                            <div class="group relative flex items-center gap-1 {p.type==='pg' ? 'bg-pink-50/80 text-pink-700' : 'bg-white text-slate-700'} border {p.type==='pg' ? 'border-pink-200' : 'border-slate-200'} px-1.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] text-[11px] hover:border-slate-300 hover:shadow-sm w-auto max-w-full transition-all">
+                                                <span class="w-1.5 h-1.5 rounded-full {p.type==='pg' ? 'bg-pink-400' : 'bg-orange-400'} shrink-0"></span>
+                                                <span class="font-semibold truncate tracking-tight">{p.displayName}</span>
+                                                
+                                                {#if isAdmin}
+                                                    <button class="absolute -top-1.5 -right-1.5 bg-white rounded-full text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm border border-slate-100 flex items-center justify-center z-10" on:click={() => removeUser(d, 'afternoon', p.id)} title="Xóa nhân sự">
+                                                        <span class="material-icons-round text-[12px] block leading-none">cancel</span>
+                                                    </button>
+                                                {/if}
+                                            </div>
+                                        {/each}
+                                    {/if}
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                {/each}
+            </div>
         {/if}
     </div>
 
