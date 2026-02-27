@@ -1,19 +1,21 @@
 <script>
-  // Version 40.5 - Refactored (Phase 4.1: Extracted Excel Export) [Surgical Fix]
+  // Version 41.0 - Tích hợp Hệ thống Lịch PG (CodeGenesis v3.0)
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
   import { currentUser } from '../lib/stores';
   import TourGuide from './TourGuide.svelte';
   import CumulativeHistoryModal from './CumulativeHistoryModal.svelte';
-  // Tích hợp các mảnh ghép giao diện
+  
   import ScheduleControls from './ShiftScheduleParts/ScheduleControls.svelte';
   import ScheduleTable from './ShiftScheduleParts/ScheduleTable.svelte';
   import DayStatsModal from './ShiftScheduleParts/DayStatsModal.svelte';
   import EditShiftModal from './ShiftScheduleParts/EditShiftModal.svelte';
   import PersonalScheduleModal from './ShiftScheduleParts/PersonalScheduleModal.svelte';
-  // [NEW] Import Service Xuất Excel
   import { exportScheduleToExcel } from '../utils/excelExport.js';
+
+  // [NEW] Import Component Lịch PG
+  import PGScheduleTable from './ShiftScheduleParts/PGScheduleTable.svelte';
 
   export let activeTab;
   let scheduleData = null, loading = false, errorMsg = '';
@@ -21,6 +23,9 @@
   let viewYear = new Date().getFullYear();
   $: currentMonthStr = `${viewYear}-${String(viewMonth).padStart(2,'0')}`;
   
+  // [NEW] State quản lý chế độ View
+  let currentMode = 'NV'; // 'NV' | 'PG'
+
   let selectedStaff = null;
   let editingShift = null;
   let selectedDayStats = null;
@@ -35,7 +40,10 @@
   $: if (myStores.length > 0 && !selectedViewStore) { selectedViewStore = myStores[0]; }
 
   let unsubscribe = () => {};
-  $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr) { loadSchedule(currentMonthStr, selectedViewStore); }
+  // Cập nhật load: Chỉ load data tháng nếu ở chế độ NV
+  $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr && currentMode === 'NV') { 
+      loadSchedule(currentMonthStr, selectedViewStore);
+  }
 
   function isPastDay(d) {
       const today = new Date();
@@ -76,7 +84,8 @@
           const mainRef = doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr);
           await setDoc(mainRef, backupSnap.data());
           alert("✅ Đã khôi phục thành công!");
-      } catch (e) { alert("Lỗi: " + e.message); } finally { loading = false; }
+      } catch (e) { alert("Lỗi: " + e.message);
+      } finally { loading = false; }
   }
 
   function getShiftColor(code) {
@@ -151,8 +160,7 @@
           }).length;
           
           if (currentCount + 1 > quota) { 
-              const msg = quota === 0 ?
-              `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
+              const msg = quota === 0 ? `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
               if (!confirm(msg)) return; 
           } 
       } 
@@ -177,7 +185,8 @@
           try { 
               await updateDoc(doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
               editingShift = null; 
-          } catch (e) { alert("Lỗi: " + e.message); } 
+          } catch (e) { alert("Lỗi: " + e.message);
+          } 
       } 
   }
   
@@ -225,15 +234,9 @@
       return count;
   }
 
-  // [SURGICAL] Gọi hàm xuất Excel từ file util
   function handleExportExcel() {
       exportScheduleToExcel({
-          scheduleData,
-          viewMonth,
-          viewYear,
-          selectedViewStore,
-          getWeekday,
-          getWeekendHardRoleCount
+          scheduleData, viewMonth, viewYear, selectedViewStore, getWeekday, getWeekendHardRoleCount
       });
   }
   
@@ -247,6 +250,7 @@
 </script>
 
 <ScheduleControls 
+    bind:currentMode={currentMode}
     {myStores} {scheduleData} {isAdmin}
     bind:selectedViewStore bind:viewMonth bind:viewYear bind:showPastDays
     on:openHistory={() => showHistoryModal = true}
@@ -255,26 +259,30 @@
     on:startTour={() => showScheduleTour = true}
 />
 
-{#if loading} 
-    <div class="p-10 text-center text-gray-400 animate-pulse bg-white rounded-xl border border-dashed flex flex-col items-center">
-        <span class="material-icons-round text-4xl animate-spin text-indigo-300">sync</span>
-        <p class="mt-2 text-sm font-bold">Đang tải lịch tháng {viewMonth}...</p>
-    </div>
-{:else if !scheduleData} 
-    <div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed flex flex-col items-center">
-        <span class="material-icons-round text-4xl text-gray-300">calendar_today</span>
-        <p class="mt-2 text-sm">Chưa có lịch làm việc tháng {viewMonth}/{viewYear}.</p>
-        {#if isAdmin}<p class="text-xs text-indigo-500 mt-1">Vui lòng vào mục "Quản trị" để tạo.</p>{/if}
-    </div>
+{#if currentMode === 'NV'}
+    {#if loading} 
+        <div class="p-10 text-center text-gray-400 animate-pulse bg-white rounded-xl border border-dashed flex flex-col items-center">
+            <span class="material-icons-round text-4xl animate-spin text-indigo-300">sync</span>
+            <p class="mt-2 text-sm font-bold">Đang tải lịch tháng {viewMonth}...</p>
+        </div>
+    {:else if !scheduleData} 
+        <div class="p-10 text-center text-gray-400 bg-white rounded-xl border border-dashed flex flex-col items-center">
+            <span class="material-icons-round text-4xl text-gray-300">calendar_today</span>
+            <p class="mt-2 text-sm">Chưa có lịch làm việc tháng {viewMonth}/{viewYear}.</p>
+            {#if isAdmin}<p class="text-xs text-indigo-500 mt-1">Vui lòng vào mục "Quản trị" để tạo.</p>{/if}
+        </div>
+    {:else}
+        <ScheduleTable 
+            {scheduleData} {showPastDays} {highlightedDay} {isAdmin}
+            {isPastDay} {getWeekday} {getRoleBadge} {getShiftColor} {getWeekendHardRoleCount}
+            on:clickHighlight={(e) => handleHighlightClick(e.detail)}
+            on:clickDayStats={(e) => showDayStats(e.detail)}
+            on:clickStaff={(e) => viewPersonalSchedule(e.detail.id, e.detail.name)}
+            on:clickCell={(e) => openEditShift(e.detail.day, e.detail.staffId, e.detail.assign)}
+        />
+    {/if}
 {:else}
-    <ScheduleTable 
-        {scheduleData} {showPastDays} {highlightedDay} {isAdmin}
-        {isPastDay} {getWeekday} {getRoleBadge} {getShiftColor} {getWeekendHardRoleCount}
-        on:clickHighlight={(e) => handleHighlightClick(e.detail)}
-        on:clickDayStats={(e) => showDayStats(e.detail)}
-        on:clickStaff={(e) => viewPersonalSchedule(e.detail.id, e.detail.name)}
-        on:clickCell={(e) => openEditShift(e.detail.day, e.detail.staffId, e.detail.assign)}
-    />
+    <PGScheduleTable {selectedViewStore} {isAdmin} />
 {/if}
 
 {#if showHistoryModal && scheduleData}
