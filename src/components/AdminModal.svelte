@@ -7,11 +7,8 @@
   import AdminTemplate from './admin/AdminTemplate.svelte';
   import AdminAccounts from './admin/AdminAccounts.svelte';
   import AdminSchedule from './admin/AdminSchedule.svelte';
-  // StoreConfig được chuyển vào trong AdminSchedule nên không cần import ở đây nữa, 
-  // trừ khi bạn muốn giữ nó như một modal toàn cục. Nhưng theo yêu cầu, tôi sẽ ẩn nút kích hoạt ở header.
 
   const dispatch = createEventDispatcher();
-  
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
   $: myStores = $currentUser?.storeIds || [];
   
@@ -19,9 +16,7 @@
   $: if (myStores.length > 0 && !targetStore) { targetStore = myStores[0]; }
   
   $: isDemoMode = targetStore?.includes('DEMO');
-
   let activeSection = 'schedule'; 
-  // let showStoreConfig = false; // Moved to AdminSchedule
 
   function handleSwitchTab(e) {
       dispatch('switchTab', e.detail);
@@ -45,7 +40,7 @@
 
                 <div class="flex bg-slate-100 p-1 rounded-lg ml-2">
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>Phân Ca</button>
-                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Tạo công việc</button>
+                    
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>Nhân Sự</button>
                 </div>
             </div>
@@ -55,10 +50,6 @@
     <div class="flex-1 overflow-auto p-4 lg:p-6 relative">
         {#if activeSection === 'schedule'}
             <AdminSchedule {targetStore} on:switchTab={handleSwitchTab} />
-        {/if}
-        
-        {#if activeSection === 'template'} 
-            <AdminTemplate {targetStore} /> 
         {/if}
         
         {#if activeSection === 'accounts'} 

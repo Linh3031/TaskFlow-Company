@@ -15,7 +15,9 @@
   import TourGuide from './components/TourGuide.svelte';
   import ShiftSchedule from './components/ShiftSchedule.svelte';
 
-  let activeTab = 'warehouse';
+  // [ĐÃ SỬA] Đổi tab mặc định thành schedule vì tab warehouse đã bị ẩn
+  let activeTab = 'schedule';
+  
   let showAdminModal = false;
   let showTaskModal = false;
   let selectedTask = null;
@@ -218,8 +220,8 @@
       
       <nav id="tab-nav-container" class="tab-nav">
         {#each [
-            {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'},
-            {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50'},
+            // {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'},
+            // {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50'},
             {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7'}, // [CHANGED] Handover -> Installment
             {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'}
         ] as t}
@@ -248,11 +250,11 @@
            
            {#if activeTab !== 'schedule' && activeTab !== 'installment'}
             <div id="date-navigator" class="flex items-center gap-1 w-full sm:w-auto bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-sm">
-                 <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
+                <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
                     <span class="material-icons-round text-lg">chevron_left</span>
                 </button>
                 <button class="relative flex-1 sm:flex-none flex flex-col items-center justify-center px-3 cursor-pointer group min-w-[70px] bg-transparent border-none" on:click={openDatePicker}>
-                     <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
+                    <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
                     <span class="text-sm font-black text-gray-800 leading-tight group-hover:text-indigo-600 transition-colors">{displayDateLabel}</span>
                 </button>
                 <input id="hidden-date-input" type="date" bind:value={selectedDate} class="absolute opacity-0 pointer-events-none w-0 h-0">
@@ -264,7 +266,7 @@
         </div>
 
         {#if activeTab === 'installment'} 
-            <InstallmentCalc /> 
+             <InstallmentCalc /> 
         {:else if activeTab === 'schedule'} 
             <ShiftSchedule {activeTab} /> 
         {:else} 
