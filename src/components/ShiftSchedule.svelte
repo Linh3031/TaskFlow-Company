@@ -1,5 +1,5 @@
 <script>
-  // Version 41.0 - Tích hợp Hệ thống Lịch PG (CodeGenesis v3.0)
+  // Version 43.0 - Custom Shift Sort Order (CodeGenesis v3.0)
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
@@ -14,8 +14,8 @@
   import PersonalScheduleModal from './ShiftScheduleParts/PersonalScheduleModal.svelte';
   import { exportScheduleToExcel } from '../utils/excelExport.js';
 
-  // [NEW] Import Component Lịch PG
   import PGScheduleTable from './ShiftScheduleParts/PGScheduleTable.svelte';
+  import RoadshowPanel from './ShiftScheduleParts/RoadshowPanel.svelte';
 
   export let activeTab;
   let scheduleData = null, loading = false, errorMsg = '';
@@ -23,8 +23,7 @@
   let viewYear = new Date().getFullYear();
   $: currentMonthStr = `${viewYear}-${String(viewMonth).padStart(2,'0')}`;
   
-  // [NEW] State quản lý chế độ View
-  let currentMode = 'NV'; // 'NV' | 'PG'
+  let currentMode = 'NV'; 
 
   let selectedStaff = null;
   let editingShift = null;
@@ -40,7 +39,6 @@
   $: if (myStores.length > 0 && !selectedViewStore) { selectedViewStore = myStores[0]; }
 
   let unsubscribe = () => {};
-  // Cập nhật load: Chỉ load data tháng nếu ở chế độ NV
   $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr && currentMode === 'NV') { 
       loadSchedule(currentMonthStr, selectedViewStore);
   }
@@ -193,31 +191,70 @@
   function showDayStats(day) { 
       if (!scheduleData || !scheduleData.data[day]) return;
       const dayData = scheduleData.data[day];
+      
       const roles = ['Kho', 'Thu Ngân', 'GH', 'TV'];
       const matrix = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {}, 'TV': {} };
+      
       const activeShifts = new Set();
       dayData.forEach(assign => { if (assign.shift !== 'OFF') activeShifts.add(assign.shift); }); 
       const cols = Array.from(activeShifts).sort();
       roles.forEach(r => { cols.forEach(c => matrix[r][c] = 0); matrix[r]['Total'] = 0; });
-      dayData.forEach(assign => { 
-          if (assign.shift === 'OFF') return; 
-          let r = assign.role || 'TV'; 
-          if (r === 'TN') r = 'Thu Ngân'; 
-          if (matrix[r]) { matrix[r][assign.shift] = (matrix[r][assign.shift] || 0) + 1; matrix[r]['Total']++; } 
-      });
+      
       const targetRoles = ['Kho', 'Thu Ngân', 'GH'];
       const details = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {} };
-      dayData.forEach(assign => {
-          if (assign.shift === 'OFF') return;
-          let r = assign.role || 'TV';
-          if (r === 'TN') r = 'Thu Ngân'; if (r === 'K') r = 'Kho'; if (r === 'Giao Hàng') r = 'GH';
-          if (targetRoles.includes(r)) {
-               if (!details[r][assign.shift]) details[r][assign.shift] = [];
-               details[r][assign.shift].push(assign.name);
+      
+      const shiftDetails = {};
+
+      dayData.forEach(assign => { 
+          let rawRole = assign.role || 'TV';
+          let r = rawRole;
+          if (r === 'TN' || r === 'Thu Ngân') r = 'Thu Ngân'; 
+          if (r === 'K' || r === 'Kho') r = 'Kho'; 
+          if (r === 'Giao Hàng' || r === 'GH') r = 'GH';
+
+          let s = assign.shift || 'OFF';
+          if (!shiftDetails[s]) shiftDetails[s] = [];
+          shiftDetails[s].push({ name: assign.name, role: r });
+
+          if (s !== 'OFF') {
+              if (matrix[r]) { 
+                  matrix[r][s] = (matrix[r][s] || 0) + 1; 
+                  matrix[r]['Total']++; 
+              } 
+              if (targetRoles.includes(r)) {
+                  if (!details[r][s]) details[r][s] = [];
+                  details[r][s].push(assign.name);
+              }
           }
       });
-      selectedDayStats = { day, weekday: getWeekday(day), cols, matrix, roles, details };
-  }
+// --- [ĐÃ SỬA] THUẬT TOÁN SẮP XẾP CHUYỂN THÀNH ARRAY ---
+      const customShiftOrder = ['123', '23', '45', '456', '2345', '2-5'];
+      
+      // Dùng .map() để biến Object thành Array [{shift: '123', people: [...]}, ...]
+      const sortedShiftArray = Object.keys(shiftDetails).sort((a, b) => {
+          if (a === 'OFF') return 1;
+          if (b === 'OFF') return -1;
+          
+          const idxA = customShiftOrder.indexOf(a);
+          const idxB = customShiftOrder.indexOf(b);
+          
+          if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+          if (idxA !== -1) return -1;
+          if (idxB !== -1) return 1;
+          
+          return a.localeCompare(b);
+      }).map(key => ({
+          shift: key,
+          people: shiftDetails[key]
+      }));
+
+      selectedDayStats = { 
+          day, weekday: getWeekday(day), 
+          cols, matrix, roles, details, 
+          shiftDetails: sortedShiftArray // Đổi từ Object sang Array
+      };
+  } // Kết thúc hàm showDayStats
+      
 
   function getWeekendHardRoleCount(staffId) {
       if (!scheduleData || !scheduleData.data) return 0;
@@ -235,9 +272,7 @@
   }
 
   function handleExportExcel() {
-      exportScheduleToExcel({
-          scheduleData, viewMonth, viewYear, selectedViewStore, getWeekday, getWeekendHardRoleCount
-      });
+      exportScheduleToExcel({ scheduleData, viewMonth, viewYear, selectedViewStore, getWeekday, getWeekendHardRoleCount });
   }
   
   let showScheduleTour = false;
@@ -281,8 +316,10 @@
             on:clickCell={(e) => openEditShift(e.detail.day, e.detail.staffId, e.detail.assign)}
         />
     {/if}
-{:else}
+{:else if currentMode === 'PG'}
     <PGScheduleTable {selectedViewStore} {isAdmin} />
+{:else if currentMode === 'RS'}
+    <RoadshowPanel {selectedViewStore} {isAdmin} />
 {/if}
 
 {#if showHistoryModal && scheduleData}

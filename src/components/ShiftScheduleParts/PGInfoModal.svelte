@@ -61,7 +61,7 @@
         
         <div class="p-4 border-b border-slate-100 flex justify-between items-center shrink-0">
             <div>
-                <h3 class="font-bold text-lg text-indigo-700">{pg.username}</h3>
+                <h3 class="font-bold text-lg text-indigo-700">{pg.name}</h3>
                 <p class="text-[10px] text-slate-500 font-semibold uppercase">Hãng: {pg.brand} - Nhóm: {pg.category}</p>
             </div>
             {#if !isEditing}
