@@ -3,8 +3,9 @@
     import { db } from '../../lib/firebase';
     import { collection, query, where, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
     
-    // [NEW] Import 2 Modal mới
-    import { currentUser } from '../../lib/stores';
+    // [NEW] Lấy thông tin User đang đăng nhập để phân quyền xếp ca
+    import { currentUser } from '../../lib/stores'; 
+    
     import PGInfoModal from './PGInfoModal.svelte';
     import PGDayStatsModal from './PGDayStatsModal.svelte';
 
@@ -20,7 +21,6 @@
     let unsubscribe = null;
     let saveTimeout = null;
 
-    // [NEW] Trạng thái mở Modal
     let selectedPGForModal = null;
     let selectedDayForStats = null;
 
@@ -104,8 +104,11 @@
         });
     }
 
-    function updateShift(pgId, day, value) {
-        if (!isAdmin) return; 
+    // [NEW] Hàm cập nhật ca được cấp quyền an toàn
+    function updateShift(pgId, pgUsername, day, value) {
+        // Nếu không phải Admin VÀ cũng không phải chính PG đó -> Chặn!
+        if (!isAdmin && $currentUser?.username !== pgUsername) return; 
+        
         if (!pgScheduleData[pgId]) pgScheduleData[pgId] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
         pgScheduleData[pgId][day] = value;
         pgScheduleData = { ...pgScheduleData }; 
@@ -145,9 +148,9 @@
             <button class="w-6 h-6 flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded" on:click={() => changeWeek(-1)}>
                 <span class="material-icons-round text-sm">chevron_left</span>
             </button>
-            <div class="text-center min-w-[110px]">
-                <div class="font-bold text-pink-700 text-xs">{weekId}</div>
-                <div class="text-[9px] text-pink-500 font-semibold">{weekLabel}</div>
+            <div class="text-center min-w-[120px]">
+                <div class="font-black text-pink-700 text-sm tracking-tight">{weekLabel}</div>
+                <div class="text-[9px] text-pink-400 font-bold uppercase">Tuần: {weekId}</div>
             </div>
             <button class="w-6 h-6 flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded" on:click={() => changeWeek(1)}>
                 <span class="material-icons-round text-sm">chevron_right</span>
@@ -197,12 +200,14 @@
                                             
                                             {#each DAYS as d}
                                                 {@const currentShift = pgScheduleData[pg.id]?.[d] || ''}
+                                                {@const canEdit = isAdmin || $currentUser?.username === pg.username}
+                                                
                                                 <td class="p-1 border-r last:border-0 align-middle">
                                                     <select 
-                                                        class="w-full h-8 rounded border text-[11px] outline-none text-center cursor-pointer transition-colors shadow-sm {SHIFT_COLORS[currentShift]} {!isAdmin ? 'pointer-events-none opacity-80' : 'hover:border-indigo-300'}"
+                                                        class="w-full h-8 rounded border text-[11px] outline-none text-center cursor-pointer transition-colors shadow-sm {SHIFT_COLORS[currentShift]} {!canEdit ? 'pointer-events-none opacity-80' : 'hover:border-indigo-300'}"
                                                         value={currentShift}
-                                                        disabled={!isAdmin}
-                                                        on:change={(e) => updateShift(pg.id, d, e.target.value)}
+                                                        disabled={!canEdit}
+                                                        on:change={(e) => updateShift(pg.id, pg.username, d, e.target.value)}
                                                     >
                                                         <option value="" class="bg-white text-gray-500">- Trống -</option>
                                                         <option value="OFF" class="bg-white text-red-600 font-bold">OFF</option>
