@@ -1,5 +1,5 @@
 <script>
-  // Version 10.6 - Add Installment Calc Feature
+  // Version 10.7 - Add 8NTTT Feature (CodeGenesis v3.0)
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
@@ -8,15 +8,15 @@
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
   import TaskList from './components/TaskList.svelte';
-  // import HandoverInput from './components/HandoverInput.svelte'; // [HIDDEN]
-  import InstallmentCalc from './components/InstallmentCalc.svelte'; // [NEW IMPORT]
+  import InstallmentCalc from './components/InstallmentCalc.svelte'; 
   import AdminModal from './components/AdminModal.svelte';
   import TaskModal from './components/TaskModal.svelte';
   import TourGuide from './components/TourGuide.svelte';
   import ShiftSchedule from './components/ShiftSchedule.svelte';
+  import DailyChecklist from './components/DailyChecklist.svelte'; 
 
-  // [ĐÃ SỬA] Đổi tab mặc định thành schedule vì tab warehouse đã bị ẩn
-  let activeTab = 'schedule';
+  // Đổi tab mặc định khi mở app lên thành 8nttt
+  let activeTab = '8nttt'; 
   
   let showAdminModal = false;
   let showTaskModal = false;
@@ -30,7 +30,7 @@
 
   const tourSteps = [
       { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow.' },
-      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: Kho, Thu Ngân, Trả Góp, Lịch Ca.' },
+      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: 8NTTT, Trả Góp, Lịch Ca.' },
       { target: '#date-navigator', title: 'Chọn Ngày', content: 'Bấm < hoặc > để chuyển ngày.' },
       { target: '#btn-notif', title: 'Thông Báo', content: 'Xem ai nhắc tên bạn.' },
       { target: '#btn-admin', title: 'Cài Đặt', content: 'Cấu hình hệ thống.' }
@@ -41,7 +41,6 @@
   let hasCheckedInit = false; 
   let isTasksLoaded = false; 
 
-  // --- LOGIC HIỂN THỊ NGÀY THÁNG ---
   $: displayDateLabel = (() => {
       if (!selectedDate) return '';
       const [y, m, d] = selectedDate.split('-');
@@ -67,7 +66,6 @@
       catch (e) { document.getElementById('hidden-date-input').click(); }
   }
 
-  // Reset cờ khi đổi kho hoặc đổi ngày
   $: if (activeStoreId || selectedDate) {
       hasCheckedInit = false;
       isTasksLoaded = false; 
@@ -90,7 +88,7 @@
   }
 
   $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
-  // TỰ ĐỘNG KHỞI TẠO (CHẠY NGẦM AN TOÀN)
+  
   $: if ($currentUser && activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
            initDailyTasksSafe(activeStoreId, selectedDate, $currentTasks, $taskTemplate);
@@ -109,16 +107,13 @@
       const dayOfWeek = new Date().getDay();
       const batch = writeBatch(db);
       let hasUpdates = false;
-      const types = ['warehouse', 'cashier']; // Bỏ handover khỏi auto-init nếu không cần thiết
+      const types = ['warehouse', 'cashier']; 
 
       types.forEach(type => {
           const templateItems = template[type] || [];
           templateItems.forEach(tpl => {
               if (tpl.days && tpl.days.includes(dayOfWeek)) {
-                  
                   const fixedID = generateFixedID(storeId, dateStr, type, tpl.title);
-      
-                  // Kiểm tra trùng lặp
                   const existsByID = currentTasks.some(t => t.id === fixedID);
                   const existsByTitle = currentTasks.some(t => 
                       t.title.trim().toLowerCase() === tpl.title.trim().toLowerCase() && 
@@ -127,7 +122,6 @@
 
                   if (!existsByID && !existsByTitle) {
                       const docRef = doc(db, 'tasks', fixedID);
-             
                       batch.set(docRef, {
                           title: tpl.title.trim(),
                           timeSlot: tpl.time,
@@ -146,7 +140,6 @@
       });
 
       if (hasUpdates) {
-          console.log("⚡ Đang đồng bộ công việc thiếu...");
           try { await batch.commit(); } catch(e) { console.error(e); }
       }
   }
@@ -220,9 +213,8 @@
       
       <nav id="tab-nav-container" class="tab-nav">
         {#each [
-            // {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'},
-            // {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50'},
-            {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7'}, // [CHANGED] Handover -> Installment
+            {id:'8nttt', icon:'fact_check', label:'8NTTT', color:'#00bcd4'},
+            {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7'}, 
             {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'}
         ] as t}
             <button class="tab-btn {activeTab===t.id?'active':''}" on:click={() => activeTab=t.id} style="--theme-color: {t.color};">
@@ -232,7 +224,7 @@
       </nav>
 
       <div id="main-content" class="content-area">
-        <div class="section-header {activeTab}-theme flex flex-col gap-2 items-start sm:flex-row sm:items-center sm:justify-between">
+        <div class="section-header theme-{activeTab} flex flex-col gap-2 items-start sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
                  {#if $currentUser.role === 'super_admin'}
@@ -240,10 +232,11 @@
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
+                    {#if activeTab==='8nttt'}📋 Kiểm tra 8NTTT{/if}
                     {#if activeTab==='installment'}🧮 Tính Trả Góp{/if} {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                  {/if}
               </h3>
-              {#if activeTab !== 'schedule' && activeTab !== 'installment'}
+              {#if activeTab === 'warehouse' || activeTab === 'cashier'}
                 <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
            </div>
@@ -257,7 +250,7 @@
                     <span class="text-[10px] font-bold text-gray-400 leading-none uppercase">{displayDayOfWeek}</span>
                     <span class="text-sm font-black text-gray-800 leading-tight group-hover:text-indigo-600 transition-colors">{displayDateLabel}</span>
                 </button>
-                <input id="hidden-date-input" type="date" bind:value={selectedDate} class="absolute opacity-0 pointer-events-none w-0 h-0">
+                <input id="hidden-date-input" type="date" bind:value={selectedDate} class="absolute opacity-0 pointer-events-none w-0 h-0" />
                 <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(1)}>
                     <span class="material-icons-round text-lg">chevron_right</span>
                 </button>
@@ -269,6 +262,8 @@
              <InstallmentCalc /> 
         {:else if activeTab === 'schedule'} 
             <ShiftSchedule {activeTab} /> 
+        {:else if activeTab === '8nttt'} 
+            <DailyChecklist {activeStoreId} dateStr={selectedDate} />
         {:else} 
             <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
         {/if}
@@ -296,4 +291,5 @@
   .section-header h3 { font-size: 1rem; margin: 0; font-weight: 700; }
   .task-count { background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 800; color: #555; }
   footer { flex-shrink: 0; text-align: center; padding: 10px; color: #999; font-size: 0.75rem; font-weight: 700; background: #f4f7fc; }
+  .theme-8nttt h3 { color: #00bcd4; }
 </style>
