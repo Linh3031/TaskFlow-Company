@@ -1,9 +1,9 @@
 <script>
-  // Version 10.7 - Add 8NTTT Feature (CodeGenesis v3.0)
+  // Version 11.0 - Sử dụng Global Store Selector
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
-  import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList } from './lib/stores.js';
+  import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList, activeStoreId } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
@@ -15,7 +15,6 @@
   import ShiftSchedule from './components/ShiftSchedule.svelte';
   import DailyChecklist from './components/DailyChecklist.svelte'; 
 
-  // Đổi tab mặc định khi mở app lên thành 8nttt
   let activeTab = '8nttt'; 
   
   let showAdminModal = false;
@@ -24,7 +23,6 @@
   let noteInput = '';
   let selectedDate = getTodayStr();
   
-  let activeStoreId = '';
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
 
@@ -35,6 +33,7 @@
       { target: '#btn-notif', title: 'Thông Báo', content: 'Xem ai nhắc tên bạn.' },
       { target: '#btn-admin', title: 'Cài Đặt', content: 'Cấu hình hệ thống.' }
   ];
+
   let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
@@ -46,12 +45,14 @@
       const [y, m, d] = selectedDate.split('-');
       return `${d}/${m}`;
   })();
+
   $: displayDayOfWeek = (() => {
       if (!selectedDate) return '';
       const date = new Date(selectedDate);
       const days = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
       return days[date.getDay()];
   })();
+
   function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
@@ -66,7 +67,7 @@
       catch (e) { document.getElementById('hidden-date-input').click(); }
   }
 
-  $: if (activeStoreId || selectedDate) {
+  $: if ($activeStoreId || selectedDate) {
       hasCheckedInit = false;
       isTasksLoaded = false; 
   }
@@ -77,21 +78,24 @@
     });
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
+
   onDestroy(() => { unsubStores(); unsubTemplate(); unsubTasks(); });
 
-  $: if ($currentUser && !activeStoreId) {
+  // Khởi tạo activeStoreId toàn cục khi đăng nhập
+  $: if ($currentUser && !$activeStoreId) {
       if ($currentUser.storeIds && $currentUser.storeIds.length > 0) {
-          activeStoreId = $currentUser.storeIds[0];
+          $activeStoreId = $currentUser.storeIds[0];
       } else if ($currentUser.role === 'super_admin') {
-          activeStoreId = '908';
+          $activeStoreId = '908';
       }
   }
 
-  $: if ($currentUser && activeStoreId) loadDataForUser(activeStoreId, selectedDate);
+  // Tải dữ liệu khi kho toàn cục thay đổi
+  $: if ($currentUser && $activeStoreId) loadDataForUser($activeStoreId, selectedDate);
   
-  $: if ($currentUser && activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
+  $: if ($currentUser && $activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
-           initDailyTasksSafe(activeStoreId, selectedDate, $currentTasks, $taskTemplate);
+           initDailyTasksSafe($activeStoreId, selectedDate, $currentTasks, $taskTemplate);
        }
   }
 
@@ -151,6 +155,7 @@
       unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
           taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
       });
+
       const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
       unsubTasks = onSnapshot(q, (snapshot) => {
           const tasks = [];
@@ -228,7 +233,7 @@
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
                  {#if $currentUser.role === 'super_admin'}
-                      🛡️ View: <select bind:value={activeStoreId} class="ml-1 bg-transparent border-none font-bold text-indigo-600 outline-none cursor-pointer"><option value="908">Kho 908</option>{#each $storeList as s}{#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}{/each}</select>
+                      🛡️ View: <span class="text-indigo-600 font-bold ml-1">{$activeStoreId}</span>
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
@@ -251,6 +256,7 @@
                     <span class="text-sm font-black text-gray-800 leading-tight group-hover:text-indigo-600 transition-colors">{displayDateLabel}</span>
                 </button>
                 <input id="hidden-date-input" type="date" bind:value={selectedDate} class="absolute opacity-0 pointer-events-none w-0 h-0" />
+  
                 <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(1)}>
                     <span class="material-icons-round text-lg">chevron_right</span>
                 </button>
@@ -263,12 +269,12 @@
         {:else if activeTab === 'schedule'} 
             <ShiftSchedule {activeTab} /> 
         {:else if activeTab === '8nttt'} 
-            <DailyChecklist {activeStoreId} dateStr={selectedDate} />
+            <DailyChecklist activeStoreId={$activeStoreId} dateStr={selectedDate} />
         {:else} 
             <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
         {/if}
       </div>
-      <footer>Design by 3031 | Kho đang xem: {activeStoreId}</footer>
+      <footer>Design by 3031 | Kho đang xem: {$activeStoreId}</footer>
     </div>
   {/if}
   

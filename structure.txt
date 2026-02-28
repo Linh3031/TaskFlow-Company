@@ -20,6 +20,7 @@ src/components/ShiftScheduleParts/PGScheduleTable.svelte
 src/components/ShiftScheduleParts/PGDayStatsModal.svelte
 src/components/HandoverInput.svelte
 src/components/Header.svelte
+src/components/DailyChecklist.svelte
 src/components/admin
 src/components/admin/schedule
 src/components/admin/schedule/AdminScheduleToolbar.svelte
@@ -31,6 +32,8 @@ src/components/admin/schedule/AdminPersonalScheduleModal.svelte
 src/components/admin/schedule/scheduleConstants.js
 src/components/admin/AdminSchedule.svelte
 src/components/admin/AdminAccounts.svelte
+src/components/admin/accounts
+src/components/admin/accounts/AdminAddUserModal.svelte
 src/components/admin/AdminTemplate.svelte
 src/components/TaskModal.svelte
 src/components/InstallmentCalc.svelte
@@ -56,3 +59,4 @@ src/assets/svelte.svg
 src/services
 src/services/dataService.js
 src/services/employeeService.js
+src/services/accountService.js

@@ -1,9 +1,9 @@
 <script>
-  // Version 43.0 - Custom Shift Sort Order (CodeGenesis v3.0)
+  // Version 44.0 - Global Store Sync
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
-  import { currentUser } from '../lib/stores';
+  import { currentUser, activeStoreId } from '../lib/stores';
   import TourGuide from './TourGuide.svelte';
   import CumulativeHistoryModal from './CumulativeHistoryModal.svelte';
   
@@ -33,14 +33,13 @@
   let showPastDays = false;
   let highlightedDay = null;
   let tempEditingShift = null;
+  
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
-  let selectedViewStore = '';
-  $: if (myStores.length > 0 && !selectedViewStore) { selectedViewStore = myStores[0]; }
 
   let unsubscribe = () => {};
-  $: if (activeTab === 'schedule' && selectedViewStore && currentMonthStr && currentMode === 'NV') { 
-      loadSchedule(currentMonthStr, selectedViewStore);
+  $: if (activeTab === 'schedule' && $activeStoreId && currentMonthStr && currentMode === 'NV') { 
+      loadSchedule(currentMonthStr, $activeStoreId);
   }
 
   function isPastDay(d) {
@@ -76,14 +75,13 @@
       if (!confirm(`⚠️ CẢNH BÁO: Bạn muốn khôi phục lại phiên bản lịch CŨ của tháng ${viewMonth}/${viewYear}?\n\nDữ liệu hiện tại sẽ bị ghi đè!`)) return;
       loading = true;
       try {
-          const backupRef = doc(db, 'stores', selectedViewStore, 'schedules', `${currentMonthStr}_backup`);
+          const backupRef = doc(db, 'stores', $activeStoreId, 'schedules', `${currentMonthStr}_backup`);
           const backupSnap = await getDoc(backupRef);
           if (!backupSnap.exists()) { alert("❌ Không tìm thấy bản sao lưu nào."); loading = false; return; }
-          const mainRef = doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr);
+          const mainRef = doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr);
           await setDoc(mainRef, backupSnap.data());
           alert("✅ Đã khôi phục thành công!");
-      } catch (e) { alert("Lỗi: " + e.message);
-      } finally { loading = false; }
+      } catch (e) { alert("Lỗi: " + e.message); } finally { loading = false; }
   }
 
   function getShiftColor(code) {
@@ -158,7 +156,8 @@
           }).length;
           
           if (currentCount + 1 > quota) { 
-              const msg = quota === 0 ? `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
+              const msg = quota === 0 ?
+                `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
               if (!confirm(msg)) return; 
           } 
       } 
@@ -181,10 +180,9 @@
               if(rNew) s[rNew] = (s[rNew]||0) + 1; 
           } 
           try { 
-              await updateDoc(doc(db, 'stores', selectedViewStore, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
+              await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
               editingShift = null; 
-          } catch (e) { alert("Lỗi: " + e.message);
-          } 
+          } catch (e) { alert("Lỗi: " + e.message); } 
       } 
   }
   
@@ -204,7 +202,6 @@
       const details = { 'Kho': {}, 'Thu Ngân': {}, 'GH': {} };
       
       const shiftDetails = {};
-
       dayData.forEach(assign => { 
           let rawRole = assign.role || 'TV';
           let r = rawRole;
@@ -227,21 +224,16 @@
               }
           }
       });
-// --- [ĐÃ SỬA] THUẬT TOÁN SẮP XẾP CHUYỂN THÀNH ARRAY ---
+
       const customShiftOrder = ['123', '23', '45', '456', '2345', '2-5'];
-      
-      // Dùng .map() để biến Object thành Array [{shift: '123', people: [...]}, ...]
       const sortedShiftArray = Object.keys(shiftDetails).sort((a, b) => {
           if (a === 'OFF') return 1;
           if (b === 'OFF') return -1;
-          
           const idxA = customShiftOrder.indexOf(a);
           const idxB = customShiftOrder.indexOf(b);
-          
           if (idxA !== -1 && idxB !== -1) return idxA - idxB;
           if (idxA !== -1) return -1;
           if (idxB !== -1) return 1;
-          
           return a.localeCompare(b);
       }).map(key => ({
           shift: key,
@@ -251,17 +243,15 @@
       selectedDayStats = { 
           day, weekday: getWeekday(day), 
           cols, matrix, roles, details, 
-          shiftDetails: sortedShiftArray // Đổi từ Object sang Array
+          shiftDetails: sortedShiftArray 
       };
-  } // Kết thúc hàm showDayStats
+  }
       
-
   function getWeekendHardRoleCount(staffId) {
       if (!scheduleData || !scheduleData.data) return 0;
       let count = 0;
       const isHardRole = (r) => ['Kho', 'Thu Ngân', 'Giao Hàng', 'GH', 'TN', 'K'].includes(r);
-      const isWeekend = (d) => { const date = new Date(viewYear, viewMonth - 1, d); const day = date.getDay();
-      return day === 0 || day === 6; };
+      const isWeekend = (d) => { const date = new Date(viewYear, viewMonth - 1, d); const day = date.getDay(); return day === 0 || day === 6; };
       Object.keys(scheduleData.data).forEach(d => {
           if (isWeekend(d)) {
               const assign = scheduleData.data[d].find(a => a.staffId === staffId);
@@ -272,7 +262,7 @@
   }
 
   function handleExportExcel() {
-      exportScheduleToExcel({ scheduleData, viewMonth, viewYear, selectedViewStore, getWeekday, getWeekendHardRoleCount });
+      exportScheduleToExcel({ scheduleData, viewMonth, viewYear, selectedViewStore: $activeStoreId, getWeekday, getWeekendHardRoleCount });
   }
   
   let showScheduleTour = false;
@@ -287,7 +277,7 @@
 <ScheduleControls 
     bind:currentMode={currentMode}
     {myStores} {scheduleData} {isAdmin}
-    bind:selectedViewStore bind:viewMonth bind:viewYear bind:showPastDays
+    bind:selectedViewStore={$activeStoreId} bind:viewMonth bind:viewYear bind:showPastDays
     on:openHistory={() => showHistoryModal = true}
     on:restoreBackup={handleRestoreBackup}
     on:exportExcel={handleExportExcel}
@@ -317,13 +307,13 @@
         />
     {/if}
 {:else if currentMode === 'PG'}
-    <PGScheduleTable {selectedViewStore} {isAdmin} />
+    <PGScheduleTable selectedViewStore={$activeStoreId} {isAdmin} />
 {:else if currentMode === 'RS'}
-    <RoadshowPanel {selectedViewStore} {isAdmin} />
+    <RoadshowPanel selectedViewStore={$activeStoreId} {isAdmin} />
 {/if}
 
 {#if showHistoryModal && scheduleData}
-    <CumulativeHistoryModal storeId={selectedViewStore} currentMonth={viewMonth} currentYear={viewYear} currentStats={scheduleData.stats} on:close={() => showHistoryModal = false} />
+    <CumulativeHistoryModal storeId={$activeStoreId} currentMonth={viewMonth} currentYear={viewYear} currentStats={scheduleData.stats} on:close={() => showHistoryModal = false} />
 {/if}
 
 {#if selectedStaff}

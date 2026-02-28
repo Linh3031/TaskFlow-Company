@@ -1,4 +1,4 @@
-// Version 41.0 - Optimize Store: Add User Cache
+// Version 42.0 - Thêm Global activeStoreId
 import { writable } from 'svelte/store';
 
 // User hiện tại
@@ -14,8 +14,10 @@ export const taskTemplate = writable({});
 // Danh sách kho
 export const storeList = writable([]);
 
+// TRẠNG THÁI KHO TOÀN CỤC (GLOBAL STORE SELECTOR)
+export const activeStoreId = writable('');
+
 // CACHE MỚI: Danh sách nhân viên theo Kho
-// Cấu trúc: { 'storeId': [ {username, name}, ... ] }
 export const storeUsersCache = writable({});
 
 // Trạng thái Loading
@@ -33,7 +35,6 @@ export const setUser = (user) => {
     }
 };
 
-// (Giữ nguyên DEFAULT_TEMPLATE...)
 export const DEFAULT_TEMPLATE = {
     warehouse: [
         { time: "08:00", title: "Kiểm tra hàng nhập đầu ngày", isImportant: true, days: [0,1,2,3,4,5,6] },

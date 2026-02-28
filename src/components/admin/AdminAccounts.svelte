@@ -1,26 +1,23 @@
 <script>
-  // Version 5.1 - Tích hợp Hệ thống Quản lý PG (CodeGenesis v3.0 Layout-Safe)
   import { db } from '../../lib/firebase';
-  import { doc, deleteDoc, updateDoc, setDoc, writeBatch, query, collection, where, getDocs, serverTimestamp } from 'firebase/firestore';
+  import { query, collection, getDocs, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
   import { read, utils, writeFile } from 'xlsx';
   import { safeString } from '../../lib/utils';
   import { onMount } from 'svelte';
+  import { accountService } from '../../services/accountService';
+  import AdminAddUserModal from './accounts/AdminAddUserModal.svelte';
   import TourGuide from '../TourGuide.svelte'; 
   
-  export let targetStore = ''; 
+  export let targetStore = '';
   export let isSuperAdmin = false;
   
   let storeList = [];
   let selectedStoreId = '';
   let accountList = [];
   let isLoading = false;
-  
-  // Form State
-  let newAdminUser = '';
-  let newAdminPass = ''; 
-  let singleUsername = ''; let singlePass = '123456'; let singleRole = 'admin';
   let targetStoreInput = '';
   let showAddUserModal = false;
+  let userToEdit = null; // Biến lưu data khi bấm nút Edit
 
   // --- TOUR GUIDE CONFIG ---
   let showTour = false;
@@ -31,16 +28,12 @@
   ];
 
   $: isDemoMode = (selectedStoreId || targetStore)?.includes('DEMO');
-
+  
   onMount(async () => {
-      if (isSuperAdmin) {
-          await fetchAllStores();
-      } else {
-          selectedStoreId = targetStore;
-          loadAccountList(targetStore);
-      }
+      if (isSuperAdmin) { await fetchAllStores(); } 
+      else { selectedStoreId = targetStore; loadAccountList(targetStore); }
   });
-
+  
   $: if (targetStore && targetStore !== selectedStoreId) {
       selectedStoreId = targetStore;
       loadAccountList(targetStore);
@@ -56,20 +49,12 @@
       return false;
   }
 
-  function openAddUserModal() {
-      targetStoreInput = selectedStoreId || '';
-      showAddUserModal = true;
-  }
-
   async function fetchAllStores() {
       try {
           const q = query(collection(db, 'stores'));
           const snap = await getDocs(q);
           storeList = snap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => a.id.localeCompare(b.id));
-          if (storeList.length > 0 && !selectedStoreId) {
-              selectedStoreId = storeList[0].id;
-              loadAccountList(selectedStoreId);
-          }
+          if (storeList.length > 0 && !selectedStoreId) { selectStore(storeList[0].id); }
       } catch (e) { console.error("Lỗi tải danh sách kho:", e); }
   }
 
@@ -81,104 +66,31 @@
   async function loadAccountList(sid) {
       if (!sid) return;
       isLoading = true;
-      accountList = [];
-      try {
-          const q = query(collection(db, 'users'), where('storeIds', 'array-contains', sid));
-          const snap = await getDocs(q);
-          const list = [];
-          snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-          
-          const roleOrder = { 'super_admin': 0, 'admin': 1, 'staff': 2, 'pg': 3 };
-          list.sort((a, b) => {
-              const rA = roleOrder[a.role] ?? 99;
-              const rB = roleOrder[b.role] ?? 99;
-              if (rA !== rB) return rA - rB;
-              return a.username.localeCompare(b.username);
-          });
-          accountList = list;
-      } catch (e) { console.error("Load accounts failed:", e); } 
-      finally { isLoading = false; }
-  }
-
-  async function handleCreateSingleUser() {
-      if (checkDemoAndBlock()) return;
-      if (!singleUsername || !singlePass) return alert("Thiếu thông tin!");
-      
-      const storeToAssign = isSuperAdmin ? safeString(targetStoreInput) : selectedStoreId;
-      if (!storeToAssign) return alert("Chưa nhập Mã Kho!");
-
-      const uid = safeString(singleUsername).toLowerCase();
-      isLoading = true;
-      const batch = writeBatch(db);
-      try {
-          batch.set(doc(db, 'users', uid), {
-              username: uid, username_idx: uid,
-              pass: singlePass,
-              name: uid,
-              role: singleRole,
-              storeId: storeToAssign,
-              storeIds: [storeToAssign],
-              createdAt: serverTimestamp()
-          });
-
-          if (isSuperAdmin) {
-              const storeRef = doc(db, 'stores', storeToAssign);
-              batch.set(storeRef, { 
-                  id: storeToAssign,
-                  name: `Kho ${storeToAssign}`,
-                  createdAt: serverTimestamp() 
-              }, { merge: true });
-          }
-
-          await batch.commit();
-          alert(`✅ Đã thêm ${uid} vào kho ${storeToAssign}!`);
-          showAddUserModal = false;
-          singleUsername = '';
-          if (isSuperAdmin) {
-              await fetchAllStores();
-              selectStore(storeToAssign);
-          } else {
-              await loadAccountList(selectedStoreId);
-          }
-      } catch (e) { alert(e.message); }
-      finally { isLoading = false; }
+      accountList = await accountService.loadAccountList(sid);
+      isLoading = false;
   }
 
   async function deleteAccount(uid) {
-      if (checkDemoAndBlock()) return;
-      if (!confirm(`Xóa tài khoản ${uid}?`)) return;
-      try {
-          await deleteDoc(doc(db, 'users', uid));
-          await loadAccountList(selectedStoreId);
-      } catch (e) { alert("Lỗi xóa: " + e.message); }
+      if (checkDemoAndBlock() || !confirm(`Xóa tài khoản ${uid}?`)) return;
+      await accountService.deleteAccount(uid);
+      await loadAccountList(selectedStoreId);
   }
 
   async function changeRole(uid, newRole) {
-      if (checkDemoAndBlock()) return;
-      if (!confirm(`Đổi quyền tài khoản ${uid} thành ${newRole}?`)) return;
-      try {
-          await updateDoc(doc(db, 'users', uid), { role: newRole });
-          await loadAccountList(selectedStoreId);
-      } catch (e) { alert("Lỗi đổi quyền: " + e.message); }
+      if (checkDemoAndBlock() || !confirm(`Đổi quyền tài khoản ${uid} thành ${newRole}?`)) return;
+      await accountService.changeRole(uid, newRole);
+      await loadAccountList(selectedStoreId);
   }
 
   async function resetPassword(uid) {
-      if (checkDemoAndBlock()) return;
-      if (!confirm(`Reset mật khẩu cho ${uid} về 123456?`)) return;
-      try {
-          await updateDoc(doc(db, 'users', uid), { pass: '123456' });
-          alert("OK");
-      } catch (e) { alert("Lỗi: " + e.message); }
+      if (checkDemoAndBlock() || !confirm(`Reset mật khẩu cho ${uid} về 123456?`)) return;
+      await accountService.resetPassword(uid);
+      alert("OK");
   }
 
-  // --- LOGIC UPLOAD NHÂN VIÊN ---
   function downloadAccountSample() {
       const wb = utils.book_new();
-      const wsData = [
-          ["username", "pass", "ma_kho", "role"],
-          [`nv1_${selectedStoreId||'kho'}`, "123456", selectedStoreId||'kho', "staff"],
-          [`quanly_${selectedStoreId||'kho'}`, "123456", selectedStoreId||'kho', "admin"]
-      ];
+      const wsData = [["username", "pass", "ma_kho", "role"], [`nv1_${selectedStoreId||'kho'}`, "123456", selectedStoreId||'kho', "staff"]];
       const ws = utils.aoa_to_sheet(wsData);
       utils.book_append_sheet(wb, ws, "DS_Cap_Quyen");
       writeFile(wb, `Mau_Tai_Khoan_${selectedStoreId}.xlsx`);
@@ -194,48 +106,40 @@
               const wb = read(data);
               const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
               const batch = writeBatch(db);
+              
               let c = 0;
               json.forEach(row => {
                   const u = row['username']; const p = row['pass']; const s = row['ma_kho']; const r = row['role'];
                   if (u && p && s && r) {
                       const uid = safeString(u).toLowerCase();
+                      const storeArray = String(s).split(/[,;]+/).map(x=>x.trim().toUpperCase()).filter(Boolean); // Hỗ trợ up excel đa kho
+                      
                       batch.set(doc(db, 'users', uid), {
                           username: uid, username_idx: uid,
                           pass: String(p), name: uid,
                           role: safeString(r).toLowerCase(),
-                          storeId: String(s), storeIds: [String(s)],
+                          storeId: storeArray[0], 
+                          storeIds: storeArray,
                           createdAt: serverTimestamp()
                       });
-                      if (isSuperAdmin) {
-                          const sId = String(s);
-                          batch.set(doc(db, 'stores', sId), { id: sId, name: `Kho ${sId}` }, { merge: true });
+         
+                      if (isSuperAdmin) { 
+                          storeArray.forEach(k => {
+                              batch.set(doc(db, 'stores', k), { id: k, name: `Kho ${k}` }, { merge: true });
+                          });
                       }
                       c++;
                   }
               });
-              if (c > 0) {
-                  await batch.commit();
-                  alert(`Đã import ${c} tài khoản NV.`);
-                  if(isSuperAdmin) await fetchAllStores();
-                  await loadAccountList(selectedStoreId);
-              }
-          } catch (e) { alert(e.message); }
-          finally { isLoading = false; e.target.value = null; }
+              if (c > 0) { await batch.commit(); alert(`Đã import ${c} NV.`); if(isSuperAdmin) await fetchAllStores(); await loadAccountList(selectedStoreId); }
+          } catch (e) { alert(e.message);
+          } finally { isLoading = false; e.target.value = null; }
       }, 100);
   }
 
-// --- LOGIC UPLOAD PG ---
- // --- LOGIC UPLOAD PG ---
   function downloadPGSample() {
       const wb = utils.book_new();
-      
-      // Đã xóa "phone" và "phone_leader" khỏi file mẫu
-      const wsData = [
-          ["username", "pass", "ma_kho", "name", "brand", "category"],
-          [`PG_SAMSUNG_01`, "123456", selectedStoreId||'kho', "Nguyễn Văn A", "Samsung", "ICT"],
-          [`PG_PANA_02`, "123456", selectedStoreId||'kho', "Trần Thị B", "Panasonic", "Gia dụng"]
-      ];
-      
+      const wsData = [["username", "pass", "ma_kho", "name", "brand", "category"], [`PG_01`, "123456", selectedStoreId||'kho', "Tên PG", "Brand", "ICT"]];
       const ws = utils.aoa_to_sheet(wsData);
       utils.book_append_sheet(wb, ws, "DS_PG");
       writeFile(wb, `Mau_PG_${selectedStoreId}.xlsx`);
@@ -251,72 +155,54 @@
               const wb = read(data);
               const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
               const batch = writeBatch(db);
+           
               let c = 0;
               json.forEach(row => {
                   const u = row['username']; const p = row['pass']; const s = row['ma_kho'];
-                  const n = row['name']; const b = row['brand']; const cat = row['category'];
-                  
-                  if (u && p && s && n && b && cat) {
-                      const uid = safeString(u).toLowerCase(); // ID hệ thống vẫn viết thường
+                  if (u && p && s && row['name']) {
+                      const uid = safeString(u).toLowerCase();
+                      const storeArray = String(s).split(/[,;]+/).map(x=>x.trim().toUpperCase()).filter(Boolean); // Hỗ trợ up excel đa kho
+
                       batch.set(doc(db, 'users', uid), {
-                          username: String(u), // [QUAN TRỌNG]: Giữ nguyên chữ In Hoa của Excel
-                          username_idx: uid,
-                          pass: String(p), name: String(n),
+                          username: String(u), username_idx: uid,
+                          pass: String(p), name: String(row['name']),
                           role: 'pg', 
-                          storeId: String(s), storeIds: [String(s)],
-                          brand: String(b), category: String(cat),
-                          phone: String(row['phone'] || ''), // [NEW] SĐT PG
-                          phoneLeader: String(row['phone_leader'] || ''), // [NEW] SĐT Sếp
+                          storeId: storeArray[0], 
+                          storeIds: storeArray,
+                          brand: String(row['brand']||''), category: String(row['category']||''),
+                          phone: String(row['phone'] || ''), phoneLeader: String(row['phone_leader'] || ''),
                           createdAt: serverTimestamp()
                       });
-                      
                       if (isSuperAdmin) {
-                          const sId = String(s);
-                          batch.set(doc(db, 'stores', sId), { id: sId, name: `Kho ${sId}` }, { merge: true });
+                          storeArray.forEach(k => {
+                              batch.set(doc(db, 'stores', k), { id: k, name: `Kho ${k}` }, { merge: true });
+                          });
                       }
                       c++;
                   }
               });
-              if (c > 0) {
-                  await batch.commit();
-                  alert(`Đã import ${c} tài khoản PG.`);
-                  if(isSuperAdmin) await fetchAllStores();
-                  await loadAccountList(selectedStoreId);
-              } else {
-                  alert("Không tìm thấy dữ liệu hợp lệ. Đảm bảo file có đủ cột theo mẫu mới!");
-              }
-          } catch (e) { alert("Lỗi import PG: " + e.message); }
-          finally { isLoading = false; e.target.value = null; }
+              if (c > 0) { await batch.commit(); alert(`Đã import ${c} PG.`); await loadAccountList(selectedStoreId); }
+          } catch (e) { alert(e.message);
+          } finally { isLoading = false; e.target.value = null; }
       }, 100);
   }
 </script>
 
 <div class="h-full flex flex-col md:flex-row gap-4 animate-fadeIn overflow-hidden" style="height: calc(100vh - 140px);">
-  
   {#if isSuperAdmin}
       <div class="w-full md:w-64 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col shrink-0">
           <div class="p-3 border-b border-slate-100 bg-slate-50">
               <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
-                  <span class="material-icons-round text-indigo-500 text-base">store</span> 
-                  Danh Sách Kho ({storeList.length})
+                  <span class="material-icons-round text-indigo-500 text-base">store</span> Danh Sách Kho ({storeList.length})
               </h3>
           </div>
           <div class="flex-1 overflow-y-auto p-2 space-y-1">
               {#each storeList as store}
-                  <button 
-                      class="w-full text-left px-3 py-2 rounded-lg text-sm font-bold transition-all flex justify-between items-center
-                      {selectedStoreId === store.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'text-slate-600 hover:bg-slate-100 hover:text-indigo-600'}"
-                      on:click={() => selectStore(store.id)}
-                  >
+                  <button class="w-full text-left px-3 py-2 rounded-lg text-sm font-bold transition-all flex justify-between items-center {selectedStoreId === store.id ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}" on:click={() => selectStore(store.id)}>
                       <span>{store.id}</span>
-                      {#if selectedStoreId === store.id}
-                          <span class="material-icons-round text-xs">chevron_right</span>
-                      {/if}
+                      {#if selectedStoreId === store.id}<span class="material-icons-round text-xs">chevron_right</span>{/if}
                   </button>
               {/each}
-              {#if storeList.length === 0}
-                  <div class="text-center p-4 text-xs text-gray-400">Đang tải hoặc chưa có kho nào.</div>
-              {/if}
           </div>
       </div>
   {/if}
@@ -333,48 +219,29 @@
               </div>
           </div>
           <div class="flex gap-2 items-center">
-              <button 
-                  id="btn-add-user"
-                  class="text-xs font-bold text-green-600 bg-green-50 px-3 py-2.5 rounded-lg hover:bg-green-100 flex items-center gap-1 transition-colors border border-green-100" 
-                  on:click={(e) => checkDemoAndBlock(e) || openAddUserModal()}
-              >
+              <button id="btn-add-user" class="text-xs font-bold text-green-600 bg-green-50 px-3 py-2.5 rounded-lg border border-green-100" on:click={(e) => checkDemoAndBlock(e) || (userToEdit = null, showAddUserModal = true)}>
                   <span class="material-icons-round text-sm">person_add</span> Thêm Mới
               </button>
-              <button id="btn-help-accounts" class="text-gray-400 hover:text-indigo-600 ml-2" on:click={() => showTour = true}>
-                  <span class="material-icons-round">help_outline</span>
-              </button>
+              <button class="text-gray-400 hover:text-indigo-600 ml-2" on:click={() => showTour = true}><span class="material-icons-round">help_outline</span></button>
           </div>
       </div>
 
       <div id="upload-center" class="p-3 bg-slate-50 border-b border-slate-200 shrink-0 flex flex-col xl:flex-row gap-4">
-          <div class="flex-1 bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex flex-col justify-between">
-              <h4 class="text-xs font-bold text-slate-700 mb-3 flex items-center gap-1">
-                  <span class="material-icons-round text-blue-500 text-sm">badge</span> 
-                  Danh Sách Nhân Viên Nội Bộ
-              </h4>
+          <div class="flex-1 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+              <h4 class="text-xs font-bold text-slate-700 mb-3 flex items-center gap-1"><span class="material-icons-round text-blue-500 text-sm">badge</span> Nhân Viên Nội Bộ</h4>
               <div class="flex gap-2">
-                  <button class="flex-1 bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold py-2 rounded-lg text-xs transition-colors border border-blue-100 text-center" on:click={(e) => checkDemoAndBlock(e) || downloadAccountSample()}>
-                      Tải Mẫu NV
-                  </button>
-                  <label class="flex-1 bg-blue-600 text-white hover:bg-blue-700 font-bold py-2 rounded-lg text-xs cursor-pointer flex justify-center items-center gap-1 transition-colors shadow-sm">
-                      <span class="material-icons-round text-sm">upload</span> Upload NV
-                      <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={handleAccountUpload}>
+                  <button class="flex-1 bg-blue-50 text-blue-600 py-2 rounded-lg text-xs font-bold" on:click={(e) => checkDemoAndBlock(e) || downloadAccountSample()}>Tải Mẫu NV</button>
+                  <label class="flex-1 bg-blue-600 text-white py-2 rounded-lg text-xs font-bold cursor-pointer text-center">
+                      Upload NV <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={handleAccountUpload}>
                   </label>
               </div>
           </div>
-
-          <div class="flex-1 bg-pink-50/50 p-3 rounded-lg border border-pink-200 shadow-sm flex flex-col justify-between">
-              <h4 class="text-xs font-bold text-pink-700 mb-3 flex items-center gap-1">
-                  <span class="material-icons-round text-pink-500 text-sm">face_retouching_natural</span> 
-                  Danh Sách PG
-              </h4>
+          <div class="flex-1 bg-pink-50/50 p-3 rounded-lg border border-pink-200 shadow-sm">
+              <h4 class="text-xs font-bold text-pink-700 mb-3 flex items-center gap-1"><span class="material-icons-round text-pink-500 text-sm">face_retouching_natural</span> Danh Sách PG</h4>
               <div class="flex gap-2">
-                  <button class="flex-1 bg-pink-50 text-pink-600 hover:bg-pink-100 font-bold py-2 rounded-lg text-xs transition-colors border border-pink-200 text-center" on:click={(e) => checkDemoAndBlock(e) || downloadPGSample()}>
-                      Tải Mẫu PG
-                  </button>
-                  <label class="flex-1 bg-pink-600 text-white hover:bg-pink-700 font-bold py-2 rounded-lg text-xs cursor-pointer flex justify-center items-center gap-1 transition-colors shadow-sm">
-                      <span class="material-icons-round text-sm">upload</span> Upload PG
-                      <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={handlePGUpload}>
+                  <button class="flex-1 bg-pink-50 text-pink-600 py-2 rounded-lg text-xs font-bold" on:click={(e) => checkDemoAndBlock(e) || downloadPGSample()}>Tải Mẫu PG</button>
+                  <label class="flex-1 bg-pink-600 text-white py-2 rounded-lg text-xs font-bold cursor-pointer text-center">
+                      Upload PG <input type="file" hidden accept=".xlsx" disabled={isDemoMode} on:change={handlePGUpload}>
                   </label>
               </div>
           </div>
@@ -394,22 +261,16 @@
                       <tr class="hover:bg-indigo-50/30 transition-colors group">
                           <td class="p-3">
                               <div class="font-bold text-slate-700">{acc.username}</div>
-                              {#if acc.name && acc.name !== acc.username}
-                                  <div class="text-[10px] text-gray-500">{acc.name}</div>
-                              {/if}
+                              {#if acc.name && acc.name !== acc.username}<div class="text-[10px] text-gray-500">{acc.name}</div>{/if}
                               {#if acc.role === 'pg'}
-                                  <div class="text-[10px] text-pink-600 font-semibold mt-0.5 bg-pink-50 inline-block px-1.5 py-0.5 rounded border border-pink-100">
-                                      {acc.brand} | {acc.category}
-                                  </div>
+                                  <div class="text-[10px] text-pink-600 font-semibold mt-0.5 bg-pink-50 inline-block px-1.5 py-0.5 rounded border border-pink-100">{acc.brand} | {acc.category}</div>
+                              {/if}
+                              {#if acc.storeIds && acc.storeIds.length > 1}
+                                  <div class="text-[10px] text-indigo-600 font-semibold mt-0.5 bg-indigo-50 inline-block px-1.5 py-0.5 rounded border border-indigo-100" title={acc.storeIds.join(', ')}>Đa kho: {acc.storeIds.length} kho</div>
                               {/if}
                           </td>
                           <td class="p-3">
-                              <select 
-                                  class="bg-transparent text-xs font-bold outline-none cursor-pointer py-1 px-2 rounded border border-transparent hover:border-slate-300 transition-colors
-                                  {acc.role==='admin'?'text-purple-600 bg-purple-50':(acc.role==='super_admin'?'text-red-600 bg-red-50':(acc.role==='pg'?'text-pink-600 bg-pink-50':'text-slate-600 bg-slate-100'))}" 
-                                  value={acc.role} 
-                                  on:change={(e) => changeRole(acc.id, e.target.value)}
-                              >
+                              <select class="bg-transparent text-xs font-bold py-1 px-2 rounded border border-transparent hover:border-slate-300 {acc.role==='admin'?'text-purple-600 bg-purple-50':(acc.role==='super_admin'?'text-red-600 bg-red-50':(acc.role==='pg'?'text-pink-600 bg-pink-50':'text-slate-600 bg-slate-100'))}" value={acc.role} on:change={(e) => changeRole(acc.id, e.target.value)}>
                                   <option value="staff">Nhân viên</option>
                                   <option value="admin">Quản lý</option>
                                   <option value="pg">PG</option>
@@ -418,78 +279,34 @@
                           </td>
                           <td class="p-3 text-center">
                               <div class="flex justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-                                  <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-yellow-50 text-slate-400 hover:text-yellow-600 transition-colors" on:click={() => resetPassword(acc.id)} title="Reset Mật khẩu về 123456">
-                                      <span class="material-icons-round text-sm">lock_reset</span>
-                                  </button>
-                                  <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors" on:click={() => deleteAccount(acc.id)} title="Xóa tài khoản">
-                                      <span class="material-icons-round text-sm">delete</span>
-                                  </button>
+                                  <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600" on:click={() => { userToEdit = acc; showAddUserModal = true; }} title="Sửa tài khoản"><span class="material-icons-round text-sm">edit</span></button>
+                                  
+                                  <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-yellow-50 text-slate-400 hover:text-yellow-600" on:click={() => resetPassword(acc.id)} title="Reset Mật khẩu"><span class="material-icons-round text-sm">lock_reset</span></button>
+                                  <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600" on:click={() => deleteAccount(acc.id)} title="Xóa tài khoản"><span class="material-icons-round text-sm">delete</span></button>
                               </div>
                           </td>
                       </tr>
                   {/each}
-                  {#if accountList.length === 0}
-                      <tr>
-                          <td colspan="3" class="p-8 text-center text-gray-400 flex flex-col items-center">
-                              <span class="material-icons-round text-4xl mb-2 opacity-20">no_accounts</span>
-                              <span class="text-xs">Chưa có nhân sự nào trong kho {selectedStoreId}.</span>
-                          </td>
-                      </tr>
-                  {/if}
               </tbody>
           </table>
       </div>
   </div>
 </div>
 
-{#if showAddUserModal}
-  <div class="fixed inset-0 z-[70] bg-slate-900/50 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => showAddUserModal = false}>
-      <div class="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl animate-popIn" on:click|stopPropagation>
-          <h3 class="font-bold text-lg text-slate-800 mb-1">Thêm Nhân Sự</h3>
-          
-          {#if isSuperAdmin}
-              <div class="mb-4">
-                  <label for="store-input" class="text-[10px] font-bold text-slate-400 uppercase">Thêm vào Kho (Tạo mới nếu chưa có)</label>
-                  <input id="store-input" type="text" bind:value={targetStoreInput} class="w-full mt-1 p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-bold text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-200 uppercase" placeholder="NHẬP MÃ KHO (VD: KHO_01)">
-              </div>
-          {:else}
-              <p class="text-xs text-gray-500 mb-4">Thêm vào kho: <b class="text-indigo-600">{selectedStoreId}</b></p>
-          {/if}
-          
-          <div class="space-y-3">
-              <div>
-                  <label for="single-role" class="text-[10px] font-bold text-slate-400 uppercase">Quyền hạn</label>
-                  <select id="single-role" bind:value={singleRole} class="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 outline-none focus:border-indigo-500">
-                      <option value="staff">Nhân viên</option>
-                      <option value="admin">Quản lý</option>
-                      <option value="pg">PG (Khuyến mãi)</option>
-                  </select>
-              </div>
-              
-              <div>
-                  <label for="single-user" class="text-[10px] font-bold text-slate-400 uppercase">Tên đăng nhập</label>
-                  <div class="relative mt-1">
-                      <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">person</span>
-                      <input id="single-user" type="text" bind:value={singleUsername} class="w-full pl-9 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200" placeholder="VD: nv_moi">
-                  </div>
-              </div>
-              
-              <div>
-                  <label for="single-pass" class="text-[10px] font-bold text-slate-400 uppercase">Mật khẩu</label>
-                  <div class="relative mt-1">
-                      <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">lock</span>
-                      <input id="single-pass" type="text" bind:value={singlePass} class="w-full pl-9 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-gray-500 outline-none focus:border-indigo-500" placeholder="123456">
-                  </div>
-              </div>
-
-              <div class="flex gap-3 pt-3 mt-2">
-                  <button class="flex-1 py-2.5 bg-gray-100 rounded-lg text-gray-600 font-bold text-sm hover:bg-gray-200 transition-colors" on:click={() => showAddUserModal = false}>Hủy</button>
-                  <button class="flex-1 py-2.5 bg-indigo-600 text-white rounded-lg font-bold text-sm shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-0.5 transition-all" on:click={handleCreateSingleUser}>Lưu Lại</button>
-              </div>
-          </div>
-      </div>
-  </div>
-{/if}
+<AdminAddUserModal 
+    bind:show={showAddUserModal} 
+    {isSuperAdmin} 
+    {selectedStoreId} 
+    bind:targetStoreInput 
+    editUser={userToEdit}
+    on:close={() => { showAddUserModal = false; userToEdit = null; }}
+    on:success={(e) => { 
+        showAddUserModal = false; 
+        userToEdit = null; 
+        if(isSuperAdmin) fetchAllStores().then(() => selectStore(e.detail)); 
+        else loadAccountList(selectedStoreId); 
+    }}
+/>
 
 {#if showTour} <TourGuide steps={tourSteps} on:complete={() => showTour = false} /> {/if}
 
