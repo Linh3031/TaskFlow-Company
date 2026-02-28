@@ -44,7 +44,8 @@ function interleaveShifts(shiftList) {
     if (!shiftList || shiftList.length === 0) return [];
     const buckets = {};
     shiftList.forEach(s => { if (!buckets[s]) buckets[s] = []; buckets[s].push(s); });
-    const PRIORITY_ORDER = ['123456', '12345', '23456', '2345', '12-456', '123-56', '12-56', '2-5', '123', '456', '23', '45'];
+    
+    const PRIORITY_ORDER = ['123', '456', '23', '45', '2-5', '12-56', '123-56', '12-456', '12345', '23456', '2345', '123456', 'OFF'];
     Object.keys(buckets).forEach(k => { if (!PRIORITY_ORDER.includes(k)) PRIORITY_ORDER.push(k); });
     
     let result = [];
@@ -76,9 +77,7 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
         };
     });
 
-    // [SURGICAL FIX] Tích hợp bộ nhớ 3 tháng (Array pastSchedules)
     if (pastSchedules && pastSchedules.length > 0) {
-        // Bước 1: Quét tất cả các tháng trong quá khứ để cộng dồn Base Stats
         pastSchedules.forEach(pastMonth => {
             const pData = pastMonth.data;
             if (!pData || !pData.data) return;
@@ -102,7 +101,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
             });
         });
 
-        // Bước 2: Lấy thông tin ngày cuối cùng của tháng T-1 (phần tử đầu tiên) để nối tiếp ca
         const prevMonthData = pastSchedules[0].data;
         if (prevMonthData && prevMonthData.data) {
             const days = Object.keys(prevMonthData.data).map(Number).sort((a,b)=>b-a);
@@ -128,8 +126,12 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
             let qty = parseInt(c.qty) || 0;
             for (let i = 0; i < qty; i++) raw.push(c.code);
         });
+        
+        while (raw.length < staffList.length) {
+            raw.push('OFF');
+        }
+        
         let pool = interleaveShifts(raw);
-        while (pool.length < staffList.length) pool.push('OFF');
         return pool.slice(0, staffList.length);
     };
 
@@ -194,7 +196,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 if (gap <= 1) score -= 300000; 
                 else score += gap * 10; 
                 
-                // Trọng số tính bằng Tổng của Tháng này + 3 Tháng trước
                 const totalRoleCount = staff.baseStats.roles[targetRole] + staff.stats.roles[targetRole];
                 score -= totalRoleCount * 1000000;
                 
@@ -252,19 +253,39 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                     return false;
                 };
 
+                let bestCandidateScore = allCandidates.length > 0 ? allCandidates[0].score : 0;
+
                 for (let j = 0; j < allCandidates.length; j++) {
                     let cand = allCandidates[j];
                     if (cand.fixed) continue;
                     
+                    if (targetRole === 'gh' && !cand.isMale) continue;
+                    
                     const staffCand = staffList.find(s => s.id === cand.staffId);
                     
+                    if (d - staffCand.lastHardRoleDay <= 1) continue;
+                    
+                    if (bestCandidateScore - cand.score >= 900000) continue;
+                    
                     if (cand.shift === targetShiftCode) {
-                        if (isShiftConflict(staffCand.lastShiftCode, targetShiftCode)) continue;
-                        cand.role = targetRole;
-                        cand.fixed = true; 
-                        isAssigned = true;
-                        break;
-                    } 
+                        if (!isShiftConflict(staffCand.lastShiftCode, targetShiftCode)) {
+                            cand.role = targetRole;
+                            cand.fixed = true; 
+                            isAssigned = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isAssigned) continue;
+
+                for (let j = 0; j < allCandidates.length; j++) {
+                    let cand = allCandidates[j];
+                    if (cand.fixed) continue;
+                    
+                    if (targetRole === 'gh' && !cand.isMale) continue;
+                    
+                    const staffCand = staffList.find(s => s.id === cand.staffId);
                     
                     if (isShiftConflict(staffCand.lastShiftCode, targetShiftCode)) continue;
 
@@ -319,10 +340,15 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 }
             }
             
+            // [KHÔI PHỤC] Trả lại DISPLAY_ROLE_MAP để UI Table có màu như cũ
+            // [THÊM MỚI] Gài thêm rawRole để Modal Sửa ca có cái dùng sau này
             return {
                 staffId: a.staffId, name: a.name, gender: staff.gender,
-                shift: a.shift, role: DISPLAY_ROLE_MAP[a.role] || '',
-                originalShift: a.shift, originalRole: DISPLAY_ROLE_MAP[a.role] || ''
+                shift: a.shift, 
+                role: DISPLAY_ROLE_MAP[a.role] || '', 
+                originalShift: a.shift, 
+                originalRole: DISPLAY_ROLE_MAP[a.role] || '',
+                rawRole: a.role
             };
         });
     }
