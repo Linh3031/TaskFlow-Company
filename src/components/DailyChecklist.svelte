@@ -8,7 +8,6 @@
 
     export let activeStoreId;
     export let dateStr;
-
     $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
 
     let checklistData = [];
@@ -24,6 +23,15 @@
     let selectedStaffIds = [];
     let searchStaffQuery = '';
 
+    // THÊM MỚI: Hàm xử lý chọn nhiều nhân viên an toàn với thanh tìm kiếm
+    function toggleStaffSelection(staffId) {
+        if (selectedStaffIds.includes(staffId)) {
+            selectedStaffIds = selectedStaffIds.filter(id => id !== staffId);
+        } else {
+            selectedStaffIds = [...selectedStaffIds, staffId];
+        }
+    }
+
     // State cho Lightbox (Trình chiếu ảnh Slider)
     let showLightbox = false;
     let lightboxImages = [];
@@ -32,13 +40,11 @@
     $: filteredStaff = allStaff.filter(s => 
         s.username.toLowerCase().includes(searchStaffQuery.toLowerCase())
     );
-
     // Sắp xếp: Chưa làm nằm trên, làm rồi trôi xuống dưới
     $: sortedChecklistData = [...checklistData].sort((a, b) => {
         if (a.completed === b.completed) return 0;
         return a.completed ? 1 : -1;
     });
-
     $: if (activeStoreId && dateStr) {
         initAndLoadChecklist();
     }
@@ -49,7 +55,6 @@
 
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
-
         if (!dailySnap.exists()) {
             const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
             const templateSnap = await getDoc(templateRef);
@@ -113,10 +118,10 @@
         const assigneesData = allStaff
             .filter(s => selectedStaffIds.includes(s.id))
             .map(s => ({ id: s.id, username: s.username }));
-
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
-        let currentItems = snap.exists() ? (snap.data().items || []) : [];
+        let currentItems = snap.exists() ?
+            (snap.data().items || []) : [];
 
         let newItemData = null;
 
@@ -132,7 +137,6 @@
         }
 
         await setDoc(templateRef, { items: currentItems }, { merge: true });
-
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
@@ -154,7 +158,6 @@
 
     async function deleteArea(areaId, areaName) {
         if (!confirm(`⚠️ XÁC NHẬN XÓA:\nBạn có chắc chắn muốn xóa khu vực "${areaName}" không?\nKhu vực này sẽ bị xóa khỏi ngày hiện tại và các ngày sau.`)) return;
-
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
         if (snap.exists()) {
@@ -166,7 +169,8 @@
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
-            let dailyItems = dailySnap.data().items || [];
+            let dailyItems = dailySnap.data().items ||
+            [];
             dailyItems = dailyItems.filter(i => i.id !== areaId);
             await updateDoc(dailyRef, { items: dailyItems });
         }
@@ -208,12 +212,12 @@
         if (!files || files.length === 0) return;
 
         const item = checklistData.find(i => i.id === itemId);
-        const currentCount = item.imageUrls ? item.imageUrls.length : 0;
+        const currentCount = item.imageUrls ?
+            item.imageUrls.length : 0;
         const remainingSlots = 4 - currentCount;
         
         const filesToProcess = Array.from(files).slice(0, remainingSlots);
         if (filesToProcess.length === 0) return;
-
         uploadingId = itemId;
 
         try {
@@ -225,10 +229,8 @@
                 await uploadBytes(imageRef, compressedBlob);
                 return await getDownloadURL(imageRef);
             });
-
             // CHỜ TẤT CẢ CÁC ẢNH CÙNG UPLOAD XONG (Tốc độ x4 lần)
             const newUploadedUrls = await Promise.all(uploadPromises);
-
             const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
             const updatedItems = checklistData.map(i => {
                 if (i.id === itemId) {
@@ -245,7 +247,6 @@
                 }
                 return i;
             });
-
             await updateDoc(dailyRef, { items: updatedItems });
 
         } catch (error) {
@@ -305,7 +306,8 @@
         
         {#if isAdmin}
             <button class="bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm" on:click={() => openAdminModal(null)}>
-                <span class="material-icons-round text-[14px]">add_circle</span> <span class="hidden sm:inline">Thêm Khu Vực</span>
+                <span class="material-icons-round text-[14px]">add_circle</span> 
+                <span class="hidden sm:inline">Thêm Khu Vực</span>
             </button>
         {/if}
     </div>
@@ -320,8 +322,7 @@
             </div>
         {:else}
             {#each sortedChecklistData as item (item.id)}
-                <div class="bg-white p-3 rounded-xl border-y border-r shadow-sm flex flex-col gap-2 transition-all duration-300 
-                    {item.completed ? 'bg-slate-50 border-l-4 border-l-green-500 border-y-slate-200 border-r-slate-200 opacity-70 hover:opacity-100' : 'border-l-4 border-l-orange-500 border-y-slate-200 border-r-slate-200 hover:border-cyan-400'}">
+                <div class="bg-white p-3 rounded-xl border-y border-r shadow-sm flex flex-col gap-2 transition-all duration-300 {item.completed ? 'bg-slate-50 border-l-4 border-l-green-500 border-y-slate-200 border-r-slate-200 opacity-70 hover:opacity-100' : 'border-l-4 border-l-orange-500 border-y-slate-200 border-r-slate-200 hover:border-cyan-400'}">
                     
                     <div class="flex justify-between items-start">
                         <div class="flex-1 pr-2">
@@ -439,7 +440,7 @@
                     <div class="max-h-56 overflow-y-auto bg-slate-50 border border-slate-200 rounded-lg p-1.5 space-y-0.5">
                         {#each filteredStaff as s}
                             <label class="flex items-center gap-3 p-2 hover:bg-cyan-100 rounded-md cursor-pointer transition-colors border border-transparent hover:border-cyan-200 {selectedStaffIds.includes(s.id) ? 'bg-cyan-50 border-cyan-200' : ''}">
-                                <input type="checkbox" bind:group={selectedStaffIds} value={s.id} class="w-4 h-4 accent-cyan-600 rounded">
+                                <input type="checkbox" checked={selectedStaffIds.includes(s.id)} on:change={() => toggleStaffSelection(s.id)} class="w-4 h-4 accent-cyan-600 rounded">
                                 <span class="text-sm font-semibold text-slate-700">{s.username}</span>
                             </label>
                         {/each}
