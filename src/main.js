@@ -1,4 +1,5 @@
 // Version 3.0 - Svelte 5 Mount Fix + PWA Debug Mode
+import 'material-icons/iconfont/round.css';
 import { mount } from 'svelte' // BẮT BUỘC CHO SVELTE 5
 import './app.css'
 import App from './App.svelte'
