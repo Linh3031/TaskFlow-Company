@@ -88,10 +88,19 @@
       alert("OK");
   }
 
+  // --- CẬP NHẬT FILE MẪU NHÂN VIÊN/QUẢN LÝ ---
   function downloadAccountSample() {
       const wb = utils.book_new();
-      const wsData = [["username", "pass", "ma_kho", "role"], [`nv1_${selectedStoreId||'kho'}`, "123456", selectedStoreId||'kho', "staff"]];
+      const wsData = [
+          ["username", "pass", "ma_kho", "role", "HUONG_DAN"], 
+          [`Tâm-12234`, "123456", selectedStoreId||'kho', "Nhân viên", "Cột Role: Gõ 'Nhân viên' hoặc 'staff'"],
+          [`Linh-3031`, "123456", selectedStoreId||'kho', "Quản lý", "Cột Role: Gõ 'Quản lý' hoặc 'admin'"]
+      ];
       const ws = utils.aoa_to_sheet(wsData);
+      
+      // Auto-size độ rộng cột cho đẹp
+      ws['!cols'] = [{wch: 15}, {wch: 10}, {wch: 15}, {wch: 15}, {wch: 40}];
+      
       utils.book_append_sheet(wb, ws, "DS_Cap_Quyen");
       writeFile(wb, `Mau_Tai_Khoan_${selectedStoreId}.xlsx`);
   }
@@ -112,12 +121,21 @@
                   const u = row['username']; const p = row['pass']; const s = row['ma_kho']; const r = row['role'];
                   if (u && p && s && r) {
                       const uid = safeString(u).toLowerCase();
-                      const storeArray = String(s).split(/[,;]+/).map(x=>x.trim().toUpperCase()).filter(Boolean); // Hỗ trợ up excel đa kho
+                      const storeArray = String(s).split(/[,;]+/).map(x=>x.trim().toUpperCase()).filter(Boolean);
                       
+                      // --- BỘ LỌC TỪ KHOÁ QUYỀN HẠN THÔNG MINH ---
+                      let rawRole = String(r).toLowerCase();
+                      let finalRole = 'staff'; // Mặc định là nhân viên
+                      if (rawRole.includes('admin') || rawRole.includes('quản lý') || rawRole.includes('quan ly') || rawRole.includes('ql')) {
+                          finalRole = 'admin';
+                      } else if (rawRole.includes('pg')) {
+                          finalRole = 'pg';
+                      }
+
                       batch.set(doc(db, 'users', uid), {
                           username: uid, username_idx: uid,
                           pass: String(p), name: uid,
-                          role: safeString(r).toLowerCase(),
+                          role: finalRole, // Lưu mã chuẩn hệ thống
                           storeId: storeArray[0], 
                           storeIds: storeArray,
                           createdAt: serverTimestamp()
@@ -131,7 +149,7 @@
                       c++;
                   }
               });
-              if (c > 0) { await batch.commit(); alert(`Đã import ${c} NV.`); if(isSuperAdmin) await fetchAllStores(); await loadAccountList(selectedStoreId); }
+              if (c > 0) { await batch.commit(); alert(`Đã import ${c} NV/QL.`); if(isSuperAdmin) await fetchAllStores(); await loadAccountList(selectedStoreId); }
           } catch (e) { alert(e.message);
           } finally { isLoading = false; e.target.value = null; }
       }, 100);
@@ -139,8 +157,11 @@
 
   function downloadPGSample() {
       const wb = utils.book_new();
-      const wsData = [["username", "pass", "ma_kho", "name", "brand", "category"], [`PG_01`, "123456", selectedStoreId||'kho', "Tên PG", "Brand", "ICT"]];
+      const wsData = [
+        ["username", "pass", "ma_kho", "name", "brand", "category"], [`Nghĩa-Oppo`, "123456", selectedStoreId||'kho', "Nguyễn Trọng Nghĩa", "Oppo", "ICT"],
+        [`Anh-Samsung`, "123456", selectedStoreId||'kho', "Nguyễn Phạm Trúc Anh", "Samsung", "Điện Tử"]];
       const ws = utils.aoa_to_sheet(wsData);
+      ws['!cols'] = [{wch: 15}, {wch: 10}, {wch: 15}, {wch: 25}, {wch: 15}, {wch: 15}];
       utils.book_append_sheet(wb, ws, "DS_PG");
       writeFile(wb, `Mau_PG_${selectedStoreId}.xlsx`);
   }
