@@ -255,8 +255,9 @@
 
 <div class="w-full bg-slate-50 rounded-xl shadow-sm border border-amber-200 overflow-hidden flex flex-col h-full animate-fadeIn">
     
-    <div class="p-3 bg-white border-b border-amber-200 flex flex-wrap justify-between items-center gap-3 shrink-0">
-        <div class="flex items-center gap-2 text-amber-600">
+    <div class="p-2 sm:p-3 bg-white border-b border-amber-200 flex flex-row justify-between items-center gap-2 shrink-0">
+        
+        <div class="hidden sm:flex items-center gap-2 text-amber-600 shrink-0">
             <span class="material-icons-round text-2xl">campaign</span>
             <div>
                 <h3 class="font-bold text-sm">Chiến dịch Roadshow / Tờ rơi</h3>
@@ -264,53 +265,58 @@
             </div>
         </div>
 
-        <div class="flex items-center gap-3 flex-wrap">
-            <div class="bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-100 flex items-center gap-2 shadow-sm">
+        <div class="flex items-center justify-between w-full sm:w-auto gap-2">
+            
+            <div class="bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-100 flex items-center gap-1.5 shadow-sm shrink-0">
                 <div class="flex items-center gap-1">
-                    <span class="text-[10px] font-bold text-amber-600 uppercase">Từ:</span>
-                    <input type="date" bind:value={startDate} class="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                    <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Từ:</span>
+                    <input type="date" bind:value={startDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
                 </div>
-                <div class="w-px h-4 bg-amber-200"></div>
+                <div class="text-amber-300 font-bold">-</div>
                 <div class="flex items-center gap-1">
-                    <span class="text-[10px] font-bold text-amber-600 uppercase">Đến:</span>
-                    <input type="date" bind:value={endDate} class="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                    <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Đến:</span>
+                    <input type="date" bind:value={endDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
                 </div>
             </div>
             
             {#if isAdmin}
-                <button class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-1.5 px-3 rounded-lg text-xs shadow-sm shadow-amber-200 transition-colors flex items-center gap-1" on:click={autoGenerate} disabled={loading || roadshowDays.length === 0}>
-                    {#if loading} <span class="material-icons-round text-[14px] animate-spin">sync</span>
-                    {:else} <span class="material-icons-round text-[14px]">auto_awesome</span> Tự Động Xếp Lịch {/if}
+                <button class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-amber-200 transition-colors flex items-center gap-1 shrink-0" on:click={autoGenerate} disabled={loading || roadshowDays.length === 0}>
+                    {#if loading} 
+                        <span class="material-icons-round text-[14px] animate-spin">sync</span>
+                    {:else} 
+                        <span class="material-icons-round text-[14px]">auto_awesome</span> 
+                        <span class="hidden sm:inline">Tự Động Xếp Lịch</span> 
+                    {/if}
                 </button>
             {/if}
         </div>
     </div>
 
-    <div class="flex-1 overflow-x-auto overflow-y-hidden bg-slate-100/60 p-4">
+    <div class="flex-1 overflow-x-auto overflow-y-hidden bg-slate-100/60 p-2 sm:p-4">
         {#if roadshowDays.length === 0}
             <div class="h-full w-full flex flex-col items-center justify-center opacity-60">
                 <span class="material-icons-round text-5xl text-amber-300 mb-2">date_range</span>
                 <p class="text-slate-500 font-bold">Khoảng ngày không hợp lệ.</p>
-                <p class="text-xs text-amber-600 mt-1">Vui lòng chọn ngày Bắt đầu nhỏ hơn hoặc bằng ngày Kết thúc.</p>
+                <p class="text-[10px] sm:text-xs text-amber-600 mt-1">Vui lòng chọn ngày Bắt đầu &lt;= ngày Kết thúc.</p>
             </div>
         {:else}
-            <div class="flex gap-4 h-full min-w-max items-start">
+            <div class="flex gap-2.5 sm:gap-4 h-full min-w-max items-start">
                 {#each roadshowDays as d}
-                    <div class="w-[320px] flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 h-full max-h-full overflow-hidden shrink-0">
+                    <div class="w-[280px] sm:w-[320px] flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 h-full max-h-full overflow-hidden shrink-0">
                         
-                        <div class="p-2.5 bg-amber-50/80 border-b border-amber-100 flex justify-between items-center shrink-0">
-                            <span class="font-bold text-slate-800 text-[13px]">{formatDate(d)}</span>
-                            <div class="flex gap-1 text-[10px] font-bold">
+                        <div class="p-2 sm:p-2.5 bg-amber-50/80 border-b border-amber-100 flex justify-between items-center shrink-0">
+                            <span class="font-bold text-slate-800 text-xs sm:text-[13px]">{formatDate(d)}</span>
+                            <div class="flex gap-1 text-[9px] sm:text-[10px] font-bold">
                                 <span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 shadow-sm">🌞 {roadshowData[d]?.morning?.length || 0}</span>
                                 <span class="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 shadow-sm">🌛 {roadshowData[d]?.afternoon?.length || 0}</span>
                             </div>
                         </div>
 
-                        <div class="flex-1 overflow-y-auto p-2 space-y-2">
+                        <div class="flex-1 overflow-y-auto p-1.5 sm:p-2 space-y-1.5 sm:space-y-2">
                             
-                            <div class="bg-blue-50/40 rounded border border-blue-100 p-1.5">
-                                <div class="flex justify-between items-center mb-1.5 px-0.5">
-                                    <div class="text-[10px] font-black text-blue-700 flex items-center gap-1 uppercase tracking-wide">
+                            <div class="bg-blue-50/40 rounded border border-blue-100 p-1 sm:p-1.5">
+                                <div class="flex justify-between items-center mb-1 sm:mb-1.5 px-0.5">
+                                    <div class="text-[9px] sm:text-[10px] font-black text-blue-700 flex items-center gap-1 uppercase tracking-wide">
                                         <span>🌞</span> CA SÁNG
                                     </div>
                                     {#if isAdmin}
@@ -320,13 +326,13 @@
                                     {/if}
                                 </div>
 
-                                <div class="flex flex-wrap gap-1.5">
+                                <div class="flex flex-wrap gap-1 sm:gap-1.5">
                                     {#if (roadshowData[d]?.morning || []).length === 0}
-                                        <div class="w-full text-[10px] text-slate-400 italic text-center py-2 bg-white/50 rounded border border-dashed border-slate-200">Chưa có nhân sự</div>
+                                        <div class="w-full text-[9px] sm:text-[10px] text-slate-400 italic text-center py-1.5 bg-white/50 rounded border border-dashed border-slate-200">Chưa có nhân sự</div>
                                     {:else}
                                         {#each (roadshowData[d]?.morning || []) as p}
-                                            <div class="group relative flex items-center gap-1 {p.type==='pg' ? 'bg-pink-50/80 text-pink-700' : 'bg-white text-slate-700'} border {p.type==='pg' ? 'border-pink-200' : 'border-slate-200'} px-1.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] text-[11px] hover:border-slate-300 hover:shadow-sm w-auto max-w-full transition-all">
-                                                <span class="w-1.5 h-1.5 rounded-full {p.type==='pg' ? 'bg-pink-400' : 'bg-blue-400'} shrink-0"></span>
+                                            <div class="group relative flex items-center gap-1 {p.type==='pg' ? 'bg-pink-50/80 text-pink-700' : 'bg-white text-slate-700'} border {p.type==='pg' ? 'border-pink-200' : 'border-slate-200'} px-1.5 py-0.5 sm:py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] text-[10px] sm:text-[11px] hover:border-slate-300 hover:shadow-sm w-auto max-w-full transition-all">
+                                                <span class="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full {p.type==='pg' ? 'bg-pink-400' : 'bg-blue-400'} shrink-0"></span>
                                                 <span class="font-semibold truncate tracking-tight">{p.displayName}</span>
                                                 
                                                 {#if isAdmin}
@@ -340,9 +346,9 @@
                                 </div>
                             </div>
 
-                            <div class="bg-orange-50/40 rounded border border-orange-100 p-1.5">
-                                <div class="flex justify-between items-center mb-1.5 px-0.5">
-                                    <div class="text-[10px] font-black text-orange-700 flex items-center gap-1 uppercase tracking-wide">
+                            <div class="bg-orange-50/40 rounded border border-orange-100 p-1 sm:p-1.5">
+                                <div class="flex justify-between items-center mb-1 sm:mb-1.5 px-0.5">
+                                    <div class="text-[9px] sm:text-[10px] font-black text-orange-700 flex items-center gap-1 uppercase tracking-wide">
                                         <span>🌛</span> CA CHIỀU
                                     </div>
                                     {#if isAdmin}
@@ -352,13 +358,13 @@
                                     {/if}
                                 </div>
 
-                                <div class="flex flex-wrap gap-1.5">
+                                <div class="flex flex-wrap gap-1 sm:gap-1.5">
                                     {#if (roadshowData[d]?.afternoon || []).length === 0}
-                                        <div class="w-full text-[10px] text-slate-400 italic text-center py-2 bg-white/50 rounded border border-dashed border-slate-200">Chưa có nhân sự</div>
+                                        <div class="w-full text-[9px] sm:text-[10px] text-slate-400 italic text-center py-1.5 bg-white/50 rounded border border-dashed border-slate-200">Chưa có nhân sự</div>
                                     {:else}
                                         {#each (roadshowData[d]?.afternoon || []) as p}
-                                            <div class="group relative flex items-center gap-1 {p.type==='pg' ? 'bg-pink-50/80 text-pink-700' : 'bg-white text-slate-700'} border {p.type==='pg' ? 'border-pink-200' : 'border-slate-200'} px-1.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] text-[11px] hover:border-slate-300 hover:shadow-sm w-auto max-w-full transition-all">
-                                                <span class="w-1.5 h-1.5 rounded-full {p.type==='pg' ? 'bg-pink-400' : 'bg-orange-400'} shrink-0"></span>
+                                            <div class="group relative flex items-center gap-1 {p.type==='pg' ? 'bg-pink-50/80 text-pink-700' : 'bg-white text-slate-700'} border {p.type==='pg' ? 'border-pink-200' : 'border-slate-200'} px-1.5 py-0.5 sm:py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] text-[10px] sm:text-[11px] hover:border-slate-300 hover:shadow-sm w-auto max-w-full transition-all">
+                                                <span class="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full {p.type==='pg' ? 'bg-pink-400' : 'bg-orange-400'} shrink-0"></span>
                                                 <span class="font-semibold truncate tracking-tight">{p.displayName}</span>
                                                 
                                                 {#if isAdmin}
@@ -379,12 +385,12 @@
         {/if}
     </div>
 
-    <div class="p-1.5 bg-slate-100 border-t flex justify-between items-center px-4 shrink-0 text-[10px] font-bold">
-        <span class="text-slate-500">Auto-save: Dữ liệu được lưu riêng lẻ từng ngày.</span>
+    <div class="p-1.5 bg-slate-100 border-t flex justify-between items-center px-4 shrink-0 text-[9px] sm:text-[10px] font-bold">
+        <span class="text-slate-500 truncate pr-2">Auto-save: Dữ liệu được lưu riêng lẻ từng ngày.</span>
         {#if isSaving}
-            <span class="text-amber-500 animate-pulse flex items-center gap-1"><span class="material-icons-round text-[12px]">sync</span> Đang lưu...</span>
+            <span class="text-amber-500 animate-pulse flex items-center gap-1 shrink-0"><span class="material-icons-round text-[12px]">sync</span> <span class="hidden sm:inline">Đang lưu...</span></span>
         {:else}
-            <span class="text-green-600 flex items-center gap-1"><span class="material-icons-round text-[12px]">cloud_done</span> Đã đồng bộ</span>
+            <span class="text-green-600 flex items-center gap-1 shrink-0"><span class="material-icons-round text-[12px]">cloud_done</span> <span class="hidden sm:inline">Đã đồng bộ</span></span>
         {/if}
     </div>
 </div>
