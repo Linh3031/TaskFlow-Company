@@ -24,11 +24,16 @@
     let selectedStaffIds = [];
     let searchStaffQuery = '';
 
+    // State cho Lightbox (Trình chiếu ảnh Slider)
+    let showLightbox = false;
+    let lightboxImages = [];
+    let lightboxIndex = 0;
+
     $: filteredStaff = allStaff.filter(s => 
         s.username.toLowerCase().includes(searchStaffQuery.toLowerCase())
     );
 
-    // THUẬT TOÁN TỰ ĐỘNG SẮP XẾP: CHƯA LÀM NẰM TRÊN, LÀM RỒI TRÔI XUỐNG DƯỚI
+    // Sắp xếp: Chưa làm nằm trên, làm rồi trôi xuống dưới
     $: sortedChecklistData = [...checklistData].sort((a, b) => {
         if (a.completed === b.completed) return 0;
         return a.completed ? 1 : -1;
@@ -45,8 +50,6 @@
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
 
-        // ĐÃ SỬA: Bỏ điều kiện dateStr === getTodayStr(). 
-        // Bất kỳ ngày nào chưa có dữ liệu (dù là hôm qua hay ngày mai), tự động lấy Template đắp vào.
         if (!dailySnap.exists()) {
             const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
             const templateSnap = await getDoc(templateRef);
@@ -130,7 +133,6 @@
 
         await setDoc(templateRef, { items: currentItems }, { merge: true });
 
-        // ĐÃ SỬA: Đồng bộ ngay lập tức vào NGÀY ĐANG XEM (Không bị bó buộc phải là hôm nay nữa)
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
@@ -161,7 +163,6 @@
             await setDoc(templateRef, { items: currentItems }, { merge: true });
         }
 
-        // ĐÃ SỬA: Xóa khỏi ngày đang xem luôn
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
@@ -171,6 +172,7 @@
         }
     }
 
+    // ĐÃ FIX LỖI ẢNH ĐEN: Thêm nền trắng (fillRect) trước khi vẽ ảnh
     function compressImage(file, maxWidth = 1000, quality = 0.7) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -183,8 +185,14 @@
                     let width = img.width;
                     let height = img.height;
                     if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
-                    canvas.width = width; canvas.height = height;
+                    canvas.width = width; 
+                    canvas.height = height;
                     const ctx = canvas.getContext('2d');
+                    
+                    // Tạo lớp nền trắng tinh để lót cho các ảnh PNG trong suốt
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fillRect(0, 0, width, height);
+                    
                     ctx.drawImage(img, 0, 0, width, height);
                     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
                 };
@@ -194,6 +202,7 @@
         });
     }
 
+    // ĐÃ FIX UP CHẬM: Dùng Promise.all() để tải lên song song nhiều ảnh cùng lúc
     async function handleUploadImage(event, itemId) {
         const files = event.target.files;
         if (!files || files.length === 0) return;
@@ -206,17 +215,19 @@
         if (filesToProcess.length === 0) return;
 
         uploadingId = itemId;
-        let newUploadedUrls = [];
 
         try {
-            for (let file of filesToProcess) {
+            // TẠO MẢNG CHỨA CÁC TÁC VỤ UPLOAD SONG SONG
+            const uploadPromises = filesToProcess.map(async (file) => {
                 const compressedBlob = await compressImage(file);
                 const fileName = `8nttt_${activeStoreId}_${dateStr}_${itemId}_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
                 const imageRef = ref(storage, `8nttt_images/${fileName}`);
                 await uploadBytes(imageRef, compressedBlob);
-                const downloadUrl = await getDownloadURL(imageRef);
-                newUploadedUrls.push(downloadUrl);
-            }
+                return await getDownloadURL(imageRef);
+            });
+
+            // CHỜ TẤT CẢ CÁC ẢNH CÙNG UPLOAD XONG (Tốc độ x4 lần)
+            const newUploadedUrls = await Promise.all(uploadPromises);
 
             const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
             const updatedItems = checklistData.map(i => {
@@ -246,10 +257,40 @@
         }
     }
 
+    // --- LOGIC LIGHTBOX (TRÌNH CHIẾU ẢNH) ---
+    function openLightbox(images, index) {
+        lightboxImages = images;
+        lightboxIndex = index;
+        showLightbox = true;
+    }
+    
+    function closeLightbox() {
+        showLightbox = false;
+        lightboxImages = [];
+    }
+
+    function nextLightboxImage() {
+        if (lightboxIndex < lightboxImages.length - 1) lightboxIndex++;
+    }
+
+    function prevLightboxImage() {
+        if (lightboxIndex > 0) lightboxIndex--;
+    }
+
+    // Xử lý phím tắt cho Lightbox
+    function handleKeydown(e) {
+        if (!showLightbox) return;
+        if (e.key === 'ArrowRight') nextLightboxImage();
+        if (e.key === 'ArrowLeft') prevLightboxImage();
+        if (e.key === 'Escape') closeLightbox();
+    }
+
     onDestroy(() => {
         if (unsubscribe) unsubscribe();
     });
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <div class="w-full h-full flex flex-col bg-slate-50 rounded-xl border border-cyan-200 shadow-sm overflow-hidden relative">
     
@@ -322,11 +363,11 @@
                     </div>
 
                     <div class="flex flex-wrap gap-2 mt-1">
-                        {#each (item.imageUrls || []) as url}
-                            <a href={url} target="_blank" class="w-14 h-14 sm:w-16 sm:h-16 rounded-lg border border-slate-200 shadow-sm overflow-hidden bg-black flex items-center justify-center group relative">
+                        {#each (item.imageUrls || []) as url, index}
+                            <button class="w-14 h-14 sm:w-16 sm:h-16 rounded-lg border border-slate-200 shadow-sm overflow-hidden bg-black flex items-center justify-center group relative outline-none" on:click={() => openLightbox(item.imageUrls, index)}>
                                 <img src={url} alt="Checklist pic" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity">
                                 <span class="material-icons-round text-white absolute text-sm drop-shadow-md opacity-0 group-hover:opacity-100">zoom_in</span>
-                            </a>
+                            </button>
                         {/each}
 
                         {#if (item.imageUrls || []).length < 4}
@@ -346,6 +387,32 @@
         {/if}
     </div>
 </div>
+
+{#if showLightbox}
+    <div class="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-2 backdrop-blur-md animate-fadeIn" on:click={closeLightbox}>
+        
+        <div class="absolute top-4 right-4 z-10 flex gap-4 text-white">
+            <span class="text-sm font-bold bg-black/50 px-3 py-1 rounded-full">{lightboxIndex + 1} / {lightboxImages.length}</span>
+            <button class="hover:text-red-400 transition-colors" on:click={closeLightbox}><span class="material-icons-round text-3xl drop-shadow-lg">close</span></button>
+        </div>
+
+        <div class="w-full h-full max-w-4xl max-h-[85vh] flex items-center justify-center relative" on:click|stopPropagation>
+            <img src={lightboxImages[lightboxIndex]} alt="Phóng to" class="max-w-full max-h-full object-contain rounded-md shadow-2xl animate-popIn">
+            
+            {#if lightboxIndex > 0}
+                <button class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 transition-all" on:click|stopPropagation={prevLightboxImage}>
+                    <span class="material-icons-round text-3xl">chevron_left</span>
+                </button>
+            {/if}
+
+            {#if lightboxIndex < lightboxImages.length - 1}
+                <button class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 transition-all" on:click|stopPropagation={nextLightboxImage}>
+                    <span class="material-icons-round text-3xl">chevron_right</span>
+                </button>
+            {/if}
+        </div>
+    </div>
+{/if}
 
 {#if showAdminModal}
     <div class="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => showAdminModal = false}>
@@ -394,6 +461,8 @@
 {/if}
 
 <style>
+    .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
     .animate-popIn { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     @keyframes popIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 </style>
