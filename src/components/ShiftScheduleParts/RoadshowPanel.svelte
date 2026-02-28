@@ -111,6 +111,30 @@
         });
     }
 
+    // --- THUẬT TOÁN XÓA TOÀN BỘ LỊCH (NEW) ---
+    async function clearSchedule() {
+        if (!isAdmin) return;
+        if (!confirm('⚠️ CẢNH BÁO: Hệ thống sẽ XÓA TRẮNG toàn bộ nhân sự trong các ngày bạn đang chọn. Bạn chắc chắn chứ?')) return;
+        
+        loading = true;
+        try {
+            const batch = writeBatch(db);
+            for (let dStr of roadshowDays) {
+                const ref = doc(db, 'stores', selectedViewStore, 'roadshows', dStr);
+                batch.set(ref, {
+                    date: dStr,
+                    data: { morning: [], afternoon: [] },
+                    updatedAt: serverTimestamp()
+                }, { merge: true });
+            }
+            await batch.commit();
+        } catch (e) {
+            alert("Lỗi xóa danh sách: " + e.message);
+        } finally {
+            loading = false;
+        }
+    }
+
     // --- THUẬT TOÁN AUTO-GEN (TỰ ĐỘNG BỐC NGƯỜI CHO NHIỀU NGÀY) ---
     async function autoGenerate() {
         if (!isAdmin) return;
@@ -280,14 +304,25 @@
             </div>
             
             {#if isAdmin}
-                <button class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-amber-200 transition-colors flex items-center gap-1 shrink-0" on:click={autoGenerate} disabled={loading || roadshowDays.length === 0}>
-                    {#if loading} 
-                        <span class="material-icons-round text-[14px] animate-spin">sync</span>
-                    {:else} 
-                        <span class="material-icons-round text-[14px]">auto_awesome</span> 
-                        <span class="hidden sm:inline">Tự Động Xếp Lịch</span> 
-                    {/if}
-                </button>
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button class="bg-red-500 hover:bg-red-600 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-red-200 transition-colors flex items-center gap-1" on:click={clearSchedule} disabled={loading || roadshowDays.length === 0} title="Xóa toàn bộ nhân sự trong khoảng ngày này">
+                        {#if loading} 
+                            <span class="material-icons-round text-[14px] animate-spin">sync</span>
+                        {:else} 
+                            <span class="material-icons-round text-[14px]">delete_sweep</span> 
+                            <span class="hidden sm:inline">Xóa Lịch</span> 
+                        {/if}
+                    </button>
+
+                    <button class="bg-amber-500 hover:bg-amber-600 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-amber-200 transition-colors flex items-center gap-1" on:click={autoGenerate} disabled={loading || roadshowDays.length === 0} title="Tự động sắp xếp từ bảng phân ca gốc">
+                        {#if loading} 
+                            <span class="material-icons-round text-[14px] animate-spin">sync</span>
+                        {:else} 
+                            <span class="material-icons-round text-[14px]">auto_awesome</span> 
+                            <span class="hidden sm:inline">Tạo Lịch</span> 
+                        {/if}
+                    </button>
+                </div>
             {/if}
         </div>
     </div>
