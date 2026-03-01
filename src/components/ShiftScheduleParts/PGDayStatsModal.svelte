@@ -10,6 +10,8 @@
         { id: 'Sáng', title: 'Ca Sáng', classes: 'bg-blue-50 border-blue-200 text-blue-700', badge: 'bg-blue-600 text-white' },
         { id: 'Chiều', title: 'Ca Chiều', classes: 'bg-orange-50 border-orange-200 text-orange-700', badge: 'bg-orange-600 text-white' },
         { id: 'Gãy', title: 'Ca Gãy', classes: 'bg-purple-50 border-purple-200 text-purple-700', badge: 'bg-purple-600 text-white' },
+        // [CodeGenesis v2] Thêm ca Full vào thống kê
+        { id: 'Full', title: 'Ca Full', classes: 'bg-teal-50 border-teal-200 text-teal-700', badge: 'bg-teal-600 text-white' },
         { id: 'OFF', title: 'Nghỉ (OFF)', classes: 'bg-red-50 border-red-200 text-red-700', badge: 'bg-red-600 text-white' },
         { id: '', title: 'Chưa xếp ca (Trống)', classes: 'bg-slate-50 border-slate-200 text-slate-600', badge: 'bg-slate-500 text-white' }
     ];
@@ -34,11 +36,11 @@
 
         <div class="overflow-y-auto p-4 space-y-4 flex-1">
             {#each stats as st}
-                {#if st.count > 0}
+                 {#if st.count > 0}
                     <div class="border rounded-xl p-3 {st.classes}">
                         <div class="flex justify-between items-center mb-3 border-b border-current pb-2 border-opacity-20">
                             <span class="font-black text-sm uppercase">{st.title}</span>
-                            <span class="text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm {st.badge}">{st.count} người</span>
+                             <span class="text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm {st.badge}">{st.count} người</span>
                         </div>
                         <div class="flex flex-wrap gap-2">
                             {#each st.people as p}

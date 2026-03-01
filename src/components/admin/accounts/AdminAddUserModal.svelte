@@ -16,6 +16,11 @@
   let singleRole = 'admin';
   let isLoading = false;
   
+  // [CodeGenesis v2] Biến lưu dữ liệu mở rộng cho PG
+  let singleName = '';
+  let singleBrand = '';
+  let singleCategory = '';
+  
   let selectedStoreIdsForAdmin = []; // Mảng chứa các kho mà Admin thường tick chọn
 
   const dispatch = createEventDispatcher();
@@ -26,6 +31,12 @@
           singleUsername = editUser.username || '';
           singleRole = editUser.role || 'staff';
           singlePass = ''; // Để trống là không đổi mật khẩu
+          
+          // Nạp dữ liệu cũ của PG vào form nếu có
+          singleName = editUser.name !== editUser.username ? (editUser.name || '') : '';
+          singleBrand = editUser.brand || '';
+          singleCategory = editUser.category || '';
+
           if (isSuperAdmin) {
               targetStoreInput = (editUser.storeIds || []).join(', ');
           } else {
@@ -35,6 +46,12 @@
           singleUsername = '';
           singlePass = '123456';
           singleRole = 'staff';
+          
+          // Reset dữ liệu PG
+          singleName = '';
+          singleBrand = '';
+          singleCategory = '';
+
           if (!isSuperAdmin) {
               selectedStoreIdsForAdmin = [selectedStoreId];
           }
@@ -43,7 +60,6 @@
 
   async function handleSaveUser() {
       if (!singleUsername) return alert("Thiếu tên đăng nhập!");
-      
       let finalStoreIds = [];
       if (isSuperAdmin) {
           finalStoreIds = targetStoreInput.split(/[,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
@@ -55,7 +71,6 @@
 
       const uid = safeString(singleUsername).toLowerCase();
       isLoading = true;
-      
       try {
           if (editUser) {
               // LOGIC CẬP NHẬT (EDIT)
@@ -67,8 +82,15 @@
               if (singlePass.trim()) {
                   updateData.pass = singlePass.trim();
               }
-              await updateDoc(doc(db, 'users', uid), updateData);
               
+              // [CodeGenesis v2] Lưu thêm dữ liệu nếu là PG
+              if (singleRole === 'pg') {
+                  updateData.name = singleName.trim() || uid;
+                  updateData.brand = singleBrand.trim();
+                  updateData.category = singleCategory.trim();
+              }
+
+              await updateDoc(doc(db, 'users', uid), updateData);
               if (isSuperAdmin) {
                   const batch = writeBatch(db);
                   finalStoreIds.forEach(s => {
@@ -83,16 +105,24 @@
               if (!singlePass) return alert("Thiếu mật khẩu!");
               const batch = writeBatch(db);
               
-              batch.set(doc(db, 'users', uid), {
+              const payload = {
                   username: uid, username_idx: uid,
                   pass: singlePass,
-                  name: uid,
+                  // Tên hiển thị sẽ theo Tên PG hoặc lấy Username làm mặc định
+                  name: (singleRole === 'pg' && singleName.trim()) ? singleName.trim() : uid,
                   role: singleRole,
                   storeId: finalStoreIds[0],
                   storeIds: finalStoreIds,
                   createdAt: serverTimestamp()
-              });
-              
+              };
+
+              // [CodeGenesis v2] Gắn thêm dữ liệu nếu chọn Role là PG
+              if (singleRole === 'pg') {
+                  payload.brand = singleBrand.trim();
+                  payload.category = singleCategory.trim();
+              }
+
+              batch.set(doc(db, 'users', uid), payload);
               if (isSuperAdmin) {
                   finalStoreIds.forEach(s => {
                       batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}`, createdAt: serverTimestamp() }, { merge: true });
@@ -159,6 +189,28 @@
                       <input id="single-pass" type="text" bind:value={singlePass} class="w-full pl-9 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-gray-500 outline-none focus:border-indigo-500" placeholder={editUser ? "Bỏ trống để giữ nguyên mật khẩu" : "123456"}>
                   </div>
               </div>
+
+              {#if singleRole === 'pg'}
+                  <div class="space-y-3 p-3 bg-pink-50 border border-pink-100 rounded-lg mt-2">
+                      <h4 class="text-[10px] font-bold text-pink-600 uppercase flex items-center gap-1"><span class="material-icons-round text-sm">face_retouching_natural</span> Thông tin PG bổ sung</h4>
+                      
+                      <div>
+                          <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Họ và Tên</label>
+                          <input type="text" bind:value={singleName} class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-pink-500" placeholder="Nhập tên thật của PG">
+                      </div>
+                      
+                      <div class="grid grid-cols-2 gap-3">
+                          <div>
+                              <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Hãng (Brand)</label>
+                              <input type="text" bind:value={singleBrand} class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-pink-500" placeholder="VD: Oppo">
+                          </div>
+                          <div>
+                              <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nhóm (Category)</label>
+                              <input type="text" bind:value={singleCategory} class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-pink-500" placeholder="VD: ICT">
+                          </div>
+                      </div>
+                  </div>
+              {/if}
 
               <div class="flex gap-3 pt-3 mt-2">
                   <button class="flex-1 py-2.5 bg-gray-100 rounded-lg text-gray-600 font-bold text-sm hover:bg-gray-200 transition-colors" on:click={() => dispatch('close')}>Hủy</button>

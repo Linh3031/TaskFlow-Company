@@ -34,7 +34,8 @@
         'OFF': 'bg-red-100 text-red-600 border-red-200 font-bold',
         'Sáng': 'bg-blue-100 text-blue-700 border-blue-200 font-bold',
         'Chiều': 'bg-orange-100 text-orange-700 border-orange-200 font-bold',
-        'Gãy': 'bg-purple-100 text-purple-700 border-purple-200 font-bold'
+        'Gãy': 'bg-purple-100 text-purple-700 border-purple-200 font-bold',
+        'Full': 'bg-teal-100 text-teal-700 border-teal-200 font-bold' // [CodeGenesis v2] Thêm màu cho ca Full
     };
 
     const CATEGORY_COLORS = [
@@ -105,8 +106,7 @@
     }
 
     function updateShift(pgId, pgUsername, day, value) {
-        if (!isAdmin && $currentUser?.username !== pgUsername) return; 
-        
+        if (!isAdmin && $currentUser?.username !== pgUsername) return;
         if (!pgScheduleData[pgId]) pgScheduleData[pgId] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
         pgScheduleData[pgId][day] = value;
         pgScheduleData = { ...pgScheduleData }; 
@@ -190,6 +190,7 @@
                                         {/each}
                                     </tr>
                                 </thead>
+                                
                                 <tbody class="divide-y divide-slate-100">
                                     {#each pgs as pg}
                                         <tr class="hover:bg-slate-50/50 transition-colors">
@@ -213,6 +214,7 @@
                                                         <option value="Sáng" class="bg-white text-blue-700 font-bold">Sáng</option>
                                                         <option value="Chiều" class="bg-white text-orange-700 font-bold">Chiều</option>
                                                         <option value="Gãy" class="bg-white text-purple-700 font-bold">Gãy</option>
+                                                        <option value="Full" class="bg-white text-teal-700 font-bold">Full</option>
                                                     </select>
                                                 </td>
                                             {/each}
