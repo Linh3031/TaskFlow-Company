@@ -29,13 +29,18 @@
     $: weekId = getWeekId(currentDate);
     $: weekLabel = getWeekLabel(currentDate);
 
+    // [CodeGenesis v2] LOGIC KHÓA THỜI GIAN
+    let realCurrentDate = new Date();
+    $: realCurrentWeekId = getWeekId(realCurrentDate);
+    $: isFutureWeek = weekId > realCurrentWeekId; 
+
     const SHIFT_COLORS = {
         '': 'bg-slate-50 text-slate-400 border-dashed border-slate-200',
         'OFF': 'bg-red-100 text-red-600 border-red-200 font-bold',
         'Sáng': 'bg-blue-100 text-blue-700 border-blue-200 font-bold',
         'Chiều': 'bg-orange-100 text-orange-700 border-orange-200 font-bold',
         'Gãy': 'bg-purple-100 text-purple-700 border-purple-200 font-bold',
-        'Full': 'bg-teal-100 text-teal-700 border-teal-200 font-bold' // [CodeGenesis v2] Thêm màu cho ca Full
+        'Full': 'bg-teal-100 text-teal-700 border-teal-200 font-bold'
     };
 
     const CATEGORY_COLORS = [
@@ -74,6 +79,25 @@
         currentDate = newDate;
     }
 
+    // [CodeGenesis v2] HÀM CUỘN TỚI LỊCH CÁ NHÂN
+    function scrollToMyRow() {
+        if (!$currentUser) return;
+        const row = document.getElementById('pg-row-' + $currentUser.username);
+        if (row) {
+            // Cuộn trượt mượt mà tới dòng của PG
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Nháy sáng ô Tên để gây chú ý
+            const td = row.querySelector('td');
+            if (td) {
+                td.classList.add('!bg-yellow-200', 'transition-colors', 'duration-300');
+                setTimeout(() => td.classList.remove('!bg-yellow-200'), 1500);
+            }
+        } else {
+            alert("Không tìm thấy tên của bạn trong danh sách hiện tại!");
+        }
+    }
+
     $: if (selectedViewStore) loadPGs();
     $: if (selectedViewStore && weekId) loadScheduleForWeek();
 
@@ -106,7 +130,16 @@
     }
 
     function updateShift(pgId, pgUsername, day, value) {
-        if (!isAdmin && $currentUser?.username !== pgUsername) return;
+        const isOwner = $currentUser?.username === pgUsername;
+        
+        if (!isAdmin) {
+            if (!isOwner) return;
+            if (!isFutureWeek) {
+                alert("Bạn chỉ có thể đăng ký/chỉnh sửa lịch cho các tuần tiếp theo!");
+                return;
+            }
+        }
+
         if (!pgScheduleData[pgId]) pgScheduleData[pgId] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
         pgScheduleData[pgId][day] = value;
         pgScheduleData = { ...pgScheduleData }; 
@@ -139,11 +172,26 @@
             <span class="material-icons-round text-xl">face_retouching_natural</span>
             <div>
                 <h3 class="font-bold text-sm">Lịch Làm Việc PG (Tổng: {pgList.length} PG)</h3>
-                <p class="text-[10px] opacity-80">Chọn ca từ danh sách xổ xuống</p>
+                <p class="text-[10px] opacity-80">
+                    {#if !isAdmin && !isFutureWeek}
+                        <span class="text-red-500 font-bold flex items-center gap-1">
+                            <span class="material-icons-round text-[10px]">lock</span> Tuần này đã khóa, không thể sửa lịch!
+                        </span>
+                    {:else}
+                        Chọn ca từ danh sách xổ xuống
+                    {/if}
+                </p>
             </div>
         </div>
 
         <div class="flex items-center justify-between sm:justify-center w-full sm:w-auto gap-2 bg-white px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg border border-pink-200 shadow-sm shrink-0">
+            
+            {#if !isAdmin}
+                <button class="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-indigo-100 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 shrink-0 shadow-sm transition-colors" on:click={scrollToMyRow} title="Đến lịch của tôi">
+                    <span class="material-icons-round text-[18px]">my_location</span>
+                </button>
+            {/if}
+
             <button class="w-7 h-7 flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded" on:click={() => changeWeek(-1)}>
                 <span class="material-icons-round text-base">chevron_left</span>
             </button>
@@ -193,14 +241,22 @@
                                 
                                 <tbody class="divide-y divide-slate-100">
                                     {#each pgs as pg}
-                                        <tr class="hover:bg-slate-50/50 transition-colors">
-                                            <td class="p-1.5 sm:p-2 text-left border-r z-10 sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] min-w-[95px] max-w-[95px] sm:min-w-[140px] sm:max-w-[140px] cursor-pointer hover:bg-pink-50 transition-colors" title="Xem SĐT {pg.username}" on:click={() => selectedPGForModal = pg}>
-                                                <div class="font-bold text-[11px] sm:text-sm text-indigo-700 truncate">{pg.username}</div>
+                                        {@const isOwner = $currentUser?.username === pg.username}
+                                        
+                                        <tr id="pg-row-{pg.username}" class="transition-colors {isOwner ? 'bg-indigo-50/40' : 'hover:bg-slate-50/50'}">
+                                            <td class="p-1.5 sm:p-2 text-left border-r z-10 sticky left-0 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] min-w-[95px] max-w-[95px] sm:min-w-[140px] sm:max-w-[140px] cursor-pointer transition-colors {isOwner ? 'bg-indigo-50 hover:bg-indigo-100' : 'bg-white hover:bg-pink-50'}" title="Xem SĐT {pg.username}" on:click={() => selectedPGForModal = pg}>
+                                                <div class="flex justify-between items-center w-full">
+                                                    <div class="font-bold text-[11px] sm:text-sm text-indigo-700 truncate">{pg.username}</div>
+                                                    
+                                                    {#if isOwner}
+                                                        <span class="text-[8px] sm:text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded shadow-sm shrink-0 ml-1">BẠN</span>
+                                                    {/if}
+                                                </div>
                                             </td>
                                             
                                             {#each DAYS as d}
                                                 {@const currentShift = pgScheduleData[pg.id]?.[d] || ''}
-                                                {@const canEdit = isAdmin || $currentUser?.username === pg.username}
+                                                {@const canEdit = isAdmin || (isOwner && isFutureWeek)}
                                                 
                                                 <td class="p-0.5 sm:p-1 border-r last:border-0 align-middle">
                                                     <select 
