@@ -299,7 +299,7 @@
         <div class="flex items-center gap-2">
             <span class="material-icons-round text-cyan-600 text-xl">fact_check</span>
             <div>
-                <h3 class="font-bold text-slate-800 text-sm">Tuân thủ 8NTTT</h3>
+                <h3 class="font-bold text-slate-800 text-sm">Kiểm tra kỹ trước khi báo cáo</h3>
                 <p class="text-[10px] text-slate-500">Yêu cầu 4 ảnh / khu vực</p>
             </div>
         </div>
