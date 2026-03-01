@@ -241,7 +241,7 @@
                         ...i,
                         imageUrls: mergedUrls,
                         completed: isNowCompleted,
-                        completedBy: isNowCompleted ? ($currentUser.name || $currentUser.username) : i.completedBy,
+                        completedBy: isNowCompleted ? $currentUser.username : i.completedBy,
                         completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt
                     };
                 }
