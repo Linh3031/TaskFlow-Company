@@ -1,7 +1,7 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
     import { db, storage } from '../lib/firebase';
-    import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, query, where, updateDoc, serverTimestamp } from 'firebase/firestore';
+    import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, query, where, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore';
     import { currentUser } from '../lib/stores';
     import { getCurrentTimeShort, getTodayStr } from '../lib/utils';
     import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -23,7 +23,6 @@
     let selectedStaffIds = [];
     let searchStaffQuery = '';
 
-    // THÊM MỚI: Hàm xử lý chọn nhiều nhân viên an toàn với thanh tìm kiếm
     function toggleStaffSelection(staffId) {
         if (selectedStaffIds.includes(staffId)) {
             selectedStaffIds = selectedStaffIds.filter(id => id !== staffId);
@@ -32,7 +31,7 @@
         }
     }
 
-    // State cho Lightbox (Trình chiếu ảnh Slider)
+    // State cho Lightbox
     let showLightbox = false;
     let lightboxImages = [];
     let lightboxIndex = 0;
@@ -40,13 +39,27 @@
     $: filteredStaff = allStaff.filter(s => 
         s.username.toLowerCase().includes(searchStaffQuery.toLowerCase())
     );
-    // Sắp xếp: Chưa làm nằm trên, làm rồi trôi xuống dưới
+
     $: sortedChecklistData = [...checklistData].sort((a, b) => {
         if (a.completed === b.completed) return 0;
         return a.completed ? 1 : -1;
     });
+
     $: if (activeStoreId && dateStr) {
         initAndLoadChecklist();
+    }
+
+    async function writeDebugLog(action, reason) {
+        try {
+            await addDoc(collection(db, 'debug_8nttt_logs'), {
+                action: action,
+                storeId: activeStoreId,
+                dateStr: dateStr,
+                reason: reason,
+                user: $currentUser?.username || 'unknown',
+                timestamp: serverTimestamp()
+            });
+        } catch (e) { console.error("Lỗi ghi log:", e); }
     }
 
     async function initAndLoadChecklist() {
@@ -55,7 +68,20 @@
 
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
+        
+        const todayStr = getTodayStr();
+        const isPastDate = dateStr < todayStr;
+
         if (!dailySnap.exists()) {
+            if (isPastDate) {
+                // ĐẶT BẪY LOG: Bắt khoảnh khắc phát hiện dữ liệu quá khứ bị mất
+                await writeDebugLog('DETECTED_MISSING', 'Phát hiện dữ liệu quá khứ không tồn tại trên Firestore.');
+                
+                checklistData = [];
+                loading = false;
+                return;
+            }
+
             const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
             const templateSnap = await getDoc(templateRef);
             let defaultData = [];
@@ -80,6 +106,10 @@
                     imageUrls: i.imageUrls || (i.imageUrl ? [i.imageUrl] : [])
                 }));
             } else {
+                // ĐẶT BẪY LOG: Nếu dữ liệu đang xem mà đột nhiên bốc hơi
+                if (checklistData.length > 0) {
+                    writeDebugLog('LIVE_DELETION', 'Dữ liệu đột ngột bị xóa khỏi Database trong lúc User đang xem!');
+                }
                 checklistData = [];
             }
             loading = false;
@@ -118,10 +148,10 @@
         const assigneesData = allStaff
             .filter(s => selectedStaffIds.includes(s.id))
             .map(s => ({ id: s.id, username: s.username }));
+
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
-        let currentItems = snap.exists() ?
-            (snap.data().items || []) : [];
+        let currentItems = snap.exists() ? (snap.data().items || []) : [];
 
         let newItemData = null;
 
@@ -137,8 +167,10 @@
         }
 
         await setDoc(templateRef, { items: currentItems }, { merge: true });
+
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
+
         if (dailySnap.exists()) {
             let dailyItems = dailySnap.data().items || [];
             if (editingAreaId) {
@@ -158,8 +190,10 @@
 
     async function deleteArea(areaId, areaName) {
         if (!confirm(`⚠️ XÁC NHẬN XÓA:\nBạn có chắc chắn muốn xóa khu vực "${areaName}" không?\nKhu vực này sẽ bị xóa khỏi ngày hiện tại và các ngày sau.`)) return;
+
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
+
         if (snap.exists()) {
             let currentItems = snap.data().items || [];
             currentItems = currentItems.filter(i => i.id !== areaId);
@@ -169,14 +203,12 @@
         const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
-            let dailyItems = dailySnap.data().items ||
-            [];
+            let dailyItems = dailySnap.data().items || [];
             dailyItems = dailyItems.filter(i => i.id !== areaId);
             await updateDoc(dailyRef, { items: dailyItems });
         }
     }
 
-    // ĐÃ FIX LỖI ẢNH ĐEN: Thêm nền trắng (fillRect) trước khi vẽ ảnh
     function compressImage(file, maxWidth = 1000, quality = 0.7) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -193,7 +225,6 @@
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     
-                    // Tạo lớp nền trắng tinh để lót cho các ảnh PNG trong suốt
                     ctx.fillStyle = '#FFFFFF';
                     ctx.fillRect(0, 0, width, height);
                     
@@ -206,22 +237,20 @@
         });
     }
 
-    // ĐÃ FIX UP CHẬM: Dùng Promise.all() để tải lên song song nhiều ảnh cùng lúc
     async function handleUploadImage(event, itemId) {
         const files = event.target.files;
         if (!files || files.length === 0) return;
 
         const item = checklistData.find(i => i.id === itemId);
-        const currentCount = item.imageUrls ?
-            item.imageUrls.length : 0;
+        const currentCount = item.imageUrls ? item.imageUrls.length : 0;
         const remainingSlots = 4 - currentCount;
         
         const filesToProcess = Array.from(files).slice(0, remainingSlots);
         if (filesToProcess.length === 0) return;
+
         uploadingId = itemId;
 
         try {
-            // TẠO MẢNG CHỨA CÁC TÁC VỤ UPLOAD SONG SONG
             const uploadPromises = filesToProcess.map(async (file) => {
                 const compressedBlob = await compressImage(file);
                 const fileName = `8nttt_${activeStoreId}_${dateStr}_${itemId}_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
@@ -229,8 +258,9 @@
                 await uploadBytes(imageRef, compressedBlob);
                 return await getDownloadURL(imageRef);
             });
-            // CHỜ TẤT CẢ CÁC ẢNH CÙNG UPLOAD XONG (Tốc độ x4 lần)
+
             const newUploadedUrls = await Promise.all(uploadPromises);
+
             const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
             const updatedItems = checklistData.map(i => {
                 if (i.id === itemId) {
@@ -247,6 +277,7 @@
                 }
                 return i;
             });
+
             await updateDoc(dailyRef, { items: updatedItems });
 
         } catch (error) {
@@ -258,7 +289,6 @@
         }
     }
 
-    // --- LOGIC LIGHTBOX (TRÌNH CHIẾU ẢNH) ---
     function openLightbox(images, index) {
         lightboxImages = images;
         lightboxIndex = index;
@@ -278,7 +308,6 @@
         if (lightboxIndex > 0) lightboxIndex--;
     }
 
-    // Xử lý phím tắt cho Lightbox
     function handleKeydown(e) {
         if (!showLightbox) return;
         if (e.key === 'ArrowRight') nextLightboxImage();
@@ -318,7 +347,7 @@
         {:else if sortedChecklistData.length === 0}
             <div class="text-center py-10 text-slate-400">
                 <span class="material-icons-round text-5xl opacity-50 mb-2">assignment_turned_in</span>
-                <p class="font-bold text-sm">Chưa có khu vực nào cần kiểm tra.</p>
+                <p class="font-bold text-sm">Chưa có dữ liệu hoặc đã bị xóa.</p>
             </div>
         {:else}
             {#each sortedChecklistData as item (item.id)}
@@ -365,8 +394,8 @@
 
                     <div class="flex flex-wrap gap-2 mt-1">
                         {#each (item.imageUrls || []) as url, index}
-                            <button class="w-14 h-14 sm:w-16 sm:h-16 rounded-lg border border-slate-200 shadow-sm overflow-hidden bg-black flex items-center justify-center group relative outline-none" on:click={() => openLightbox(item.imageUrls, index)}>
-                                <img src={url} alt="Checklist pic" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity">
+                            <button class="w-14 h-14 sm:w-16 sm:h-16 rounded-lg border border-slate-200 shadow-sm overflow-hidden bg-slate-100 flex items-center justify-center group relative outline-none" on:click={() => openLightbox(item.imageUrls, index)}>
+                                <img src={url} alt="Checklist pic" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/100x100/e2e8f0/64748b?text=Da+Xoa'; }}>
                                 <span class="material-icons-round text-white absolute text-sm drop-shadow-md opacity-0 group-hover:opacity-100">zoom_in</span>
                             </button>
                         {/each}
@@ -398,7 +427,7 @@
         </div>
 
         <div class="w-full h-full max-w-4xl max-h-[85vh] flex items-center justify-center relative" on:click|stopPropagation>
-            <img src={lightboxImages[lightboxIndex]} alt="Phóng to" class="max-w-full max-h-full object-contain rounded-md shadow-2xl animate-popIn">
+            <img src={lightboxImages[lightboxIndex]} alt="Phóng to" class="max-w-full max-h-full object-contain rounded-md shadow-2xl animate-popIn" on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/800x600/e2e8f0/64748b?text=Anh+Da+Bi+Xoa+Sau+5+Ngay'; }}>
             
             {#if lightboxIndex > 0}
                 <button class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 transition-all" on:click|stopPropagation={prevLightboxImage}>
