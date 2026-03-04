@@ -62,29 +62,33 @@
         } catch (e) { console.error("Lỗi ghi log:", e); }
     }
 
+    // HÀM TẠO ĐƯỜNG DẪN MỚI AN TOÀN (Lưu ở thư mục gốc)
+    function getDailyRecordRef() {
+        const recordId = `${activeStoreId}_${dateStr}`;
+        return doc(db, '8nttt_daily_records', recordId);
+    }
+
     async function initAndLoadChecklist() {
         if (unsubscribe) unsubscribe();
         loading = true;
 
-        const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
+        const dailyRef = getDailyRecordRef();
         const dailySnap = await getDoc(dailyRef);
         
         const todayStr = getTodayStr();
         const isPastDate = dateStr < todayStr;
 
         if (!dailySnap.exists()) {
+            // Đã xóa bỏ bẫy ép rỗng dữ liệu quá khứ.
+            // Nếu không có dữ liệu (dù là quá khứ hay hiện tại), ta đều lấy Template ra làm chuẩn.
             if (isPastDate) {
-                // ĐẶT BẪY LOG: Bắt khoảnh khắc phát hiện dữ liệu quá khứ bị mất
-                await writeDebugLog('DETECTED_MISSING', 'Phát hiện dữ liệu quá khứ không tồn tại trên Firestore.');
-                
-                checklistData = [];
-                loading = false;
-                return;
+                 await writeDebugLog('DETECTED_MISSING', 'Phát hiện dữ liệu quá khứ không tồn tại trên Firestore ở collection mới. Đang load template mặc định.');
             }
 
             const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
             const templateSnap = await getDoc(templateRef);
             let defaultData = [];
+            
             if (templateSnap.exists() && templateSnap.data().items) {
                 defaultData = templateSnap.data().items.map(item => ({
                     id: item.id,
@@ -96,7 +100,16 @@
                     completedAt: null
                 }));
             }
-            await setDoc(dailyRef, { items: defaultData, createdAt: serverTimestamp() });
+            
+            // Chỉ tự động lưu tạo Document mới nếu là ngày hôm nay hoặc tương lai.
+            // Nếu là quá khứ mà mất data, ta chỉ show Template chứ không ghi đè lại DB để tránh rác.
+            if (!isPastDate) {
+                 await setDoc(dailyRef, { items: defaultData, createdAt: serverTimestamp() });
+            } else {
+                 checklistData = defaultData;
+                 loading = false;
+                 return; // Dừng ở đây vì ngày quá khứ không cần Listen real-time nếu DB rỗng.
+            }
         }
 
         unsubscribe = onSnapshot(dailyRef, (docSnap) => {
@@ -106,7 +119,6 @@
                     imageUrls: i.imageUrls || (i.imageUrl ? [i.imageUrl] : [])
                 }));
             } else {
-                // ĐẶT BẪY LOG: Nếu dữ liệu đang xem mà đột nhiên bốc hơi
                 if (checklistData.length > 0) {
                     writeDebugLog('LIVE_DELETION', 'Dữ liệu đột ngột bị xóa khỏi Database trong lúc User đang xem!');
                 }
@@ -168,7 +180,7 @@
 
         await setDoc(templateRef, { items: currentItems }, { merge: true });
 
-        const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
+        const dailyRef = getDailyRecordRef();
         const dailySnap = await getDoc(dailyRef);
 
         if (dailySnap.exists()) {
@@ -200,7 +212,7 @@
             await setDoc(templateRef, { items: currentItems }, { merge: true });
         }
 
-        const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
+        const dailyRef = getDailyRecordRef();
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
             let dailyItems = dailySnap.data().items || [];
@@ -261,7 +273,7 @@
 
             const newUploadedUrls = await Promise.all(uploadPromises);
 
-            const dailyRef = doc(db, 'stores', activeStoreId, '8nttt_daily', dateStr);
+            const dailyRef = getDailyRecordRef();
             const updatedItems = checklistData.map(i => {
                 if (i.id === itemId) {
                     const mergedUrls = [...(i.imageUrls || []), ...newUploadedUrls];
@@ -278,7 +290,8 @@
                 return i;
             });
 
-            await updateDoc(dailyRef, { items: updatedItems });
+            // Nếu là quá khứ và lỡ bị rỗng DB, lúc upload ảnh nó sẽ tự tạo lại DB bằng merge
+            await setDoc(dailyRef, { items: updatedItems, createdAt: serverTimestamp() }, { merge: true });
 
         } catch (error) {
             console.error("Upload error: ", error);
