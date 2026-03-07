@@ -6,6 +6,12 @@
     import { getCurrentTimeShort, getTodayStr } from '../lib/utils';
     import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
+    import ChecklistHeader from './DailyChecklistParts/ChecklistHeader.svelte';
+    import ChecklistItem from './DailyChecklistParts/ChecklistItem.svelte';
+    import AreaAdminModal from './DailyChecklistParts/AreaAdminModal.svelte';
+    import LightboxModal from './DailyChecklistParts/LightboxModal.svelte';
+    import ChecklistStatsModal from './DailyChecklistParts/ChecklistStatsModal.svelte'; // MỚI
+
     export let activeStoreId;
     export let dateStr;
     $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
@@ -14,31 +20,23 @@
     let loading = true;
     let uploadingId = null;
     let unsubscribe = null;
+    let activeRecordId = ''; 
 
-    // State cho Modal Admin
+    // State Modals
     let showAdminModal = false;
     let editingAreaId = null;
     let allStaff = [];
     let newAreaName = '';
     let selectedStaffIds = [];
-    let searchStaffQuery = '';
-
-    function toggleStaffSelection(staffId) {
-        if (selectedStaffIds.includes(staffId)) {
-            selectedStaffIds = selectedStaffIds.filter(id => id !== staffId);
-        } else {
-            selectedStaffIds = [...selectedStaffIds, staffId];
-        }
-    }
-
-    // State cho Lightbox
+    
     let showLightbox = false;
     let lightboxImages = [];
     let lightboxIndex = 0;
 
-    $: filteredStaff = allStaff.filter(s => 
-        s.username.toLowerCase().includes(searchStaffQuery.toLowerCase())
-    );
+    // State Thống Kê
+    let showStatsModal = false;
+    let statsData = { matrix: [], days: [], month: '' };
+    let statsLoading = false;
 
     $: sortedChecklistData = [...checklistData].sort((a, b) => {
         if (a.completed === b.completed) return 0;
@@ -46,25 +44,25 @@
     });
 
     $: if (activeStoreId && dateStr) {
+        activeRecordId = '';
         initAndLoadChecklist();
     }
 
     async function writeDebugLog(action, reason) {
         try {
-            await addDoc(collection(db, 'debug_8nttt_logs'), {
-                action: action,
-                storeId: activeStoreId,
-                dateStr: dateStr,
-                reason: reason,
-                user: $currentUser?.username || 'unknown',
-                timestamp: serverTimestamp()
-            });
-        } catch (e) { console.error("Lỗi ghi log:", e); }
+            await addDoc(collection(db, 'debug_8nttt_logs'), { action, storeId: activeStoreId, dateStr, reason, user: $currentUser?.username || 'unknown', timestamp: serverTimestamp() });
+        } catch (e) { console.error(e); }
     }
 
-    // HÀM TẠO ĐƯỜNG DẪN MỚI AN TOÀN (Lưu ở thư mục gốc)
+    function getOldFormatDate(dStr) {
+        if (!dStr) return '';
+        const parts = dStr.split('-');
+        if (parts.length !== 3) return dStr;
+        return `${parts[0]}-${parseInt(parts[1], 10)}-${parseInt(parts[2], 10)}`;
+    }
+
     function getDailyRecordRef() {
-        const recordId = `${activeStoreId}_${dateStr}`;
+        const recordId = activeRecordId || `${activeStoreId}_${dateStr}`;
         return doc(db, '8nttt_daily_records', recordId);
     }
 
@@ -72,152 +70,162 @@
         if (unsubscribe) unsubscribe();
         loading = true;
 
-        const dailyRef = getDailyRecordRef();
-        const dailySnap = await getDoc(dailyRef);
-        
+        const standardRecordId = `${activeStoreId}_${dateStr}`;
+        const oldRecordId = `${activeStoreId}_${getOldFormatDate(dateStr)}`;
+
+        let dailyRef = doc(db, '8nttt_daily_records', standardRecordId);
+        let dailySnap = await getDoc(dailyRef);
+        activeRecordId = standardRecordId;
+
+        if (!dailySnap.exists() && standardRecordId !== oldRecordId) {
+            const oldDailyRef = doc(db, '8nttt_daily_records', oldRecordId);
+            const oldDailySnap = await getDoc(oldDailyRef);
+            if (oldDailySnap.exists()) {
+                dailyRef = oldDailyRef;
+                dailySnap = oldDailySnap;
+                activeRecordId = oldRecordId; 
+            }
+        }
+
         const todayStr = getTodayStr();
         const isPastDate = dateStr < todayStr;
 
         if (!dailySnap.exists()) {
-            // Đã xóa bỏ bẫy ép rỗng dữ liệu quá khứ.
-            // Nếu không có dữ liệu (dù là quá khứ hay hiện tại), ta đều lấy Template ra làm chuẩn.
-            if (isPastDate) {
-                 await writeDebugLog('DETECTED_MISSING', 'Phát hiện dữ liệu quá khứ không tồn tại trên Firestore ở collection mới. Đang load template mặc định.');
-            }
-
+            if (isPastDate) await writeDebugLog('DETECTED_MISSING', 'Load template mặc định');
             const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
             const templateSnap = await getDoc(templateRef);
-            let defaultData = [];
+            // Sửa template: thêm mảng uploaders
+            let defaultData = templateSnap.exists() && templateSnap.data().items ? templateSnap.data().items.map(item => ({ ...item, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null })) : [];
             
-            if (templateSnap.exists() && templateSnap.data().items) {
-                defaultData = templateSnap.data().items.map(item => ({
-                    id: item.id,
-                    areaName: item.areaName,
-                    assignees: item.assignees || [],
-                    completed: false,
-                    imageUrls: [],
-                    completedBy: null,
-                    completedAt: null
-                }));
-            }
-            
-            // Chỉ tự động lưu tạo Document mới nếu là ngày hôm nay hoặc tương lai.
-            // Nếu là quá khứ mà mất data, ta chỉ show Template chứ không ghi đè lại DB để tránh rác.
             if (!isPastDate) {
                  await setDoc(dailyRef, { items: defaultData, createdAt: serverTimestamp() });
             } else {
                  checklistData = defaultData;
                  loading = false;
-                 return; // Dừng ở đây vì ngày quá khứ không cần Listen real-time nếu DB rỗng.
+                 return;
             }
         }
 
         unsubscribe = onSnapshot(dailyRef, (docSnap) => {
             if (docSnap.exists() && docSnap.data().items) {
-                checklistData = docSnap.data().items.map(i => ({
-                    ...i,
-                    imageUrls: i.imageUrls || (i.imageUrl ? [i.imageUrl] : [])
+                checklistData = docSnap.data().items.map(i => ({ 
+                    ...i, 
+                    imageUrls: i.imageUrls || (i.imageUrl ? [i.imageUrl] : []),
+                    uploaders: i.uploaders || [] // Load mảng uploaders
                 }));
             } else {
-                if (checklistData.length > 0) {
-                    writeDebugLog('LIVE_DELETION', 'Dữ liệu đột ngột bị xóa khỏi Database trong lúc User đang xem!');
-                }
                 checklistData = [];
             }
             loading = false;
         });
     }
 
-    async function openAdminModal(item = null) {
-        showAdminModal = true;
-        searchStaffQuery = '';
+    // TÍNH NĂNG MỚI: Tải Thống Kê
+    async function loadAndShowStats() {
+        showStatsModal = true;
+        statsLoading = true;
+        
+        const [year, month] = dateStr.split('-');
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const daysArray = Array.from({length: daysInMonth}, (_, i) => i + 1);
+        let userStats = {};
 
+        // Tạo ma trận các Promise truy vấn (rất nhẹ vì duyệt theo ID trực tiếp)
+        const fetchPromises = daysArray.map(async (day) => {
+            const dd = String(day).padStart(2, '0');
+            const standardId = `${activeStoreId}_${year}-${month}-${dd}`;
+            const oldId = `${activeStoreId}_${year}-${parseInt(month, 10)}-${day}`;
+
+            let snap = await getDoc(doc(db, '8nttt_daily_records', standardId));
+            if (!snap.exists()) {
+                snap = await getDoc(doc(db, '8nttt_daily_records', oldId));
+            }
+
+            if (snap.exists() && snap.data().items) {
+                snap.data().items.forEach(item => {
+                    // Ưu tiên đếm theo mảng chi tiết mới
+                    if (item.uploaders && item.uploaders.length > 0) {
+                        item.uploaders.forEach(u => {
+                            if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
+                            userStats[u].days[day] = (userStats[u].days[day] || 0) + 1;
+                            userStats[u].total += 1;
+                        });
+                    } 
+                    // Fallback tương thích dữ liệu cũ
+                    else if (item.completedBy && item.imageUrls && item.imageUrls.length > 0) {
+                        const u = item.completedBy;
+                        if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
+                        userStats[u].days[day] = (userStats[u].days[day] || 0) + item.imageUrls.length;
+                        userStats[u].total += item.imageUrls.length;
+                    }
+                });
+            }
+        });
+
+        await Promise.all(fetchPromises);
+        
+        statsData = { month: `${month}/${year}`, days: daysArray, matrix: Object.values(userStats) };
+        statsLoading = false;
+    }
+
+    async function openAdminModal(event) {
+        const item = event?.detail || null;
+        showAdminModal = true;
         if (allStaff.length === 0) {
             const q = query(collection(db, 'users'), where('storeIds', 'array-contains', activeStoreId));
             const snap = await getDocs(q);
-            allStaff = snap.docs
-                .map(d => ({ id: d.id, username: d.data().username, role: d.data().role }))
-                .filter(s => s.role !== 'admin' && s.role !== 'super_admin' && s.username)
-                .sort((a, b) => a.username.localeCompare(b.username));
+            allStaff = snap.docs.map(d => ({ id: d.id, username: d.data().username, role: d.data().role })).filter(s => s.role !== 'admin' && s.role !== 'super_admin' && s.username).sort((a, b) => a.username.localeCompare(b.username));
         }
-
         if (item) {
-            editingAreaId = item.id;
-            newAreaName = item.areaName;
-            selectedStaffIds = (item.assignees || []).map(a => a.id);
+            editingAreaId = item.id; newAreaName = item.areaName; selectedStaffIds = (item.assignees || []).map(a => a.id);
         } else {
-            editingAreaId = null;
-            newAreaName = '';
-            selectedStaffIds = [];
+            editingAreaId = null; newAreaName = ''; selectedStaffIds = [];
         }
     }
 
     async function saveAreaToTemplate() {
-        if (!newAreaName.trim() || selectedStaffIds.length === 0) {
-            return alert("Vui lòng nhập tên khu vực và chọn ít nhất 1 người phụ trách!");
-        }
-        
-        const assigneesData = allStaff
-            .filter(s => selectedStaffIds.includes(s.id))
-            .map(s => ({ id: s.id, username: s.username }));
-
+        if (!newAreaName.trim() || selectedStaffIds.length === 0) return alert("Vui lòng nhập tên và chọn người phụ trách!");
+        const assigneesData = allStaff.filter(s => selectedStaffIds.includes(s.id)).map(s => ({ id: s.id, username: s.username }));
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
         let currentItems = snap.exists() ? (snap.data().items || []) : [];
-
         let newItemData = null;
 
         if (editingAreaId) {
             currentItems = currentItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), assignees: assigneesData } : i);
         } else {
-            newItemData = {
-                id: 'area_' + Date.now(),
-                areaName: newAreaName.trim(),
-                assignees: assigneesData
-            };
+            newItemData = { id: 'area_' + Date.now(), areaName: newAreaName.trim(), assignees: assigneesData };
             currentItems.push(newItemData);
         }
-
         await setDoc(templateRef, { items: currentItems }, { merge: true });
-
+        
         const dailyRef = getDailyRecordRef();
         const dailySnap = await getDoc(dailyRef);
-
         if (dailySnap.exists()) {
             let dailyItems = dailySnap.data().items || [];
-            if (editingAreaId) {
-                dailyItems = dailyItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), assignees: assigneesData } : i);
-            } else {
-                dailyItems.push({ ...newItemData, completed: false, imageUrls: [], completedBy: null, completedAt: null });
-            }
+            if (editingAreaId) dailyItems = dailyItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), assignees: assigneesData } : i);
+            else dailyItems.push({ ...newItemData, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null });
             await updateDoc(dailyRef, { items: dailyItems });
-        } else {
-            if (!editingAreaId && newItemData) {
-                await setDoc(dailyRef, { items: [{ ...newItemData, completed: false, imageUrls: [], completedBy: null, completedAt: null }], createdAt: serverTimestamp() });
-            }
+        } else if (!editingAreaId && newItemData) {
+            await setDoc(dailyRef, { items: [{ ...newItemData, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null }], createdAt: serverTimestamp() });
         }
-        
         showAdminModal = false;
     }
 
-    async function deleteArea(areaId, areaName) {
-        if (!confirm(`⚠️ XÁC NHẬN XÓA:\nBạn có chắc chắn muốn xóa khu vực "${areaName}" không?\nKhu vực này sẽ bị xóa khỏi ngày hiện tại và các ngày sau.`)) return;
-
+    async function deleteArea(event) {
+        const { id, name } = event.detail;
+        if (!confirm(`⚠️ XÁC NHẬN XÓA:\nBạn có chắc chắn muốn xóa khu vực "${name}" không?`)) return;
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
-
         if (snap.exists()) {
             let currentItems = snap.data().items || [];
-            currentItems = currentItems.filter(i => i.id !== areaId);
-            await setDoc(templateRef, { items: currentItems }, { merge: true });
+            await setDoc(templateRef, { items: currentItems.filter(i => i.id !== id) }, { merge: true });
         }
-
         const dailyRef = getDailyRecordRef();
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
             let dailyItems = dailySnap.data().items || [];
-            dailyItems = dailyItems.filter(i => i.id !== areaId);
-            await updateDoc(dailyRef, { items: dailyItems });
+            await updateDoc(dailyRef, { items: dailyItems.filter(i => i.id !== id) });
         }
     }
 
@@ -226,20 +234,14 @@
             const reader = new FileReader();
             reader.readAsDataURL(file);
             reader.onload = (event) => {
-                const img = new Image();
-                img.src = event.target.result;
+                const img = new Image(); img.src = event.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
+                    let width = img.width, height = img.height;
                     if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
-                    canvas.width = width; 
-                    canvas.height = height;
+                    canvas.width = width; canvas.height = height;
                     const ctx = canvas.getContext('2d');
-                    
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.fillRect(0, 0, width, height);
-                    
+                    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, width, height);
                     ctx.drawImage(img, 0, 0, width, height);
                     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
                 };
@@ -249,19 +251,17 @@
         });
     }
 
-    async function handleUploadImage(event, itemId) {
+    async function handleUploadImage(eventObj) {
+        const { event, itemId } = eventObj.detail;
         const files = event.target.files;
         if (!files || files.length === 0) return;
 
         const item = checklistData.find(i => i.id === itemId);
-        const currentCount = item.imageUrls ? item.imageUrls.length : 0;
-        const remainingSlots = 4 - currentCount;
-        
+        const remainingSlots = 4 - (item.imageUrls ? item.imageUrls.length : 0);
         const filesToProcess = Array.from(files).slice(0, remainingSlots);
         if (filesToProcess.length === 0) return;
-
+        
         uploadingId = itemId;
-
         try {
             const uploadPromises = filesToProcess.map(async (file) => {
                 const compressedBlob = await compressImage(file);
@@ -270,89 +270,47 @@
                 await uploadBytes(imageRef, compressedBlob);
                 return await getDownloadURL(imageRef);
             });
-
+            
             const newUploadedUrls = await Promise.all(uploadPromises);
+            
+            // TÍNH NĂNG MỚI: Mảng ghi lại tên từng người tương ứng với từng ảnh vừa up
+            const newUploaders = newUploadedUrls.map(() => $currentUser.username);
 
             const dailyRef = getDailyRecordRef();
             const updatedItems = checklistData.map(i => {
                 if (i.id === itemId) {
                     const mergedUrls = [...(i.imageUrls || []), ...newUploadedUrls];
+                    const mergedUploaders = [...(i.uploaders || []), ...newUploaders]; // Ghép danh sách người up
                     const isNowCompleted = mergedUrls.length >= 4;
                     
-                    return {
-                        ...i,
-                        imageUrls: mergedUrls,
-                        completed: isNowCompleted,
-                        completedBy: isNowCompleted ? $currentUser.username : i.completedBy,
-                        completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt
+                    return { 
+                        ...i, 
+                        imageUrls: mergedUrls, 
+                        uploaders: mergedUploaders, // Cập nhật mảng
+                        completed: isNowCompleted, 
+                        completedBy: isNowCompleted ? $currentUser.username : i.completedBy, 
+                        completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt 
                     };
                 }
                 return i;
             });
-
-            // Nếu là quá khứ và lỡ bị rỗng DB, lúc upload ảnh nó sẽ tự tạo lại DB bằng merge
             await setDoc(dailyRef, { items: updatedItems, createdAt: serverTimestamp() }, { merge: true });
-
-        } catch (error) {
-            console.error("Upload error: ", error);
-            alert("Lỗi tải ảnh lên: " + error.message);
-        } finally {
-            uploadingId = null;
-            event.target.value = null; 
-        }
+        } catch (error) { alert("Lỗi tải ảnh lên: " + error.message); } 
+        finally { uploadingId = null; event.target.value = null; }
     }
 
-    function openLightbox(images, index) {
-        lightboxImages = images;
-        lightboxIndex = index;
+    function openLightbox(event) {
+        lightboxImages = event.detail.images;
+        lightboxIndex = event.detail.index;
         showLightbox = true;
     }
-    
-    function closeLightbox() {
-        showLightbox = false;
-        lightboxImages = [];
-    }
 
-    function nextLightboxImage() {
-        if (lightboxIndex < lightboxImages.length - 1) lightboxIndex++;
-    }
-
-    function prevLightboxImage() {
-        if (lightboxIndex > 0) lightboxIndex--;
-    }
-
-    function handleKeydown(e) {
-        if (!showLightbox) return;
-        if (e.key === 'ArrowRight') nextLightboxImage();
-        if (e.key === 'ArrowLeft') prevLightboxImage();
-        if (e.key === 'Escape') closeLightbox();
-    }
-
-    onDestroy(() => {
-        if (unsubscribe) unsubscribe();
-    });
+    onDestroy(() => { if (unsubscribe) unsubscribe(); });
 </script>
-
-<svelte:window on:keydown={handleKeydown} />
 
 <div class="w-full h-full flex flex-col bg-slate-50 rounded-xl border border-cyan-200 shadow-sm overflow-hidden relative">
     
-    <div class="p-3 bg-white border-b border-cyan-200 flex justify-between items-center shrink-0 shadow-sm z-10">
-        <div class="flex items-center gap-2">
-            <span class="material-icons-round text-cyan-600 text-xl">fact_check</span>
-            <div>
-                <h3 class="font-bold text-slate-800 text-sm">Kiểm tra kỹ trước khi báo cáo</h3>
-                <p class="text-[10px] text-slate-500">Yêu cầu 4 ảnh / khu vực</p>
-            </div>
-        </div>
-        
-        {#if isAdmin}
-            <button class="bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm" on:click={() => openAdminModal(null)}>
-                <span class="material-icons-round text-[14px]">add_circle</span> 
-                <span class="hidden sm:inline">Thêm Khu Vực</span>
-            </button>
-        {/if}
-    </div>
+    <ChecklistHeader {isAdmin} on:openAdmin={() => openAdminModal(null)} on:openStats={loadAndShowStats} />
 
     <div class="flex-1 overflow-y-auto p-2 sm:p-3 bg-slate-50 space-y-3">
         {#if loading}
@@ -364,148 +322,41 @@
             </div>
         {:else}
             {#each sortedChecklistData as item (item.id)}
-                <div class="bg-white p-3 rounded-xl border-y border-r shadow-sm flex flex-col gap-2 transition-all duration-300 {item.completed ? 'bg-slate-50 border-l-4 border-l-green-500 border-y-slate-200 border-r-slate-200 opacity-70 hover:opacity-100' : 'border-l-4 border-l-orange-500 border-y-slate-200 border-r-slate-200 hover:border-cyan-400'}">
-                    
-                    <div class="flex justify-between items-start">
-                        <div class="flex-1 pr-2">
-                            <div class="flex items-center gap-2">
-                                <div class="font-bold text-slate-800 text-sm {item.completed ? 'line-through decoration-green-400' : ''}">{item.areaName}</div>
-                                
-                                {#if isAdmin}
-                                    <div class="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
-                                        <button class="text-slate-500 hover:text-indigo-600 p-0.5 rounded hover:bg-slate-100" on:click={() => openAdminModal(item)} title="Sửa khu vực">
-                                            <span class="material-icons-round text-[14px]">edit</span>
-                                        </button>
-                                        <button class="text-slate-500 hover:text-red-500 p-0.5 rounded hover:bg-slate-100" on:click={() => deleteArea(item.id, item.areaName)} title="Xóa khu vực">
-                                            <span class="material-icons-round text-[14px]">delete</span>
-                                        </button>
-                                    </div>
-                                {/if}
-                            </div>
-                            
-                            <div class="text-[11px] text-slate-500 font-semibold mt-0.5 flex items-center gap-1">
-                                <span class="material-icons-round text-[14px] text-indigo-400">groups</span>
-                                {(item.assignees || []).map(a => a.username).join(', ') || 'Chưa gán người'}
-                            </div>
-                        </div>
-                        
-                        {#if item.completed}
-                            <div class="text-right shrink-0">
-                                <div class="inline-flex items-center gap-1 text-green-700 font-bold text-[10px] bg-green-100 px-2 py-0.5 rounded-full border border-green-300 mb-0.5 shadow-sm">
-                                    <span class="material-icons-round text-[12px]">check_circle</span> Hoàn tất
-                                </div>
-                                <div class="text-[9px] text-slate-500">
-                                    ✍️ {item.completedBy} • {item.completedAt}
-                                </div>
-                            </div>
-                        {:else}
-                            <div class="text-[10px] shrink-0 font-bold px-2 py-1 rounded bg-orange-100 text-orange-600 border border-orange-300 shadow-sm">
-                                Chưa đạt ({(item.imageUrls || []).length}/4)
-                            </div>
-                        {/if}
-                    </div>
-
-                    <div class="flex flex-wrap gap-2 mt-1">
-                        {#each (item.imageUrls || []) as url, index}
-                            <button class="w-14 h-14 sm:w-16 sm:h-16 rounded-lg border border-slate-200 shadow-sm overflow-hidden bg-slate-100 flex items-center justify-center group relative outline-none" on:click={() => openLightbox(item.imageUrls, index)}>
-                                <img src={url} alt="Checklist pic" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/100x100/e2e8f0/64748b?text=Da+Xoa'; }}>
-                                <span class="material-icons-round text-white absolute text-sm drop-shadow-md opacity-0 group-hover:opacity-100">zoom_in</span>
-                            </button>
-                        {/each}
-
-                        {#if (item.imageUrls || []).length < 4}
-                            <label class="w-14 h-14 sm:w-16 sm:h-16 border-2 border-dashed border-orange-300 rounded-lg flex flex-col items-center justify-center text-orange-500 cursor-pointer hover:bg-orange-50 transition-colors bg-orange-50/30 relative shadow-inner">
-                                <input type="file" multiple accept="image/*" class="absolute w-0 h-0 opacity-0" on:change={(e) => handleUploadImage(e, item.id)} disabled={uploadingId === item.id}>
-                                {#if uploadingId === item.id}
-                                    <span class="material-icons-round text-lg animate-spin">sync</span>
-                                {:else}
-                                    <span class="material-icons-round text-lg mb-0.5">add_a_photo</span>
-                                    <span class="text-[8px] font-bold uppercase tracking-tighter text-orange-500 leading-none">Thêm</span>
-                                {/if}
-                            </label>
-                        {/if}
-                    </div>
-                </div>
+                <ChecklistItem 
+                    {item} 
+                    {isAdmin} 
+                    {uploadingId}
+                    on:edit={openAdminModal}
+                    on:delete={deleteArea}
+                    on:upload={handleUploadImage}
+                    on:openLightbox={openLightbox}
+                />
             {/each}
         {/if}
     </div>
 </div>
 
-{#if showLightbox}
-    <div class="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center p-2 backdrop-blur-md animate-fadeIn" on:click={closeLightbox}>
-        
-        <div class="absolute top-4 right-4 z-10 flex gap-4 text-white">
-            <span class="text-sm font-bold bg-black/50 px-3 py-1 rounded-full">{lightboxIndex + 1} / {lightboxImages.length}</span>
-            <button class="hover:text-red-400 transition-colors" on:click={closeLightbox}><span class="material-icons-round text-3xl drop-shadow-lg">close</span></button>
-        </div>
+<LightboxModal 
+    show={showLightbox} 
+    images={lightboxImages} 
+    currentIndex={lightboxIndex} 
+    on:close={() => showLightbox = false} 
+    on:updateIndex={(e) => lightboxIndex = e.detail} 
+/>
 
-        <div class="w-full h-full max-w-4xl max-h-[85vh] flex items-center justify-center relative" on:click|stopPropagation>
-            <img src={lightboxImages[lightboxIndex]} alt="Phóng to" class="max-w-full max-h-full object-contain rounded-md shadow-2xl animate-popIn" on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/800x600/e2e8f0/64748b?text=Anh+Da+Bi+Xoa+Sau+5+Ngay'; }}>
-            
-            {#if lightboxIndex > 0}
-                <button class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 transition-all" on:click|stopPropagation={prevLightboxImage}>
-                    <span class="material-icons-round text-3xl">chevron_left</span>
-                </button>
-            {/if}
+<AreaAdminModal 
+    show={showAdminModal} 
+    {editingAreaId} 
+    {allStaff} 
+    bind:newAreaName 
+    bind:selectedStaffIds 
+    on:close={() => showAdminModal = false} 
+    on:save={saveAreaToTemplate} 
+/>
 
-            {#if lightboxIndex < lightboxImages.length - 1}
-                <button class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 transition-all" on:click|stopPropagation={nextLightboxImage}>
-                    <span class="material-icons-round text-3xl">chevron_right</span>
-                </button>
-            {/if}
-        </div>
-    </div>
-{/if}
-
-{#if showAdminModal}
-    <div class="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => showAdminModal = false}>
-        <div class="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-popIn max-h-[90vh]" on:click|stopPropagation>
-            <div class="p-4 bg-cyan-50 border-b border-cyan-100 flex justify-between items-center shrink-0">
-                <h3 class="font-bold text-cyan-800">{editingAreaId ? 'Sửa Khu Vực' : 'Thêm Khu Vực 8NTTT'}</h3>
-                <button class="text-slate-400 hover:text-red-500" on:click={() => showAdminModal = false}><span class="material-icons-round">close</span></button>
-            </div>
-            
-            <div class="p-4 flex-1 overflow-y-auto space-y-4 bg-white">
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 mb-1">Tên Khu Vực / Quầy Kệ</label>
-                    <input type="text" bind:value={newAreaName} placeholder="Vd: Quầy Tivi Sony..." class="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-semibold focus:border-cyan-500 focus:ring-1 focus:ring-cyan-200 outline-none">
-                </div>
-                
-                <div class="flex flex-col h-full">
-                    <label class="block text-xs font-bold text-slate-500 mb-2">Người Phụ Trách (Chọn nhiều)</label>
-                    
-                    <div class="relative mb-2">
-                        <span class="material-icons-round absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-[16px]">search</span>
-                        <input type="text" bind:value={searchStaffQuery} placeholder="Tìm nhân viên..." class="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-cyan-500">
-                    </div>
-
-                    <div class="max-h-56 overflow-y-auto bg-slate-50 border border-slate-200 rounded-lg p-1.5 space-y-0.5">
-                        {#each filteredStaff as s}
-                            <label class="flex items-center gap-3 p-2 hover:bg-cyan-100 rounded-md cursor-pointer transition-colors border border-transparent hover:border-cyan-200 {selectedStaffIds.includes(s.id) ? 'bg-cyan-50 border-cyan-200' : ''}">
-                                <input type="checkbox" checked={selectedStaffIds.includes(s.id)} on:change={() => toggleStaffSelection(s.id)} class="w-4 h-4 accent-cyan-600 rounded">
-                                <span class="text-sm font-semibold text-slate-700">{s.username}</span>
-                            </label>
-                        {/each}
-                        {#if filteredStaff.length === 0}
-                            <div class="text-xs text-center text-slate-400 py-4 font-bold">Không tìm thấy nhân sự phù hợp</div>
-                        {/if}
-                    </div>
-                </div>
-            </div>
-
-            <div class="p-3 bg-slate-50 border-t flex gap-2 shrink-0">
-                <button class="flex-1 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-100" on:click={() => showAdminModal = false}>Hủy</button>
-                <button class="flex-[2] py-2 rounded-xl bg-cyan-600 text-white font-bold text-sm shadow-md hover:bg-cyan-700 transition-colors" on:click={saveAreaToTemplate}>
-                    {editingAreaId ? 'Cập Nhật' : 'Lưu Khu Vực'}
-                </button>
-            </div>
-        </div>
-    </div>
-{/if}
-
-<style>
-    .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
-    .animate-popIn { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes popIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-</style>
+<ChecklistStatsModal
+    show={showStatsModal}
+    {statsData}
+    {statsLoading}
+    on:close={() => showStatsModal = false}
+/>
