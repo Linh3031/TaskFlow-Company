@@ -3,7 +3,6 @@
     export let show = false;
     export let statsData = { matrix: [], days: [], month: '' };
     export let statsLoading = false;
-
     const dispatch = createEventDispatcher();
     
     let sortBy = 'total'; // 'total' | 'name'
@@ -25,6 +24,13 @@
             sortDesc = field === 'total'; // Mặc định name thì asc, total thì desc
         }
     }
+
+    // [CodeGenesis] Tính toán dòng Tổng cộng toàn kho
+    $: grandTotal = sortedMatrix.reduce((sum, row) => sum + row.total, 0);
+    $: dailyTotals = statsData.days.reduce((acc, day) => {
+        acc[day] = sortedMatrix.reduce((sum, row) => sum + (row.days[day] || 0), 0);
+        return acc;
+    }, {});
 </script>
 
 {#if show}
@@ -45,6 +51,7 @@
         </div>
 
         <div class="flex-1 overflow-auto bg-slate-50 relative">
+            
             {#if statsLoading}
                 <div class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10">
                     <span class="material-icons-round animate-spin text-indigo-500 text-4xl mb-2">sync</span>
@@ -96,6 +103,25 @@
                         </tr>
                     {/if}
                 </tbody>
+                
+                {#if sortedMatrix.length > 0 && !statsLoading}
+                <tfoot class="sticky bottom-0 z-20 bg-indigo-100 text-indigo-900 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
+                    <tr>
+                        <td class="px-4 py-3 border-r border-indigo-200 font-black sticky left-0 bg-indigo-100 z-30 uppercase">
+                            Tổng Toàn Kho
+                        </td>
+                        <td class="px-4 py-3 border-r border-indigo-200 font-black text-center text-lg text-indigo-700">
+                            {grandTotal}
+                        </td>
+                        {#each statsData.days as day}
+                            <td class="px-2 py-3 border-r border-indigo-200 text-center font-bold {dailyTotals[day] ? 'text-indigo-800' : 'text-indigo-300'}">
+                                {dailyTotals[day] || '-'}
+                            </td>
+                        {/each}
+                    </tr>
+                </tfoot>
+                {/if}
+                
             </table>
         </div>
     </div>

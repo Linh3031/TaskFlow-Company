@@ -59,6 +59,10 @@
         {/if}
 
         {#if scheduleData && currentMode === 'NV'}
+            <button class="flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-1 rounded-lg font-bold text-xs shadow hover:bg-amber-100 transition-all border border-amber-200 shrink-0" on:click={() => dispatch('locate')} title="Đến lịch của tôi">
+                <span class="material-icons-round text-[14px]">my_location</span> <span class="hidden sm:inline">Của Tôi</span>
+            </button>
+
             <button class="flex items-center gap-1 bg-slate-100 text-slate-600 px-2 py-1 rounded-lg font-bold text-xs shadow hover:bg-slate-200 transition-all border border-slate-200 shrink-0" on:click={() => showPastDays = !showPastDays} title="Ẩn/Hiện các ngày trước hôm nay">
                 <span class="material-icons-round text-[14px]">{showPastDays ? 'visibility_off' : 'visibility'}</span>
                 <span class="hidden md:inline">{showPastDays ? 'Ẩn ngày cũ' : 'Hiện ngày cũ'}</span>

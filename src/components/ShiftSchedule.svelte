@@ -36,7 +36,6 @@
   
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
-
   let unsubscribe = () => {};
   $: if (activeTab === 'schedule' && $activeStoreId && currentMonthStr && currentMode === 'NV') { 
       loadSchedule(currentMonthStr, $activeStoreId);
@@ -156,8 +155,7 @@
           }).length;
           
           if (currentCount + 1 > quota) { 
-              const msg = quota === 0 ?
-                `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
+              const msg = quota === 0 ? `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
               if (!confirm(msg)) return; 
           } 
       } 
@@ -224,7 +222,6 @@
               }
           }
       });
-
       const customShiftOrder = ['123', '23', '45', '456', '2345', '2-5'];
       const sortedShiftArray = Object.keys(shiftDetails).sort((a, b) => {
           if (a === 'OFF') return 1;
@@ -239,7 +236,6 @@
           shift: key,
           people: shiftDetails[key]
       }));
-
       selectedDayStats = { 
           day, weekday: getWeekday(day), 
           cols, matrix, roles, details, 
@@ -264,6 +260,30 @@
   function handleExportExcel() {
       exportScheduleToExcel({ scheduleData, viewMonth, viewYear, selectedViewStore: $activeStoreId, getWeekday, getWeekendHardRoleCount });
   }
+
+  // [CodeGenesis] Hàm định vị lịch cá nhân của user đang đăng nhập
+  function scrollToMyRow() {
+      if (!$currentUser || !scheduleData || !scheduleData.stats) return;
+      
+      const myStat = scheduleData.stats.find(s => s.id === $currentUser.username || s.name === $currentUser.name);
+      
+      if (myStat) {
+          const row = document.getElementById('staff-row-' + myStat.id);
+          if (row) {
+              row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              
+              const td = row.firstElementChild;
+              if (td) {
+                  td.classList.add('!bg-yellow-200', 'transition-colors', 'duration-500');
+                  setTimeout(() => {
+                      td.classList.remove('!bg-yellow-200');
+                  }, 1500);
+              }
+          }
+      } else {
+          alert("Không tìm thấy tên của bạn trong danh sách hiện tại!");
+      }
+  }
   
   let showScheduleTour = false;
   const scheduleSteps = [ 
@@ -278,6 +298,7 @@
     bind:currentMode={currentMode}
     {myStores} {scheduleData} {isAdmin}
     bind:selectedViewStore={$activeStoreId} bind:viewMonth bind:viewYear bind:showPastDays
+    on:locate={scrollToMyRow}
     on:openHistory={() => showHistoryModal = true}
     on:restoreBackup={handleRestoreBackup}
     on:exportExcel={handleExportExcel}

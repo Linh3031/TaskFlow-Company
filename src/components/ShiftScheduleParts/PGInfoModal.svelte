@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from 'svelte';
     import { db } from '../../lib/firebase';
-    import { doc, updateDoc } from 'firebase/firestore';
+    import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
     const dispatch = createEventDispatcher();
     
@@ -14,7 +14,7 @@
     
     let isEditing = false;
     let isSaving = false;
-
+    
     // Lưu trữ state form
     let form = {
         phone: pg.phone || '',
@@ -30,7 +30,15 @@
         isSaving = true;
         try {
             const ref = doc(db, 'users', pg.id);
-            await updateDoc(ref, form);
+            
+            // CodeGenesis: Thêm Audit Trail khi lưu thông tin
+            const updatePayload = {
+                ...form,
+                lastModifiedBy: currentUser ? currentUser.username : 'Unknown_PGInfoModal',
+                lastUpdatedAt: serverTimestamp()
+            };
+            
+            await updateDoc(ref, updatePayload);
             // Cập nhật lại UI lập tức sau khi lưu
             Object.assign(pg, form);
             isEditing = false;
@@ -156,7 +164,7 @@
                     {#if isSaving} 
                         <span class="material-icons-round text-[14px] animate-spin mr-1">sync</span> Đang lưu... 
                     {:else} 
-                        Lưu Thông Tin 
+                        Lưu Thông Hệ Tin 
                     {/if}
                 </button>
             {:else}

@@ -1,2 +1,0 @@
-SNAPSHOT GROUP: snapshot_features.txt
-

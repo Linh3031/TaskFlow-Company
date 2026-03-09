@@ -10,7 +10,7 @@
     import ChecklistItem from './DailyChecklistParts/ChecklistItem.svelte';
     import AreaAdminModal from './DailyChecklistParts/AreaAdminModal.svelte';
     import LightboxModal from './DailyChecklistParts/LightboxModal.svelte';
-    import ChecklistStatsModal from './DailyChecklistParts/ChecklistStatsModal.svelte'; // MỚI
+    import ChecklistStatsModal from './DailyChecklistParts/ChecklistStatsModal.svelte';
 
     export let activeStoreId;
     export let dateStr;
@@ -20,7 +20,7 @@
     let loading = true;
     let uploadingId = null;
     let unsubscribe = null;
-    let activeRecordId = ''; 
+    let activeRecordId = '';
 
     // State Modals
     let showAdminModal = false;
@@ -94,8 +94,9 @@
             if (isPastDate) await writeDebugLog('DETECTED_MISSING', 'Load template mặc định');
             const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
             const templateSnap = await getDoc(templateRef);
-            // Sửa template: thêm mảng uploaders
-            let defaultData = templateSnap.exists() && templateSnap.data().items ? templateSnap.data().items.map(item => ({ ...item, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null })) : [];
+            
+            let defaultData = templateSnap.exists() && templateSnap.data().items ?
+                templateSnap.data().items.map(item => ({ ...item, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null })) : [];
             
             if (!isPastDate) {
                  await setDoc(dailyRef, { items: defaultData, createdAt: serverTimestamp() });
@@ -111,7 +112,7 @@
                 checklistData = docSnap.data().items.map(i => ({ 
                     ...i, 
                     imageUrls: i.imageUrls || (i.imageUrl ? [i.imageUrl] : []),
-                    uploaders: i.uploaders || [] // Load mảng uploaders
+                    uploaders: i.uploaders || [] 
                 }));
             } else {
                 checklistData = [];
@@ -120,7 +121,7 @@
         });
     }
 
-    // TÍNH NĂNG MỚI: Tải Thống Kê
+    // [CodeGenesis] Phẫu thuật: Fix thất thoát dữ liệu khi tính báo cáo
     async function loadAndShowStats() {
         showStatsModal = true;
         statsLoading = true;
@@ -130,7 +131,6 @@
         const daysArray = Array.from({length: daysInMonth}, (_, i) => i + 1);
         let userStats = {};
 
-        // Tạo ma trận các Promise truy vấn (rất nhẹ vì duyệt theo ID trực tiếp)
         const fetchPromises = daysArray.map(async (day) => {
             const dd = String(day).padStart(2, '0');
             const standardId = `${activeStoreId}_${year}-${month}-${dd}`;
@@ -143,27 +143,31 @@
 
             if (snap.exists() && snap.data().items) {
                 snap.data().items.forEach(item => {
-                    // Ưu tiên đếm theo mảng chi tiết mới
-                    if (item.uploaders && item.uploaders.length > 0) {
-                        item.uploaders.forEach(u => {
-                            if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
-                            userStats[u].days[day] = (userStats[u].days[day] || 0) + 1;
-                            userStats[u].total += 1;
-                        });
-                    } 
-                    // Fallback tương thích dữ liệu cũ
-                    else if (item.completedBy && item.imageUrls && item.imageUrls.length > 0) {
+                    const imagesCount = item.imageUrls ? item.imageUrls.length : 0;
+                    const uploadersList = item.uploaders || [];
+                    
+                    // 1. Ghi nhận chính xác số ảnh từ mảng uploaders mới
+                    uploadersList.forEach(u => {
+                        if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
+                        userStats[u].days[day] = (userStats[u].days[day] || 0) + 1;
+                        userStats[u].total += 1;
+                    });
+
+                    // 2. Tính toán số lượng ảnh "Bóng ma" chưa được định danh
+                    const unattributedImagesCount = imagesCount - uploadersList.length;
+                    
+                    // Nếu còn ảnh chưa biết của ai và có người chốt hạ (completedBy)
+                    if (unattributedImagesCount > 0 && item.completedBy) {
                         const u = item.completedBy;
                         if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
-                        userStats[u].days[day] = (userStats[u].days[day] || 0) + item.imageUrls.length;
-                        userStats[u].total += item.imageUrls.length;
+                        userStats[u].days[day] = (userStats[u].days[day] || 0) + unattributedImagesCount;
+                        userStats[u].total += unattributedImagesCount;
                     }
                 });
             }
         });
 
         await Promise.all(fetchPromises);
-        
         statsData = { month: `${month}/${year}`, days: daysArray, matrix: Object.values(userStats) };
         statsLoading = false;
     }
@@ -177,9 +181,11 @@
             allStaff = snap.docs.map(d => ({ id: d.id, username: d.data().username, role: d.data().role })).filter(s => s.role !== 'admin' && s.role !== 'super_admin' && s.username).sort((a, b) => a.username.localeCompare(b.username));
         }
         if (item) {
-            editingAreaId = item.id; newAreaName = item.areaName; selectedStaffIds = (item.assignees || []).map(a => a.id);
+            editingAreaId = item.id;
+            newAreaName = item.areaName; selectedStaffIds = (item.assignees || []).map(a => a.id);
         } else {
-            editingAreaId = null; newAreaName = ''; selectedStaffIds = [];
+            editingAreaId = null; newAreaName = '';
+            selectedStaffIds = [];
         }
     }
 
@@ -215,12 +221,14 @@
     async function deleteArea(event) {
         const { id, name } = event.detail;
         if (!confirm(`⚠️ XÁC NHẬN XÓA:\nBạn có chắc chắn muốn xóa khu vực "${name}" không?`)) return;
+        
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
         if (snap.exists()) {
             let currentItems = snap.data().items || [];
             await setDoc(templateRef, { items: currentItems.filter(i => i.id !== id) }, { merge: true });
         }
+        
         const dailyRef = getDailyRecordRef();
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
@@ -270,23 +278,20 @@
                 await uploadBytes(imageRef, compressedBlob);
                 return await getDownloadURL(imageRef);
             });
-            
             const newUploadedUrls = await Promise.all(uploadPromises);
             
-            // TÍNH NĂNG MỚI: Mảng ghi lại tên từng người tương ứng với từng ảnh vừa up
             const newUploaders = newUploadedUrls.map(() => $currentUser.username);
-
             const dailyRef = getDailyRecordRef();
             const updatedItems = checklistData.map(i => {
                 if (i.id === itemId) {
                     const mergedUrls = [...(i.imageUrls || []), ...newUploadedUrls];
-                    const mergedUploaders = [...(i.uploaders || []), ...newUploaders]; // Ghép danh sách người up
+                    const mergedUploaders = [...(i.uploaders || []), ...newUploaders];
                     const isNowCompleted = mergedUrls.length >= 4;
                     
                     return { 
                         ...i, 
                         imageUrls: mergedUrls, 
-                        uploaders: mergedUploaders, // Cập nhật mảng
+                        uploaders: mergedUploaders,
                         completed: isNowCompleted, 
                         completedBy: isNowCompleted ? $currentUser.username : i.completedBy, 
                         completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt 

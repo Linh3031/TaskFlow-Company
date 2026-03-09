@@ -8,8 +8,23 @@
 
     const dispatch = createEventDispatcher();
 
-    // Lọc ra danh sách những người đóng góp (loại bỏ trùng lặp)
-    $: uniqueContributors = Array.from(new Set(item.uploaders || (item.completedBy ? [item.completedBy] : []))).join(', ');
+    // [CodeGenesis] Phẫu thuật: Gom toàn bộ người trong mảng VÀ người chốt hạ cuối cùng để không sót ai
+    $: uniqueContributors = (() => {
+        const list = [];
+        
+        // 1. Nhặt tất cả những người đã up ảnh (nếu có)
+        if (item.uploaders && item.uploaders.length > 0) {
+            list.push(...item.uploaders);
+        }
+        
+        // 2. Dự phòng: Luôn nhét thêm người completedBy vào (để cứu dữ liệu cũ)
+        if (item.completedBy) {
+            list.push(item.completedBy);
+        }
+        
+        // 3. Lọc trùng (Set) và loại bỏ các giá trị rỗng/undefined (filter Boolean)
+        return Array.from(new Set(list)).filter(Boolean).join(', ');
+    })();
 </script>
 
 <div class="bg-white p-3 rounded-xl border-y border-r shadow-sm flex flex-col gap-2 transition-all duration-300 {item.completed ? 'bg-slate-50 border-l-4 border-l-green-500 border-y-slate-200 border-r-slate-200 opacity-70 hover:opacity-100' : 'border-l-4 border-l-orange-500 border-y-slate-200 border-r-slate-200 hover:border-cyan-400'}">
@@ -30,7 +45,7 @@
                     </div>
                 {/if}
             </div>
-            
+             
             <div class="text-[11px] text-slate-500 font-semibold mt-0.5 flex items-center gap-1">
                 <span class="material-icons-round text-[14px] text-indigo-400">groups</span>
                 {(item.assignees || []).map(a => a.username).join(', ') || 'Chưa gán người'}

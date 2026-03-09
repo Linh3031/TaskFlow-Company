@@ -1,5 +1,5 @@
 import { db } from '../lib/firebase';
-import { doc, deleteDoc, updateDoc, query, collection, where, getDocs } from 'firebase/firestore';
+import { doc, deleteDoc, updateDoc, query, collection, where, getDocs, serverTimestamp } from 'firebase/firestore';
 
 export const accountService = {
     async loadAccountList(sid) {
@@ -21,16 +21,25 @@ export const accountService = {
         await deleteDoc(doc(db, 'users', uid));
     },
 
-    async changeRole(uid, newRole) {
-        await updateDoc(doc(db, 'users', uid), { role: newRole });
+    async changeRole(uid, newRole, editorName = 'System') {
+        await updateDoc(doc(db, 'users', uid), { 
+            role: newRole,
+            lastModifiedBy: editorName,
+            lastUpdatedAt: serverTimestamp()
+        });
     },
 
     async resetPassword(uid) {
         await updateDoc(doc(db, 'users', uid), { pass: '123456' });
     },
 
-    // Thêm hàm update tài khoản đa kho
-    async updateAccount(uid, data) {
-        await updateDoc(doc(db, 'users', uid), data);
+    // Thêm hàm update tài khoản đa kho an toàn (Gắn Audit Trail)
+    async updateAccount(uid, data, editorName = 'System') {
+        const safeData = {
+            ...data,
+            lastModifiedBy: editorName,
+            lastUpdatedAt: serverTimestamp()
+        };
+        await updateDoc(doc(db, 'users', uid), safeData);
     }
 };

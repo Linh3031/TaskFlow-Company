@@ -15,6 +15,10 @@
     </div>
     
     <div class="flex gap-2">
+        <button class="bg-indigo-50 border border-indigo-200 text-indigo-600 hover:bg-indigo-100 px-2 py-1.5 rounded-lg transition-colors flex items-center justify-center shadow-sm" on:click={() => dispatch('locate')} title="Đến khu vực của tôi">
+            <span class="material-icons-round text-[16px]">my_location</span>
+        </button>
+
         <button class="bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm" on:click={() => dispatch('openStats')}>
             <span class="material-icons-round text-[14px]">bar_chart</span> 
             <span class="hidden sm:inline">Thống Kê Tháng</span>

@@ -41,6 +41,13 @@ src/components/NotificationDropdown.svelte
 src/components/TaskList.svelte
 src/components/AdminModal.svelte
 src/components/CumulativeHistoryModal.svelte
+src/components/DailyChecklistParts
+src/components/DailyChecklistParts/ChecklistStatsModal.svelte
+src/components/DailyChecklistParts/ChecklistItem.svelte
+src/components/DailyChecklistParts/LightboxModal.svelte
+src/components/DailyChecklistParts/ChecklistImageGrid.svelte
+src/components/DailyChecklistParts/AreaAdminModal.svelte
+src/components/DailyChecklistParts/ChecklistHeader.svelte
 src/components/TourGuide.svelte
 src/lib
 src/lib/scheduleGenerator.js
