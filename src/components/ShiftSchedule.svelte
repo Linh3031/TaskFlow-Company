@@ -1,5 +1,5 @@
 <script>
-  // Version 44.0 - Global Store Sync
+  // Version 46.0 - Global Store Sync & Super Radar Locator (Fuzzy Match)
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
@@ -261,11 +261,42 @@
       exportScheduleToExcel({ scheduleData, viewMonth, viewYear, selectedViewStore: $activeStoreId, getWeekday, getWeekendHardRoleCount });
   }
 
-  // [CodeGenesis] Hàm định vị lịch cá nhân của user đang đăng nhập
+  // [CodeGenesis] Lắp đặt Siêu Radar (Fuzzy Match)
   function scrollToMyRow() {
       if (!$currentUser || !scheduleData || !scheduleData.stats) return;
+
+      // Hàm bóc tách từ: Xóa dấu tiếng Việt, xóa khoảng trắng, gạch ngang, đưa về chữ thường viết liền
+      const normalizeStr = (str) => {
+          if (!str) return '';
+          return String(str)
+              .normalize('NFD')                     // Tách dấu ra khỏi chữ
+              .replace(/[\u0300-\u036f]/g, '')      // Xóa các dấu vừa tách
+              .toLowerCase()                        // Đưa về chữ thường
+              .replace(/[^a-z0-9]/g, '');           // Xóa mọi khoảng trắng, gạch ngang, ký tự đặc biệt
+      };
       
-      const myStat = scheduleData.stats.find(s => s.id === $currentUser.username || s.name === $currentUser.name);
+      const cUsername = normalizeStr($currentUser.username);
+      const cName = normalizeStr($currentUser.name);
+      const cId = normalizeStr($currentUser.id);
+
+      const myStat = scheduleData.stats.find(s => {
+          const sId = normalizeStr(s.id);
+          const sName = normalizeStr(s.name);
+          const sUsername = normalizeStr(s.username);
+
+          // 1. So sánh tuyệt đối ID (đã lột bỏ rác)
+          if (sId && (sId === cId || sId === cUsername)) return true;
+          
+          // 2. So sánh tuyệt đối Username (đã lột bỏ rác)
+          if (sUsername && sUsername === cUsername) return true;
+          
+          // 3. So sánh Tên bằng phương pháp nhúng (Includes):
+          // Chỉ cần chuỗi này nằm trong chuỗi kia là hợp lệ (ví dụ: tran4118 nằm trong nguyenthitran4118)
+          if (sName && cName && (sName.includes(cName) || cName.includes(sName))) return true;
+          if (sName && cUsername && (sName.includes(cUsername) || cUsername.includes(sName))) return true;
+          
+          return false;
+      });
       
       if (myStat) {
           const row = document.getElementById('staff-row-' + myStat.id);
@@ -277,11 +308,13 @@
                   td.classList.add('!bg-yellow-200', 'transition-colors', 'duration-500');
                   setTimeout(() => {
                       td.classList.remove('!bg-yellow-200');
-                  }, 1500);
+                  }, 2000);
               }
+          } else {
+              alert("Đã tìm thấy dữ liệu của bạn, nhưng giao diện chưa kịp hiển thị. Vui lòng thử lại!");
           }
       } else {
-          alert("Không tìm thấy tên của bạn trong danh sách hiện tại!");
+          alert(`Không tìm thấy "${$currentUser.name || $currentUser.username}" trong danh sách Lịch làm việc tháng này! Vui lòng báo Quản lý kiểm tra lại.`);
       }
   }
   

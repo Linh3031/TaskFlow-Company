@@ -121,7 +121,43 @@
         });
     }
 
-    // [CodeGenesis] Phẫu thuật: Fix thất thoát dữ liệu khi tính báo cáo
+    // [CodeGenesis Phẫu thuật 8NTTT] - Tìm bằng ID & xuyên thấu DOM lấy thẻ con
+    function scrollToMyArea() {
+        if (!$currentUser) return;
+        
+        const myArea = sortedChecklistData.find(item => 
+            (item.assignees || []).some(a => 
+                a.id === $currentUser.id || 
+                (a.username && a.username.toLowerCase() === $currentUser.username?.toLowerCase())
+            )
+        );
+
+        if (myArea) {
+            const wrapper = document.getElementById('area-' + myArea.id);
+            if (wrapper) {
+                wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Dùng querySelector để bắt trúng lớp div bg-white sinh ra từ ChecklistItem
+                const target = wrapper.querySelector('div.bg-white') || wrapper.querySelector('div.bg-slate-50') || wrapper.firstElementChild;
+                
+                if (target) {
+                    const originalTransition = target.style.transition;
+                    target.style.transition = "all 0.5s ease";
+                    target.classList.add('!bg-yellow-200', '!border-yellow-400', 'shadow-lg');
+                    
+                    setTimeout(() => {
+                        target.classList.remove('!bg-yellow-200', '!border-yellow-400', 'shadow-lg');
+                        target.style.transition = originalTransition;
+                    }, 2000);
+                }
+            } else {
+                 alert("Đã tìm thấy khu vực của bạn nhưng giao diện chưa tải kịp, vui lòng thử lại!");
+            }
+        } else {
+            alert("Hôm nay bạn chưa được phân công phụ trách khu vực 8NTTT nào!");
+        }
+    }
+
     async function loadAndShowStats() {
         showStatsModal = true;
         statsLoading = true;
@@ -146,17 +182,14 @@
                     const imagesCount = item.imageUrls ? item.imageUrls.length : 0;
                     const uploadersList = item.uploaders || [];
                     
-                    // 1. Ghi nhận chính xác số ảnh từ mảng uploaders mới
                     uploadersList.forEach(u => {
                         if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
                         userStats[u].days[day] = (userStats[u].days[day] || 0) + 1;
                         userStats[u].total += 1;
                     });
 
-                    // 2. Tính toán số lượng ảnh "Bóng ma" chưa được định danh
                     const unattributedImagesCount = imagesCount - uploadersList.length;
                     
-                    // Nếu còn ảnh chưa biết của ai và có người chốt hạ (completedBy)
                     if (unattributedImagesCount > 0 && item.completedBy) {
                         const u = item.completedBy;
                         if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
@@ -315,7 +348,7 @@
 
 <div class="w-full h-full flex flex-col bg-slate-50 rounded-xl border border-cyan-200 shadow-sm overflow-hidden relative">
     
-    <ChecklistHeader {isAdmin} on:openAdmin={() => openAdminModal(null)} on:openStats={loadAndShowStats} />
+    <ChecklistHeader {isAdmin} on:openAdmin={() => openAdminModal(null)} on:openStats={loadAndShowStats} on:locate={scrollToMyArea} />
 
     <div class="flex-1 overflow-y-auto p-2 sm:p-3 bg-slate-50 space-y-3">
         {#if loading}
@@ -327,15 +360,17 @@
             </div>
         {:else}
             {#each sortedChecklistData as item (item.id)}
-                <ChecklistItem 
-                    {item} 
-                    {isAdmin} 
-                    {uploadingId}
-                    on:edit={openAdminModal}
-                    on:delete={deleteArea}
-                    on:upload={handleUploadImage}
-                    on:openLightbox={openLightbox}
-                />
+                <div id="area-{item.id}">
+                    <ChecklistItem 
+                        {item} 
+                        {isAdmin} 
+                        {uploadingId}
+                        on:edit={openAdminModal}
+                        on:delete={deleteArea}
+                        on:upload={handleUploadImage}
+                        on:openLightbox={openLightbox}
+                    />
+                </div>
             {/each}
         {/if}
     </div>
