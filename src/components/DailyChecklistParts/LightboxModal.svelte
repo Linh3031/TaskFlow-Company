@@ -29,7 +29,7 @@
     </div>
 
     <div class="w-full h-full max-w-4xl max-h-[85vh] flex items-center justify-center relative" on:click|stopPropagation>
-        <img src={images[currentIndex]} alt="Phóng to" class="max-w-full max-h-full object-contain rounded-md shadow-2xl animate-popIn" on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/800x600/e2e8f0/64748b?text=Anh+Da+Bi+Xoa+Sau+5+Ngay'; }}>
+        <img src={images[currentIndex]} alt="Phóng to" class="max-w-full max-h-full object-contain rounded-md shadow-2xl animate-popIn" on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/800x600/e2e8f0/64748b?text=Anh+Da+Bi+Xoa+Sau+2+Ngay'; }}>
         
         {#if currentIndex > 0}
             <button class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/70 text-white rounded-full p-2 transition-all" on:click|stopPropagation={prev}>

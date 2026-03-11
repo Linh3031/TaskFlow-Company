@@ -10,7 +10,16 @@
 <div class="flex flex-wrap gap-2 mt-1">
     {#each (item.imageUrls || []) as url, index}
         <button class="w-14 h-14 sm:w-16 sm:h-16 rounded-lg border border-slate-200 shadow-sm overflow-hidden bg-slate-100 flex items-center justify-center group relative outline-none" on:click={() => dispatch('openLightbox', { images: item.imageUrls, index })}>
-            <img src={url} alt="Checklist pic" class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/100x100/e2e8f0/64748b?text=Da+Xoa'; }}>
+            
+            <img 
+                src={url} 
+                alt="Checklist pic" 
+                loading="lazy" 
+                decoding="async"
+                class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" 
+                on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/100x100/e2e8f0/64748b?text=Da+Xoa'; }}
+            >
+            
             <span class="material-icons-round text-white absolute text-sm drop-shadow-md opacity-0 group-hover:opacity-100">zoom_in</span>
         </button>
     {/each}

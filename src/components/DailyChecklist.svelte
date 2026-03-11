@@ -264,20 +264,41 @@
         }
     }
 
-    function compressImage(file, maxWidth = 1000, quality = 0.7) {
+    function compressImage(file, maxEdge = 800, quality = 0.5) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
             reader.onload = (event) => {
-                const img = new Image(); img.src = event.target.result;
+                const img = new Image(); 
+                img.src = event.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    let width = img.width, height = img.height;
-                    if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
-                    canvas.width = width; canvas.height = height;
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    // [CodeGenesis] Logic Cạnh Dài Nhất: Xử lý triệt để ảnh chụp Dọc (Portrait)
+                    if (width > height) {
+                        if (width > maxEdge) {
+                            height = Math.round((height * maxEdge) / width);
+                            width = maxEdge;
+                        }
+                    } else {
+                        if (height > maxEdge) {
+                            width = Math.round((width * maxEdge) / height);
+                            height = maxEdge;
+                        }
+                    }
+
+                    canvas.width = width; 
+                    canvas.height = height;
                     const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, width, height);
+                    
+                    // Lót nền trắng phòng trường hợp ảnh gốc bị lỗi alpha channel
+                    ctx.fillStyle = '#FFFFFF'; 
+                    ctx.fillRect(0, 0, width, height);
                     ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Xuất ra file JPEG với chất lượng 50%
                     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
                 };
                 img.onerror = (err) => reject(err);
@@ -303,7 +324,7 @@
             const uploadPromises = filesToProcess.map(async (file) => {
                 const compressedBlob = await compressImage(file);
                 const fileName = `8nttt_${activeStoreId}_${dateStr}_${itemId}_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-                const imageRef = ref(storage, `8nttt_images/${fileName}`);
+                const imageRef = ref(storage, `8nttt_images/${activeStoreId}/${dateStr}/${fileName}`);
                 await uploadBytes(imageRef, compressedBlob);
                 return await getDownloadURL(imageRef);
             });
