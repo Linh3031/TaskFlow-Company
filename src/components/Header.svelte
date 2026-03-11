@@ -100,7 +100,7 @@
       showNotifDropdown = false;
   }
 
-  $: if ($currentUser) {
+ $: if ($currentUser) {
       if (unsubNotif) {
           unsubNotif();
           unsubNotif = null;
@@ -108,15 +108,20 @@
 
       const username = $currentUser.username;
       const userVariants = [...new Set([username, username.toLowerCase()])];
+      
+      // [CodeGenesis] LƯỢC BỎ orderBy để né lỗi Composite Index
       const q = query(
           collection(db, 'notifications'), 
-          where('toUser', 'in', userVariants),
-          orderBy('createdAt', 'desc'),
-          limit(20)
+          where('toUser', 'in', userVariants)
       );
 
       unsubNotif = onSnapshot(q, (snapshot) => {
-          notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
+          notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}))
+              // [CodeGenesis] Tự động sắp xếp (sort) ngày tháng mới nhất trên RAM
+              .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0))
+              // Cắt lấy 20 thông báo mới nhất (thay thế cho limit)
+              .slice(0, 20);
+              
           unreadCount = notifications.filter(n => !n.isRead).length;
       }, (error) => {
           console.error("Lỗi tải thông báo:", error);
