@@ -1,7 +1,8 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
     import { db, storage } from '../lib/firebase';
-    import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, query, where, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore';
+    // Đã thêm runTransaction vào đây
+    import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, query, where, updateDoc, serverTimestamp, addDoc, runTransaction } from 'firebase/firestore';
     import { currentUser } from '../lib/stores';
     import { getCurrentTimeShort, getTodayStr } from '../lib/utils';
     import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -21,7 +22,7 @@
     let uploadingId = null;
     let unsubscribe = null;
     let activeRecordId = '';
-
+    
     // State Modals
     let showAdminModal = false;
     let editingAreaId = null;
@@ -32,7 +33,7 @@
     let showLightbox = false;
     let lightboxImages = [];
     let lightboxIndex = 0;
-
+    
     // State Thống Kê
     let showStatsModal = false;
     let statsData = { matrix: [], days: [], month: '' };
@@ -97,7 +98,6 @@
             
             let defaultData = templateSnap.exists() && templateSnap.data().items ?
                 templateSnap.data().items.map(item => ({ ...item, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null })) : [];
-            
             if (!isPastDate) {
                  await setDoc(dailyRef, { items: defaultData, createdAt: serverTimestamp() });
             } else {
@@ -121,23 +121,18 @@
         });
     }
 
-    // [CodeGenesis Phẫu thuật 8NTTT] - Tìm bằng ID & xuyên thấu DOM lấy thẻ con
     function scrollToMyArea() {
         if (!$currentUser) return;
-        
         const myArea = sortedChecklistData.find(item => 
             (item.assignees || []).some(a => 
                 a.id === $currentUser.id || 
                 (a.username && a.username.toLowerCase() === $currentUser.username?.toLowerCase())
             )
         );
-
         if (myArea) {
             const wrapper = document.getElementById('area-' + myArea.id);
             if (wrapper) {
                 wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Dùng querySelector để bắt trúng lớp div bg-white sinh ra từ ChecklistItem
                 const target = wrapper.querySelector('div.bg-white') || wrapper.querySelector('div.bg-slate-50') || wrapper.firstElementChild;
                 
                 if (target) {
@@ -166,7 +161,6 @@
         const daysInMonth = new Date(year, month, 0).getDate();
         const daysArray = Array.from({length: daysInMonth}, (_, i) => i + 1);
         let userStats = {};
-
         const fetchPromises = daysArray.map(async (day) => {
             const dd = String(day).padStart(2, '0');
             const standardId = `${activeStoreId}_${year}-${month}-${dd}`;
@@ -189,7 +183,6 @@
                     });
 
                     const unattributedImagesCount = imagesCount - uploadersList.length;
-                    
                     if (unattributedImagesCount > 0 && item.completedBy) {
                         const u = item.completedBy;
                         if (!userStats[u]) userStats[u] = { name: u, total: 0, days: {} };
@@ -215,9 +208,11 @@
         }
         if (item) {
             editingAreaId = item.id;
-            newAreaName = item.areaName; selectedStaffIds = (item.assignees || []).map(a => a.id);
+            newAreaName = item.areaName; 
+            selectedStaffIds = (item.assignees || []).map(a => a.id);
         } else {
-            editingAreaId = null; newAreaName = '';
+            editingAreaId = null; 
+            newAreaName = '';
             selectedStaffIds = [];
         }
     }
@@ -254,7 +249,6 @@
     async function deleteArea(event) {
         const { id, name } = event.detail;
         if (!confirm(`⚠️ XÁC NHẬN XÓA:\nBạn có chắc chắn muốn xóa khu vực "${name}" không?`)) return;
-        
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
         if (snap.exists()) {
@@ -292,6 +286,7 @@
         });
     }
 
+    // [CodeGenesis] Phẫu thuật Giao dịch Nguyên tử (Transaction) cho Upload
     async function handleUploadImage(eventObj) {
         const { event, itemId } = eventObj.detail;
         const files = event.target.files;
@@ -304,6 +299,7 @@
         
         uploadingId = itemId;
         try {
+            // Bước 1: Upload ảnh lên Storage (Độc lập)
             const uploadPromises = filesToProcess.map(async (file) => {
                 const compressedBlob = await compressImage(file);
                 const fileName = `8nttt_${activeStoreId}_${dateStr}_${itemId}_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
@@ -311,30 +307,47 @@
                 await uploadBytes(imageRef, compressedBlob);
                 return await getDownloadURL(imageRef);
             });
-            const newUploadedUrls = await Promise.all(uploadPromises);
             
+            const newUploadedUrls = await Promise.all(uploadPromises);
             const newUploaders = newUploadedUrls.map(() => $currentUser.username);
+            
+            // Bước 2: Dùng Transaction Đọc -> Hòa trộn -> Ghi dữ liệu đồng bộ
             const dailyRef = getDailyRecordRef();
-            const updatedItems = checklistData.map(i => {
-                if (i.id === itemId) {
-                    const mergedUrls = [...(i.imageUrls || []), ...newUploadedUrls];
-                    const mergedUploaders = [...(i.uploaders || []), ...newUploaders];
-                    const isNowCompleted = mergedUrls.length >= 4;
-                    
-                    return { 
-                        ...i, 
-                        imageUrls: mergedUrls, 
-                        uploaders: mergedUploaders,
-                        completed: isNowCompleted, 
-                        completedBy: isNowCompleted ? $currentUser.username : i.completedBy, 
-                        completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt 
-                    };
-                }
-                return i;
+            
+            await runTransaction(db, async (transaction) => {
+                const dailyDoc = await transaction.get(dailyRef);
+                
+                // Nếu bản ghi chưa có (dù hiếm), khởi tạo rỗng
+                let serverItems = dailyDoc.exists() ? (dailyDoc.data().items || []) : checklistData;
+                
+                const updatedItems = serverItems.map(i => {
+                    if (i.id === itemId) {
+                        // Hòa trộn an toàn dữ liệu đang có thực tế trên server và ảnh mới up
+                        const mergedUrls = [...(i.imageUrls || []), ...newUploadedUrls];
+                        const mergedUploaders = [...(i.uploaders || []), ...newUploaders];
+                        const isNowCompleted = mergedUrls.length >= 4;
+                        
+                        return { 
+                            ...i, 
+                            imageUrls: mergedUrls, 
+                            uploaders: mergedUploaders,
+                            completed: isNowCompleted, 
+                            completedBy: isNowCompleted ? $currentUser.username : i.completedBy, 
+                            completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt 
+                        };
+                    }
+                    return i;
+                });
+
+                transaction.set(dailyRef, { items: updatedItems, createdAt: dailyDoc.exists() ? dailyDoc.data().createdAt : serverTimestamp() }, { merge: true });
             });
-            await setDoc(dailyRef, { items: updatedItems, createdAt: serverTimestamp() }, { merge: true });
-        } catch (error) { alert("Lỗi tải ảnh lên: " + error.message); } 
-        finally { uploadingId = null; event.target.value = null; }
+
+        } catch (error) { 
+            alert("Lỗi tải ảnh lên: " + error.message);
+        } finally { 
+            uploadingId = null; 
+            event.target.value = null;
+        }
     }
 
     function openLightbox(event) {

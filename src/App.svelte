@@ -1,5 +1,5 @@
 <script>
-  // Version 12.0 - Bật lại tính năng Bàn Giao (Handover)
+  // Version 12.1 - Cập nhật kịch bản Tour Guide mới
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
@@ -15,6 +15,7 @@
   import ShiftSchedule from './components/ShiftSchedule.svelte';
   import DailyChecklist from './components/DailyChecklist.svelte'; 
   import HandoverInput from './components/HandoverInput.svelte';
+  import Chatbot from './components/Chatbot.svelte';
 
   let activeTab = '8nttt';
   let showAdminModal = false;
@@ -25,13 +26,40 @@
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
 
+  // [CodeGenesis] Cập nhật kịch bản TourGuide chi tiết cho các Tab mới
   const tourSteps = [
-      { target: '.app-header', title: 'Xin chào!', content: 'Chào mừng bạn đến với TaskFlow.' },
-      { target: '#tab-nav-container', title: 'Chuyển Đổi Bộ Phận', content: 'Chuyển giữa: 8NTTT, Trả Góp, Lịch Ca.' },
-      { target: '#date-navigator', title: 'Chọn Ngày', content: 'Bấm < hoặc > để chuyển ngày.' },
-      { target: '#btn-notif', title: 'Thông Báo', content: 'Xem ai nhắc tên bạn.' },
-      { target: '#btn-admin', title: 'Cài Đặt', content: 'Cấu hình hệ thống.' }
+      { 
+          target: '.app-header', 
+          title: '1. Xin chào!', 
+          content: 'Chào mừng bạn đến với TaskFlow. Giao diện đã được nâng cấp để tối ưu trải nghiệm của bạn.' 
+      },
+      { 
+          target: '#store-selector-tour', 
+          title: '2. Chọn Kho Làm Việc', 
+          content: 'Nếu bạn quản lý nhiều kho, hãy bấm vào đây để chuyển đổi dữ liệu giữa các siêu thị.' 
+      },
+      { 
+          target: '#tab-nav-container', 
+          title: '3. Thanh Chức Năng', 
+          content: 'Chuyển đổi cực nhanh giữa các bộ phận: <b>8NTTT</b>, <b>Trả Góp</b>, <b>Lịch Ca</b> và <b>Bàn Giao</b>.' 
+      },
+      { 
+          target: '#date-navigator', 
+          title: '4. Điều Hướng Ngày', 
+          content: 'Bấm mũi tên trái/phải hoặc chọn trực tiếp vào ngày ở giữa để xem dữ liệu của ngày khác.' 
+      },
+      { 
+          target: '#btn-notif', 
+          title: '5. Trung Tâm Thông Báo', 
+          content: 'Các nhắc nhở, tag tên hoặc biến động dữ liệu sẽ báo đỏ tại đây.' 
+      },
+      { 
+          target: '#btn-help', 
+          title: '6. Xem Lại Hướng Dẫn', 
+          content: 'Bất cứ khi nào bạn quên cách dùng, hãy bấm vào biểu tượng "Dấu hỏi chấm" này nhé!' 
+      }
   ];
+
   let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
@@ -43,12 +71,14 @@
       const [y, m, d] = selectedDate.split('-');
       return `${d}/${m}`;
   })();
+
   $: displayDayOfWeek = (() => {
       if (!selectedDate) return '';
       const date = new Date(selectedDate);
       const days = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
       return days[date.getDay()];
   })();
+
   function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
@@ -74,6 +104,7 @@
     });
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
+
   onDestroy(() => { unsubStores(); unsubTemplate(); unsubTasks(); });
 
   // Khởi tạo activeStoreId toàn cục khi đăng nhập
@@ -87,6 +118,7 @@
 
   // Tải dữ liệu khi kho toàn cục thay đổi
   $: if ($currentUser && $activeStoreId) loadDataForUser($activeStoreId, selectedDate);
+
   $: if ($currentUser && $activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
            initDailyTasksSafe($activeStoreId, selectedDate, $currentTasks, $taskTemplate);
@@ -149,6 +181,7 @@
       unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
           taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
       });
+
       const q = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
       unsubTasks = onSnapshot(q, (snapshot) => {
           const tasks = [];
@@ -227,7 +260,7 @@
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
                  {#if $currentUser.role === 'super_admin'}
-                      🛡️ View: <span class="text-indigo-600 font-bold ml-1">{$activeStoreId}</span>
+                   🛡️ View: <span class="text-indigo-600 font-bold ml-1">{$activeStoreId}</span>
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
@@ -279,6 +312,11 @@
   {#if showAdminModal} <AdminModal on:close={() => showAdminModal = false} on:switchTab={(e) => { activeTab = e.detail; showAdminModal = false; }} /> {/if}
   {#if showTaskModal && selectedTask} <TaskModal taskTitle={selectedTask.title} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> {/if}
   {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
+   {#if showAdminModal} <AdminModal on:close={() => showAdminModal = false} on:switchTab={(e) => { activeTab = e.detail; showAdminModal = false; }} /> {/if}
+  {#if showTaskModal && selectedTask} <TaskModal taskTitle={selectedTask.title} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> {/if}
+  {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
+  
+  <Chatbot />
 </main>
 
 <style>

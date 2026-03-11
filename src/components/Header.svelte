@@ -1,5 +1,5 @@
 <script>
-  // Version 12.0 - Thêm Global Store Selector
+  // Version 12.1 - Thêm ID định vị cho TourGuide
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { currentUser, setUser, activeStoreId, storeList } from '../lib/stores';
   import { db } from '../lib/firebase';
@@ -108,7 +108,6 @@
 
       const username = $currentUser.username;
       const userVariants = [...new Set([username, username.toLowerCase()])];
-      
       const q = query(
           collection(db, 'notifications'), 
           where('toUser', 'in', userVariants),
@@ -147,7 +146,7 @@
   <div class="flex items-center gap-2 relative">
     
     {#if $currentUser?.role === 'super_admin'}
-        <div class="relative mr-1">
+        <div id="store-selector-tour" class="relative mr-1">
             <select bind:value={$activeStoreId} class="appearance-none bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold py-1.5 pl-3 pr-7 rounded-lg text-sm outline-none cursor-pointer shadow-sm">
                 <option value="908">Kho 908</option>
                 {#each $storeList as s}
@@ -157,7 +156,7 @@
             <span class="material-icons-round absolute right-1.5 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">expand_more</span>
         </div>
     {:else if ($currentUser?.storeIds || []).length > 1}
-        <div class="relative mr-1">
+        <div id="store-selector-tour" class="relative mr-1">
             <select bind:value={$activeStoreId} class="appearance-none bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold py-1.5 pl-3 pr-7 rounded-lg text-sm outline-none cursor-pointer shadow-sm">
                 {#each $currentUser.storeIds as s}
                     <option value={s}>{s}</option>
@@ -166,6 +165,7 @@
             <span class="material-icons-round absolute right-1.5 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">expand_more</span>
         </div>
     {/if}
+
     {#if showInstallBtn}
       <button 
         id="btn-install"
