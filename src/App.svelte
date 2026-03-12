@@ -1,5 +1,5 @@
 <script>
-  // Version 13.0 - [CodeGenesis] Dual-Channel Data Fetching (Fix Handover Desync)
+  // Version 16.0 - [CodeGenesis] Cache-First Stores, Dual-Channel Tasks & Force Update PWA
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
@@ -18,6 +18,10 @@
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
 
+  // [CodeGenesis] Quản lý Phiên bản PWA
+  const APP_VERSION = 1; // Tăng số này lên khi bạn có bản cập nhật mới
+  let showUpdatePrompt = false;
+
   let activeTab = '8nttt';
   let showAdminModal = false;
   let showTaskModal = false;
@@ -27,20 +31,17 @@
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
   
-  // Cập nhật kịch bản TourGuide chi tiết cho các Tab mới
   const tourSteps = [
-      { target: '.app-header', title: '1. Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Giao diện đã được nâng cấp để tối ưu trải nghiệm của bạn.' },
-      { target: '#store-selector-tour', title: '2. Chọn Kho Làm Việc', content: 'Nếu bạn quản lý nhiều kho, hãy bấm vào đây để chuyển đổi dữ liệu giữa các siêu thị.' },
-      { target: '#tab-nav-container', title: '3. Thanh Chức Năng', content: 'Chuyển đổi cực nhanh giữa các bộ phận: <b>8NTTT</b>, <b>Trả Góp</b>, <b>Lịch Ca</b> và <b>Bàn Giao</b>.' },
-      { target: '#date-navigator', title: '4. Điều Hướng Ngày', content: 'Bấm mũi tên trái/phải hoặc chọn trực tiếp vào ngày ở giữa để xem dữ liệu của ngày khác.' },
-      { target: '#btn-notif', title: '5. Trung Tâm Thông Báo', content: 'Các nhắc nhở, tag tên hoặc biến động dữ liệu sẽ báo đỏ tại đây.' },
-      { target: '#btn-help', title: '6. Xem Lại Hướng Dẫn', content: 'Bất cứ khi nào bạn quên cách dùng, hãy bấm vào biểu tượng "Dấu hỏi chấm" này nhé!' }
+      { target: '.app-header', title: '1. Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Giao diện đã được nâng cấp.' },
+      { target: '#store-selector-tour', title: '2. Chọn Kho', content: 'Chuyển đổi dữ liệu giữa các siêu thị.' },
+      { target: '#tab-nav-container', title: '3. Chức Năng', content: 'Chuyển đổi cực nhanh giữa các bộ phận.' },
+      { target: '#date-navigator', title: '4. Ngày tháng', content: 'Bấm mũi tên hoặc chọn ngày để xem quá khứ/tương lai.' },
+      { target: '#btn-notif', title: '5. Thông Báo', content: 'Nhắc nhở, tag tên sẽ báo đỏ tại đây.' },
+      { target: '#btn-help', title: '6. Hướng Dẫn', content: 'Xem lại hướng dẫn bất cứ lúc nào.' }
   ];
 
-  let unsubStores = () => {};
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
-  // [CodeGenesis] Kênh lắng nghe Handover độc lập
   let unsubHandover = () => {}; 
   
   let hasCheckedInit = false; 
@@ -78,17 +79,36 @@
       isTasksLoaded = false; 
   }
 
-  onMount(() => {
-    unsubStores = onSnapshot(collection(db, 'stores'), (snap) => {
-        storeList.set(snap.docs.map(d => ({id:d.id, ...d.data()})));
+  onMount(async () => {
+    // [CodeGenesis] CACHE-FIRST LOGIC CHO CỬA HÀNG (Cứu hàng ngàn lượt Reads)
+    const cachedStores = localStorage.getItem('taskflow_stores_list');
+    if (cachedStores) {
+        storeList.set(JSON.parse(cachedStores));
+    } else {
+        try {
+            const snap = await getDocs(collection(db, 'stores'));
+            const stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
+            storeList.set(stores);
+            localStorage.setItem('taskflow_stores_list', JSON.stringify(stores));
+        } catch (e) { console.error("Lỗi tải danh sách cửa hàng", e); }
+    }
+
+    // [CodeGenesis] Lắng nghe Công tắc Phiên bản từ Firebase
+    onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
+        if (docSnap.exists()) {
+            const serverVersion = docSnap.data().currentVersion || 1;
+            // Nếu Server có số lớn hơn Code hiện tại -> Bật còi báo động!
+            if (serverVersion > APP_VERSION) {
+                showUpdatePrompt = true;
+            }
+        }
     });
+
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
   
-  // [CodeGenesis] Dọn dẹp cả kênh Handover
-  onDestroy(() => { unsubStores(); unsubTemplate(); unsubTasks(); unsubHandover(); });
+  onDestroy(() => { unsubTemplate(); unsubTasks(); unsubHandover(); });
 
-  // Khởi tạo activeStoreId toàn cục khi đăng nhập
   $: if ($currentUser && !$activeStoreId) {
       if ($currentUser.storeIds && $currentUser.storeIds.length > 0) {
           $activeStoreId = $currentUser.storeIds[0];
@@ -97,7 +117,6 @@
       }
   }
 
-  // Tải dữ liệu khi kho toàn cục thay đổi
   $: if ($currentUser && $activeStoreId) loadDataForUser($activeStoreId, selectedDate);
   
   $: if ($currentUser && $activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
@@ -127,21 +146,14 @@
                   const fixedID = generateFixedID(storeId, dateStr, type, tpl.title);
                   const existsByID = currentTasks.some(t => t.id === fixedID);
                   const existsByTitle = currentTasks.some(t => 
-                      t.title.trim().toLowerCase() === tpl.title.trim().toLowerCase() && 
-                      t.type === type
+                      t.title.trim().toLowerCase() === tpl.title.trim().toLowerCase() && t.type === type
                   );
 
                   if (!existsByID && !existsByTitle) {
                       const docRef = doc(db, 'tasks', fixedID);
                       batch.set(docRef, {
-                          title: tpl.title.trim(),
-                          timeSlot: tpl.time,
-                          isImportant: tpl.isImportant || false,
-                          type: type,
-                          storeId: storeId,
-                          date: dateStr,
-                          completed: false,
-                          createdBy: 'System',
+                          title: tpl.title.trim(), timeSlot: tpl.time, isImportant: tpl.isImportant || false,
+                          type: type, storeId: storeId, date: dateStr, completed: false, createdBy: 'System',
                           timestamp: serverTimestamp()
                       });
                       hasUpdates = true;
@@ -155,7 +167,6 @@
       }
   }
 
-  // [CodeGenesis] Phẫu thuật Giao thức 2 Kênh
   function loadDataForUser(storeId, dateStr) {
       if(unsubTemplate) unsubTemplate();
       if(unsubTasks) unsubTasks();
@@ -168,40 +179,25 @@
       let dailyTasks = [];
       let handoverTasks = [];
 
-      // Hàm gộp dữ liệu từ 2 kênh
       const updateStore = () => {
           const allTasks = [...dailyTasks, ...handoverTasks];
           const uniqueMap = new Map();
-          // Map sẽ tự động ghi đè các task trùng ID, đảm bảo không bị lặp
           allTasks.forEach(t => uniqueMap.set(t.id, t));
           currentTasks.set(Array.from(uniqueMap.values()));
           isTasksLoaded = true; 
       };
 
-      // KÊNH 1: Cào việc trong ngày (Kho, Thu ngân, Bàn giao tạo hôm nay)
       const qDaily = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
       unsubTasks = onSnapshot(qDaily, (snapshot) => {
           dailyTasks = [];
-          snapshot.forEach(doc => {
-              const data = doc.data();
-              if (data.type) dailyTasks.push({ id: doc.id, ...data });
-          });
+          snapshot.forEach(doc => { const data = doc.data(); if (data.type) dailyTasks.push({ id: doc.id, ...data }); });
           updateStore();
       });
 
-      // KÊNH 2: Cào việc Bàn Giao CHƯA HOÀN THÀNH (Bất chấp ngày tháng)
-      const qHandover = query(
-          collection(db, 'tasks'), 
-          where('storeId', '==', storeId), 
-          where('type', '==', 'handover'),
-          where('completed', '==', false)
-      );
+      const qHandover = query(collection(db, 'tasks'), where('storeId', '==', storeId), where('type', '==', 'handover'), where('completed', '==', false));
       unsubHandover = onSnapshot(qHandover, (snapshot) => {
           handoverTasks = [];
-          snapshot.forEach(doc => {
-              const data = doc.data();
-              if (data.type) handoverTasks.push({ id: doc.id, ...data });
-          });
+          snapshot.forEach(doc => { const data = doc.data(); if (data.type) handoverTasks.push({ id: doc.id, ...data }); });
           updateStore();
       });
   }
@@ -211,16 +207,12 @@
     if (task.completed) {
       if(confirm('Hoàn tác (Undo)?')) {
           const user = $currentUser.name || $currentUser.username;
-          const time = getCurrentTimeShort();
           updateDoc(doc(db, 'tasks', task.id), { 
-              completed: false, 
-              history: arrayUnion({ action: 'undo', user, time, fullTime: new Date().toISOString() })
+              completed: false, history: arrayUnion({ action: 'undo', user, time: getCurrentTimeShort(), fullTime: new Date().toISOString() })
           });
       }
     } else {
-      selectedTask = task;
-      noteInput = '';
-      showTaskModal = true;
+      selectedTask = task; noteInput = ''; showTaskModal = true;
     }
   }
 
@@ -246,6 +238,23 @@
           el.style.backgroundColor = "#fff9c4"; 
           setTimeout(() => { el.style.backgroundColor = ""; }, 2000);
       } else { alert("Không tìm thấy công việc này!"); }
+  }
+
+  // [CodeGenesis] Hàm ép cập nhật PWA
+  async function forceUpdateApp() {
+      if ('caches' in window) {
+          try {
+              const cacheNames = await caches.keys();
+              await Promise.all(cacheNames.map(name => caches.delete(name)));
+          } catch (err) { console.error(err); }
+      }
+      if ('serviceWorker' in navigator) {
+          try {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              for (let reg of regs) await reg.unregister();
+          } catch (err) { console.error(err); }
+      }
+      window.location.href = window.location.pathname + "?v=" + new Date().getTime();
   }
 </script>
 
@@ -304,16 +313,11 @@
           {/if}
         </div>
 
-        {#if activeTab === 'installment'} 
-             <InstallmentCalc /> 
-        {:else if activeTab === 'schedule'} 
-            <ShiftSchedule {activeTab} /> 
-        {:else if activeTab === '8nttt'} 
-            <DailyChecklist activeStoreId={$activeStoreId} dateStr={selectedDate} />
+        {#if activeTab === 'installment'} <InstallmentCalc /> 
+        {:else if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> 
+        {:else if activeTab === '8nttt'} <DailyChecklist activeStoreId={$activeStoreId} dateStr={selectedDate} />
         {:else} 
-            {#if activeTab === 'handover'}
-                 <HandoverInput />
-            {/if}
+            {#if activeTab === 'handover'} <HandoverInput /> {/if}
             <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
         {/if}
       </div>
@@ -325,6 +329,21 @@
   {#if showTaskModal && selectedTask} <TaskModal taskTitle={selectedTask.title} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> {/if}
   {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
   
+  {#if showUpdatePrompt}
+  <div class="fixed inset-0 z-[9999] bg-slate-900/80 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div class="bg-white p-6 rounded-2xl shadow-2xl text-center max-w-sm w-full animate-popIn">
+          <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span class="material-icons-round text-3xl">system_update</span>
+          </div>
+          <h3 class="text-xl font-black text-slate-800 mb-2">Đã có bản cập nhật mới!</h3>
+          <p class="text-sm text-slate-500 mb-6">Hệ thống vừa được nâng cấp tính năng và sửa lỗi. Vui lòng cập nhật để sử dụng ổn định nhất.</p>
+          <button class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-colors" on:click={forceUpdateApp}>
+              Tải Cập Nhật Ngay
+          </button>
+      </div>
+  </div>
+  {/if}
+
   <Chatbot />
 </main>
 
@@ -344,4 +363,7 @@
   footer { flex-shrink: 0; text-align: center; padding: 10px; color: #999; font-size: 0.75rem; font-weight: 700; background: #f4f7fc; }
   .theme-8nttt h3 { color: #00bcd4; }
   .theme-handover h3 { color: #9c27b0; }
+  
+  .animate-popIn { animation: popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+  @keyframes popIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
 </style>

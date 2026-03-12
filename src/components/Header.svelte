@@ -1,5 +1,5 @@
 <script>
-  // Version 12.1 - Thêm ID định vị cho TourGuide
+  // Version 16.0 - [CodeGenesis] PWA Cache Nuke & Notification Quota Shield
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { currentUser, setUser, activeStoreId, storeList } from '../lib/stores';
   import { db } from '../lib/firebase';
@@ -21,13 +21,8 @@
 
     const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
     const isInStandaloneMode = ('standalone' in window.navigator) && (window.navigator.standalone);
-    
-    if (isIos && !isInStandaloneMode) {
-      showInstallBtn = true;
-    }
-    if ($currentUser?.role?.includes('admin')) {
-      showInstallBtn = true;
-    }
+    if (isIos && !isInStandaloneMode) showInstallBtn = true;
+    if ($currentUser?.role?.includes('admin')) showInstallBtn = true;
   });
 
   function handleInstall() {
@@ -37,9 +32,7 @@
     } else if (deferredPrompt) {
       deferredPrompt.prompt();
       deferredPrompt.userChoice.then((choiceResult) => {
-        if (choiceResult.outcome === 'accepted') {
-            showInstallBtn = false;
-        }
+        if (choiceResult.outcome === 'accepted') showInstallBtn = false;
         deferredPrompt = null;
       });
     } else {
@@ -49,18 +42,35 @@
     }
   }
 
-  function handleLogout() {
+  // [CodeGenesis] Diệt Cache PWA Tận Gốc
+  async function handleLogout() {
     if(confirm("Đăng xuất khỏi hệ thống?")) {
         setUser(null);
-        window.location.reload();
+        
+        if ('caches' in window) {
+            try {
+                const cacheNames = await caches.keys();
+                await Promise.all(cacheNames.map(name => caches.delete(name)));
+            } catch (err) { console.error("Lỗi xóa cache", err); }
+        }
+        
+        if ('serviceWorker' in navigator) {
+            try {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                for (let registration of registrations) {
+                    await registration.unregister();
+                }
+            } catch (err) { console.error("Lỗi xóa SW", err); }
+        }
+
+        // Tải lại bằng Query param để lách cache trình duyệt
+        window.location.href = window.location.pathname + "?t=" + new Date().getTime();
     }
   }
 
   // --- LOGIC ĐỔI MẬT KHẨU ---
   let showProfileModal = false;
-  let oldPass = '';
-  let newPass = '';
-  let changePassLoading = false;
+  let oldPass = ''; let newPass = ''; let changePassLoading = false;
 
   async function handleChangePassword() {
       if (!oldPass || !newPass) return alert("Vui lòng nhập đầy đủ thông tin!");
@@ -75,11 +85,8 @@
           alert("✅ Đổi mật khẩu thành công!");
           showProfileModal = false;
           oldPass = ''; newPass = '';
-      } catch (e) { 
-          alert("Lỗi: " + e.message);
-      } finally { 
-          changePassLoading = false;
-      }
+      } catch (e) { alert("Lỗi: " + e.message); } 
+      finally { changePassLoading = false; }
   }
 
   // --- LOGIC THÔNG BÁO ---
@@ -90,9 +97,7 @@
   let notifContainer;
 
   function handleWindowClick(event) {
-      if (showNotifDropdown && notifContainer && !notifContainer.contains(event.target)) {
-          showNotifDropdown = false;
-      }
+      if (showNotifDropdown && notifContainer && !notifContainer.contains(event.target)) showNotifDropdown = false;
   }
 
   function forwardJump(event) {
@@ -100,37 +105,29 @@
       showNotifDropdown = false;
   }
 
- $: if ($currentUser) {
-      if (unsubNotif) {
-          unsubNotif();
-          unsubNotif = null;
-      }
+  // [CodeGenesis] Khiên bảo vệ Quota Firebase
+  $: if ($currentUser) {
+      if (unsubNotif) { unsubNotif(); unsubNotif = null; }
 
       const username = $currentUser.username;
       const userVariants = [...new Set([username, username.toLowerCase()])];
       
-      // [CodeGenesis] LƯỢC BỎ orderBy để né lỗi Composite Index
       const q = query(
           collection(db, 'notifications'), 
-          where('toUser', 'in', userVariants)
+          where('toUser', 'in', userVariants),
+          orderBy('createdAt', 'desc'),
+          limit(20) // CHỐT CHẶN CỨU MẠNG QUOTA!
       );
 
       unsubNotif = onSnapshot(q, (snapshot) => {
-          notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}))
-              // [CodeGenesis] Tự động sắp xếp (sort) ngày tháng mới nhất trên RAM
-              .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0))
-              // Cắt lấy 20 thông báo mới nhất (thay thế cho limit)
-              .slice(0, 20);
-              
+          notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
           unreadCount = notifications.filter(n => !n.isRead).length;
       }, (error) => {
-          console.error("Lỗi tải thông báo:", error);
+          console.error("⚠️ BẠN CHƯA TẠO INDEX TRÊN FIREBASE. CLICK VÀO LINK NÀY ĐỂ TẠO: ", error.message);
       });
   }
 
-  onDestroy(() => {
-      if (unsubNotif) unsubNotif();
-  });
+  onDestroy(() => { if (unsubNotif) unsubNotif(); });
 </script>
 
 <svelte:window on:click={handleWindowClick} />
@@ -175,8 +172,7 @@
       <button 
         id="btn-install"
         class="w-8 h-8 flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors animate-bounce border border-blue-200" 
-        on:click={handleInstall}
-        title="Cài đặt App"
+        on:click={handleInstall} title="Cài đặt App"
       >
         <span class="material-icons-round text-xl">download</span>
       </button>
@@ -185,8 +181,7 @@
     <button 
       id="btn-help"
       class="w-8 h-8 flex items-center justify-center text-purple-500 bg-purple-50 hover:bg-purple-100 rounded-full transition-colors" 
-      on:click={() => dispatch('openTour')} 
-      title="Xem hướng dẫn"
+      on:click={() => dispatch('openTour')} title="Xem hướng dẫn"
     >
       <span class="material-icons-round text-xl">help_outline</span>
     </button>
@@ -195,8 +190,7 @@
         <button 
             id="btn-notif"
             class="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-slate-50 rounded-full transition-all {unreadCount > 0 ? 'animate-wiggle' : ''}" 
-            on:click={() => showNotifDropdown = !showNotifDropdown} 
-            title="Thông báo"
+            on:click={() => showNotifDropdown = !showNotifDropdown} title="Thông báo"
         >
             <span class="material-icons-round text-xl">notifications</span>
             {#if unreadCount > 0}
@@ -214,8 +208,7 @@
       <button 
         id="btn-admin"
         class="w-8 h-8 flex items-center justify-center text-orange-500 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors" 
-        on:click={() => dispatch('openAdmin')} 
-        title="Cài đặt"
+        on:click={() => dispatch('openAdmin')} title="Cài đặt"
       >
         <span class="material-icons-round text-xl">settings</span>
       </button>

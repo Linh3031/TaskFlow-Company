@@ -1,5 +1,6 @@
 <script>
-  // Version 7.4 - Fix Invalid ID Error (Sanitize Slash Character)
+  // Version 7.5 - [CodeGenesis] Thêm tính năng Nhớ mật khẩu
+  import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { collection, getDocs, query, where, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
   import { setUser, DEFAULT_TEMPLATE } from '../lib/stores.js';
@@ -9,10 +10,26 @@
   let password = '';
   let showPassword = false;
   let isSuperAdminLogin = false;
+  let rememberMe = false; // [CodeGenesis] Trạng thái Nhớ mật khẩu
   let errorMsg = '';
   let isLoading = false;
 
   const tourKey = 'taskflow_v6_general_tour_seen';
+
+  // [CodeGenesis] Tự động điền tài khoản nếu đã lưu trước đó
+  onMount(() => {
+      const savedCreds = localStorage.getItem('taskflow_saved_creds');
+      if (savedCreds) {
+          try {
+              const parsed = JSON.parse(savedCreds);
+              if (parsed.u && parsed.p) {
+                  username = parsed.u;
+                  password = parsed.p;
+                  rememberMe = true;
+              }
+          } catch (e) { console.error("Lỗi đọc cache đăng nhập", e); }
+      }
+  });
 
   // --- HÀM TẠO DỮ LIỆU DEMO ---
   async function seedDemoData() {
@@ -25,14 +42,12 @@
       console.log("⏳ Đang khởi tạo dữ liệu Demo...");
 
       // 1. TẠO CÔNG VIỆC MẪU (TASKS)
-      // Dùng template chuẩn (giống kho 908)
       const types = ['warehouse', 'cashier'];
       types.forEach(type => {
           (DEFAULT_TEMPLATE[type] || []).forEach(tpl => {
-              // FIX LỖI: Chuẩn hóa ID kỹ càng (Bỏ dấu, bỏ ký tự đặc biệt như /)
               const cleanTitle = tpl.title
-                  .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Bỏ dấu tiếng Việt
-                  .replace(/[^a-zA-Z0-9]/g, "") // Bỏ hết ký tự lạ (/, -, dấu cách...)
+                  .normalize("NFD").replace(/[\u0300-\u036f]/g, "") 
+                  .replace(/[^a-zA-Z0-9]/g, "") 
                   .toLowerCase();
 
               const taskId = `${demoStoreId}_${todayStr}_${type}_${cleanTitle}`;
@@ -85,7 +100,6 @@
       });
 
       // 3. TẠO CẤU HÌNH CA & LỊCH LÀM VIỆC THÁNG NÀY
-      // Cấu hình Matrix
       batch.set(doc(db, 'settings', `shift_matrix_${demoStoreId}`), {
           genderConfig: { kho: 'mixed', tn: 'mixed' },
           comboCols: ['123', '456', '23', '45', '2-5'],
@@ -93,13 +107,11 @@
           updatedAt: serverTimestamp()
       });
 
-      // Tạo Lịch (Schedule) giả lập
       const daysInMonth = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate();
       const scheduleData = {};
       
       for (let d = 1; d <= daysInMonth; d++) {
           const dayData = demoStaff.map((s, idx) => {
-              // Thuật toán gán ca xoay vòng đơn giản để demo: 123 -> 456 -> OFF
               const pattern = (d + idx) % 3; 
               let shift = 'OFF', role = '';
               
@@ -115,7 +127,6 @@
           scheduleData[d] = dayData;
       }
 
-      // Tính Stats giả
       const stats = demoStaff.map(s => ({
           id: s.id, name: s.name, gender: s.gender,
           totalHours: 150, gh: 5, tn: 10, kho: 10 
@@ -133,7 +144,7 @@
           console.log("✅ Đã tạo xong dữ liệu Demo!");
       } catch (e) {
           console.error("Lỗi tạo Demo:", e);
-          throw e; // Ném lỗi ra để hiển thị alert bên dưới
+          throw e;
       }
   }
 
@@ -143,24 +154,14 @@
     const cleanU = safeString(username).toLowerCase();
     const cleanP = safeString(password);
 
-    // --- FIX: TÀI KHOẢN SETUP QUYỀN LỰC TUYỆT ĐỐI ---
     if (cleanU === 'setup' && cleanP === 'Linh30!0') {
-        setUser({ 
-            username: 'setup', 
-            name: 'System Setup', 
-            role: 'super_admin', 
-            storeIds: [], 
-            storeId: '' 
-        });
+        setUser({ username: 'setup', name: 'System Setup', role: 'super_admin', storeIds: [], storeId: '' });
         return;
     }
-    // ------------------------------------------------
 
     if (cleanU === 'demo' && cleanP === '123456') {
         try {
-            // TẠO DỮ LIỆU TRƯỚC KHI VÀO
             await seedDemoData();
-            
             localStorage.removeItem(tourKey);
             setUser({ username: 'demo', name: 'Quản Lý Demo', role: 'admin', storeIds: ['DEMO_1'], storeId: 'DEMO_1' });
             return;
@@ -195,11 +196,20 @@
                     foundUser.storeIds = stores;
                 }
             }
-         }
+        }
       });
 
-      if (foundUser) setUser(foundUser);
-      else errorMsg = isSuperAdminLogin ? 'Bạn không có quyền Super Admin!' : 'Sai mật khẩu!';
+      if (foundUser) {
+          // [CodeGenesis] Lưu hoặc xóa cache tài khoản dựa vào tick chọn
+          if (rememberMe) {
+              localStorage.setItem('taskflow_saved_creds', JSON.stringify({ u: username, p: password }));
+          } else {
+              localStorage.removeItem('taskflow_saved_creds');
+          }
+          setUser(foundUser);
+      } else {
+          errorMsg = isSuperAdminLogin ? 'Bạn không có quyền Super Admin!' : 'Sai mật khẩu!';
+      }
     } catch (err) { 
         errorMsg = err.message;
     } finally { 
@@ -215,9 +225,17 @@
     <p class="subtitle">Đăng nhập hệ thống</p>
     
     <form on:submit|preventDefault={handleLogin}>
-      <div class="flex items-center justify-end mb-4 gap-2">
-         <label for="sa-check" class="text-xs font-bold text-gray-500 cursor-pointer select-none">Quản trị hệ thống</label>
-         <input id="sa-check" type="checkbox" bind:checked={isSuperAdminLogin} class="w-4 h-4 accent-purple-600 cursor-pointer">
+      
+      <div class="flex items-center justify-between mb-4 gap-2 px-1">
+         <label class="flex items-center gap-1.5 cursor-pointer">
+             <input type="checkbox" bind:checked={rememberMe} class="w-4 h-4 accent-purple-600 cursor-pointer rounded">
+             <span class="text-xs font-bold text-gray-500 select-none hover:text-purple-600 transition-colors">Nhớ mật khẩu</span>
+         </label>
+
+         <label class="flex items-center gap-1.5 cursor-pointer">
+             <span class="text-xs font-bold text-gray-500 select-none hover:text-purple-600 transition-colors">Quản trị viên</span>
+             <input type="checkbox" bind:checked={isSuperAdminLogin} class="w-4 h-4 accent-purple-600 cursor-pointer rounded">
+         </label>
       </div>
 
       <div class="input-wrapper">
