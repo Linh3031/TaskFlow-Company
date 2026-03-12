@@ -1,5 +1,6 @@
 <script>
     import { createEventDispatcher } from 'svelte';
+    
     export let loadingData = false;
     export let faqCount = 0;
     export let isAdmin = false;
@@ -8,25 +9,40 @@
     const dispatch = createEventDispatcher();
 </script>
 
-<div class="bg-indigo-600 text-white p-3 flex justify-between items-center shrink-0 shadow-md z-10">
+<div class="bg-indigo-600 text-white p-3 sm:p-4 shrink-0 flex items-center justify-between shadow-md relative z-10">
     <div class="flex items-center gap-3">
-        <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 border-2 border-indigo-300">
-            <span class="material-icons-round text-indigo-600 text-2xl {loadingData ? 'animate-spin' : 'animate-pulse'}">
-                {loadingData ? 'sync' : 'smart_toy'}
-            </span>
+        <div class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+            <span class="material-icons-round text-[22px]">smart_toy</span>
         </div>
         <div>
-            <h3 class="font-bold text-[15px] leading-tight">Trợ Lý Chính Sách</h3>
-            <p class="text-[11px] text-indigo-100 flex items-center gap-1">
-                <span class="w-2 h-2 {loadingData ? 'bg-orange-400' : 'bg-green-400'} rounded-full"></span> 
-                {loadingData ? 'Đang kết nối...' : `${faqCount} chủ đề`}
-            </p>
+            <h3 class="font-bold text-[15px] sm:text-base leading-tight">Trợ Lý Chính Sách</h3>
+            <div class="text-[11px] sm:text-xs text-indigo-100 flex items-center gap-1 mt-0.5">
+                {#if loadingData}
+                    <span class="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-pulse"></span> Đang tải dữ liệu...
+                {:else}
+                    <span class="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span> Sẵn sàng • {faqCount} chủ đề
+                {/if}
+            </div>
         </div>
     </div>
-    
-    {#if isAdmin}
-        <button class="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500 hover:bg-indigo-700 transition-colors" on:click={() => dispatch('toggleAdmin')} title="Quản trị dữ liệu">
-            <span class="material-icons-round text-sm">{showAdminPanel ? 'forum' : 'settings'}</span>
+
+    <div class="flex items-center gap-1">
+        {#if isAdmin}
+            <button 
+                class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors {showAdminPanel ? 'bg-white/30' : ''}" 
+                on:click={() => dispatch('toggleAdmin')}
+                title="Quản lý dữ liệu"
+            >
+                <span class="material-icons-round text-sm sm:text-base">settings</span>
+            </button>
+        {/if}
+        
+        <button 
+            class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/20 transition-colors bg-white/10 sm:bg-transparent ml-1" 
+            on:click={() => dispatch('closeChat')}
+            title="Thu nhỏ"
+        >
+            <span class="material-icons-round text-xl">keyboard_arrow_down</span>
         </button>
-    {/if}
+    </div>
 </div>

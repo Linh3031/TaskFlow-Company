@@ -17,19 +17,17 @@
     $: isAdmin = $currentUser?.role === 'super_admin';
     $: categories = [...new Set(faqData.map(item => item.category))].filter(Boolean);
 
-    // [CodeGenesis] Kỹ thuật "Bong Bóng Chat" mượt mà 60FPS (Dùng Transform 3D)
+    // Kỹ thuật "Bong Bóng Chat" mượt mà 60FPS (Dùng Transform 3D)
     function draggable(node) {
         let isDragging = false;
         let wasDragged = false;
         let startX, startY;
-        let currentX = 0, currentY = 0; // Lưu trữ tọa độ dịch chuyển
+        let currentX = 0, currentY = 0; 
         let initialX, initialY;
 
         const handleMousedown = (e) => {
             isDragging = true;
             wasDragged = false;
-            
-            // Tạm tắt hiệu ứng CSS để kéo không bị giật (chuột rút)
             node.style.transition = 'none';
 
             startX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
@@ -53,24 +51,20 @@
             const dx = clientX - startX;
             const dy = clientY - startY;
 
-            // Nếu dịch chuyển quá 5px thì xác nhận là thao tác KÉO (không phải CLICK)
             if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
                 wasDragged = true;
             }
 
             if (wasDragged) {
-                e.preventDefault(); // Ngăn màn hình cuộn theo khi kéo
+                e.preventDefault(); 
                 currentX = initialX + dx;
                 currentY = initialY + dy;
-                
-                // Dùng GPU để render chuyển động cực mượt
                 node.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
             }
         };
 
         const handleMouseup = () => {
             isDragging = false;
-            // Bật lại CSS hiệu ứng khi đã thả tay
             node.style.transition = ''; 
 
             document.removeEventListener('mousemove', handleMousemove);
@@ -80,7 +74,6 @@
         };
 
         const handleClick = (e) => {
-            // Nếu vừa kéo xong thì KHÔNG cho kích hoạt sự kiện click (mở chatbot)
             if (wasDragged) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -89,7 +82,7 @@
 
         node.addEventListener('mousedown', handleMousedown);
         node.addEventListener('touchstart', handleMousedown, { passive: false });
-        node.addEventListener('click', handleClick, true); // Bắt click ở phase sớm nhất
+        node.addEventListener('click', handleClick, true); 
 
         return {
             destroy() {
@@ -127,9 +120,7 @@
         }
     }
 
-    function addMessage(sender, text) {
-        messages = [...messages, { sender, text }];
-    }
+    function addMessage(sender, text) { messages = [...messages, { sender, text }]; }
 
     function normalizeStr(str) {
         if (!str) return '';
@@ -152,9 +143,7 @@
             if (foundMatch) break;
         }
 
-        if (!foundMatch) {
-            addMessage('bot', "Xin lỗi, hệ thống chưa có dữ liệu cho câu hỏi này. Bạn hãy thử dùng từ khóa ngắn gọn hơn (VD: <i>truy thu, trả góp, kẹp nách</i>).");
-        }
+        if (!foundMatch) addMessage('bot', "Xin lỗi, hệ thống chưa có dữ liệu cho câu hỏi này. Bạn hãy thử dùng từ khóa ngắn gọn hơn (VD: <i>truy thu, trả góp, kẹp nách</i>).");
     }
 
     function handleCategoryClick(cat) {
@@ -169,36 +158,42 @@
 
 <button 
     use:draggable
-    class="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center hover:bg-indigo-700 hover:scale-105 z-[90] border-2 border-white cursor-move touch-none" 
+    class="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center hover:bg-indigo-700 hover:scale-105 z-[100] border-2 border-white cursor-move touch-none" 
     on:click={toggleChat}
 >
     <span class="material-icons-round text-3xl">{isOpen ? 'close' : 'support_agent'}</span>
 </button>
 
 {#if isOpen}
-<div class="fixed bottom-24 right-4 sm:right-6 w-[90vw] max-w-[380px] h-[75vh] max-h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col z-[90] overflow-hidden border border-slate-200 animate-slideUp">
-    
-    <ChatHeader 
-        {loadingData} 
-        faqCount={categories.length} 
-        {isAdmin} 
-        {showAdminPanel} 
-        on:toggleAdmin={() => showAdminPanel = !showAdminPanel} 
-    />
+    <div 
+        class="fixed inset-0 z-[80] bg-slate-900/30 backdrop-blur-[2px] sm:bg-transparent sm:backdrop-blur-none transition-all" 
+        on:click={() => isOpen = false}
+    ></div>
 
-    {#if showAdminPanel && isAdmin}
-        <AdminPanel {faqData} />
-    {:else}
-        <ChatMessageArea 
-            {messages} 
-            {categories} 
+    <div class="fixed bottom-24 right-4 sm:right-6 w-[90vw] max-w-[380px] h-[75vh] max-h-[600px] bg-white rounded-2xl shadow-2xl flex flex-col z-[90] overflow-hidden border border-slate-200 animate-slideUp">
+        
+        <ChatHeader 
             {loadingData} 
-            faqDataLength={faqData.length}
-            on:send={(e) => { addMessage('user', e.detail); processQuery(e.detail); }}
-            on:categoryClick={(e) => handleCategoryClick(e.detail)}
+            faqCount={categories.length} 
+            {isAdmin} 
+            {showAdminPanel} 
+            on:toggleAdmin={() => showAdminPanel = !showAdminPanel} 
+            on:closeChat={() => isOpen = false} 
         />
-    {/if}
-</div>
+
+        {#if showAdminPanel && isAdmin}
+            <AdminPanel {faqData} />
+        {:else}
+            <ChatMessageArea 
+                {messages} 
+                {categories} 
+                {loadingData} 
+                faqDataLength={faqData.length}
+                on:send={(e) => { addMessage('user', e.detail); processQuery(e.detail); }}
+                on:categoryClick={(e) => handleCategoryClick(e.detail)}
+            />
+        {/if}
+    </div>
 {/if}
 
 <style>
