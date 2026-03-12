@@ -1,16 +1,14 @@
 <script>
     import { currentUser } from '../lib/stores';
     import { db } from '../lib/firebase';
-    // [CodeGenesis] Thay onSnapshot bằng getDocs để đọc dữ liệu 1 lần
     import { collection, getDocs } from 'firebase/firestore'; 
     
-    // Import các mảnh ghép vừa tạo
     import ChatHeader from './ChatbotParts/ChatHeader.svelte';
     import ChatMessageArea from './ChatbotParts/ChatMessageArea.svelte';
     import AdminPanel from './ChatbotParts/AdminPanel.svelte';
 
     let faqData = [];
-    let loadingData = false; // Mặc định không load, chỉ load khi bấm mở Chatbot
+    let loadingData = false;
 
     let isOpen = false;
     let messages = [];
@@ -19,67 +17,93 @@
     $: isAdmin = $currentUser?.role === 'super_admin';
     $: categories = [...new Set(faqData.map(item => item.category))].filter(Boolean);
 
-    // [CodeGenesis] Kỹ thuật biến Icon thành cục nam châm di chuyển được (Draggable)
+    // [CodeGenesis] Kỹ thuật "Bong Bóng Chat" mượt mà 60FPS (Dùng Transform 3D)
     function draggable(node) {
-        let x, y, startX, startY;
         let isDragging = false;
+        let wasDragged = false;
+        let startX, startY;
+        let currentX = 0, currentY = 0; // Lưu trữ tọa độ dịch chuyển
+        let initialX, initialY;
 
         const handleMousedown = (e) => {
-            isDragging = false;
+            isDragging = true;
+            wasDragged = false;
+            
+            // Tạm tắt hiệu ứng CSS để kéo không bị giật (chuột rút)
+            node.style.transition = 'none';
+
             startX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
             startY = e.type === 'touchstart' ? e.touches[0].clientY : e.clientY;
-            
-            document.addEventListener('mousemove', handleMousemove);
+
+            initialX = currentX;
+            initialY = currentY;
+
+            document.addEventListener('mousemove', handleMousemove, { passive: false });
             document.addEventListener('mouseup', handleMouseup);
             document.addEventListener('touchmove', handleMousemove, { passive: false });
             document.addEventListener('touchend', handleMouseup);
         };
 
         const handleMousemove = (e) => {
-            isDragging = true; // Xác nhận đây là thao tác kéo, không phải click
-            e.preventDefault();
+            if (!isDragging) return;
+
             const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
             const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
-            
-            x = startX - clientX;
-            y = startY - clientY;
-            startX = clientX;
-            startY = clientY;
-            
-            // Giới hạn không cho kéo bay ra khỏi màn hình
-            const newTop = Math.max(0, Math.min(window.innerHeight - node.offsetHeight, node.offsetTop - y));
-            const newLeft = Math.max(0, Math.min(window.innerWidth - node.offsetWidth, node.offsetLeft - x));
 
-            node.style.top = `${newTop}px`;
-            node.style.left = `${newLeft}px`;
-            node.style.bottom = 'auto'; // Hủy bottom mặc định
-            node.style.right = 'auto';  // Hủy right mặc định
+            const dx = clientX - startX;
+            const dy = clientY - startY;
+
+            // Nếu dịch chuyển quá 5px thì xác nhận là thao tác KÉO (không phải CLICK)
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                wasDragged = true;
+            }
+
+            if (wasDragged) {
+                e.preventDefault(); // Ngăn màn hình cuộn theo khi kéo
+                currentX = initialX + dx;
+                currentY = initialY + dy;
+                
+                // Dùng GPU để render chuyển động cực mượt
+                node.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+            }
         };
 
-        const handleMouseup = (e) => {
+        const handleMouseup = () => {
+            isDragging = false;
+            // Bật lại CSS hiệu ứng khi đã thả tay
+            node.style.transition = ''; 
+
             document.removeEventListener('mousemove', handleMousemove);
             document.removeEventListener('mouseup', handleMouseup);
             document.removeEventListener('touchmove', handleMousemove);
             document.removeEventListener('touchend', handleMouseup);
         };
 
+        const handleClick = (e) => {
+            // Nếu vừa kéo xong thì KHÔNG cho kích hoạt sự kiện click (mở chatbot)
+            if (wasDragged) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        };
+
         node.addEventListener('mousedown', handleMousedown);
         node.addEventListener('touchstart', handleMousedown, { passive: false });
+        node.addEventListener('click', handleClick, true); // Bắt click ở phase sớm nhất
 
         return {
             destroy() {
                 node.removeEventListener('mousedown', handleMousedown);
                 node.removeEventListener('touchstart', handleMousedown);
+                node.removeEventListener('click', handleClick, true);
             }
         };
     }
 
-    // [CodeGenesis] Hàm toggleChat được nâng cấp thành async để xử lý Lazy Loading
     async function toggleChat() {
         isOpen = !isOpen;
         
         if (isOpen) {
-            // 1. Thêm câu chào nếu chưa có
             if (messages.length === 0) {
                 messages = [...messages, { 
                     sender: 'bot', 
@@ -87,7 +111,6 @@
                 }];
             }
 
-            // 2. Giao thức Lazy Load: Chỉ cào dữ liệu khi mở Chat VÀ chưa có data
             if (faqData.length === 0 && !loadingData) {
                 loadingData = true;
                 try {
@@ -146,7 +169,7 @@
 
 <button 
     use:draggable
-    class="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center hover:bg-indigo-700 hover:scale-105 transition-all z-[90] border-2 border-white cursor-move touch-none" 
+    class="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center hover:bg-indigo-700 hover:scale-105 z-[90] border-2 border-white cursor-move touch-none" 
     on:click={toggleChat}
 >
     <span class="material-icons-round text-3xl">{isOpen ? 'close' : 'support_agent'}</span>
