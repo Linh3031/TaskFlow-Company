@@ -208,11 +208,22 @@
 </script>
 
 <button 
-    use:draggable
-    class="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-xl flex items-center justify-center hover:bg-indigo-700 hover:scale-105 z-[100] border-2 border-white cursor-move touch-none" 
+    use:draggable 
+    class="fixed bottom-6 right-6 w-16 h-16 sm:w-20 sm:h-20 hover:scale-110 transition-transform duration-300 z-[100] cursor-move touch-none" 
     on:click={toggleChat}
 >
-    <span class="material-icons-round text-3xl">{isOpen ? 'close' : 'support_agent'}</span>
+    {#if isOpen}
+        <div class="w-12 h-12 bg-slate-800 text-white rounded-full flex items-center justify-center shadow-2xl mx-auto opacity-90 hover:opacity-100 border-2 border-slate-600">
+            <span class="material-icons-round text-2xl">close</span>
+        </div>
+    {:else}
+        <img 
+            src="/bot-icon.png" 
+            alt="Trợ lý ĐMX" 
+            class="w-full h-full object-contain drop-shadow-[0_10px_15px_rgba(0,0,0,0.25)]" 
+            draggable="false" 
+        />
+    {/if}
 </button>
 
 {#if isOpen}
