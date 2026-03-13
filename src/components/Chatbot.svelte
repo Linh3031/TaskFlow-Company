@@ -1,7 +1,8 @@
 <script>
     import { currentUser } from '../lib/stores';
     import { db } from '../lib/firebase';
-    import { collection, getDocs } from 'firebase/firestore'; 
+    import { collection, getDocs, addDoc } from 'firebase/firestore'; 
+    import Fuse from 'fuse.js';
     
     import ChatHeader from './ChatbotParts/ChatHeader.svelte';
     import ChatMessageArea from './ChatbotParts/ChatMessageArea.svelte';
@@ -13,11 +14,13 @@
     let isOpen = false;
     let messages = [];
     let showAdminPanel = false;
+    let isBotTyping = false; // Trạng thái UX 
 
     $: isAdmin = $currentUser?.role === 'super_admin';
-    $: categories = [...new Set(faqData.map(item => item.category))].filter(Boolean);
+    // Khởi tạo Decision Tree từ Master Category
+    $: categories = [...new Set(faqData.map(item => item.master_category || item.category))].filter(Boolean);
 
-    // Kỹ thuật "Bong Bóng Chat" mượt mà 60FPS (Dùng Transform 3D)
+    // Kỹ thuật "Bong Bóng Chat" mượt mà 60FPS
     function draggable(node) {
         let isDragging = false;
         let wasDragged = false;
@@ -44,7 +47,6 @@
 
         const handleMousemove = (e) => {
             if (!isDragging) return;
-
             const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
             const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
 
@@ -56,7 +58,7 @@
             }
 
             if (wasDragged) {
-                e.preventDefault(); 
+                e.preventDefault();
                 currentX = initialX + dx;
                 currentY = initialY + dy;
                 node.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
@@ -95,12 +97,13 @@
 
     async function toggleChat() {
         isOpen = !isOpen;
-        
         if (isOpen) {
             if (messages.length === 0) {
                 messages = [...messages, { 
+                    id: Date.now().toString(),
                     sender: 'bot', 
-                    text: `Chào <b>${$currentUser?.name || 'bạn'}</b>! Mình là Trợ lý Ảo hỗ trợ Quy định nội bộ.<br>Bạn cứ gõ câu hỏi hoặc chọn chủ đề bên dưới nhé!` 
+                    text: `Chào <b>${$currentUser?.name || 'bạn'}</b>! Mình là Trợ lý Quy định.<br>Bạn gõ từ khóa tìm kiếm hoặc chọn nhóm chủ đề bên dưới nhé!`,
+                    isWelcome: true
                 }];
             }
 
@@ -120,39 +123,87 @@
         }
     }
 
-    function addMessage(sender, text) { messages = [...messages, { sender, text }]; }
-
-    function normalizeStr(str) {
-        if (!str) return '';
-        return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s]/g, '');
+    // Hàm tiện ích thêm tin nhắn có tạo độ trễ (UX Typing indicator)
+    async function addMessage(sender, text, extraInfo = {}) { 
+        if (sender === 'bot') {
+            isBotTyping = true;
+            // Tạo độ trễ 500ms để giống người thật đang gõ
+            await new Promise(r => setTimeout(r, 500));
+            isBotTyping = false;
+        }
+        messages = [...messages, { id: Date.now().toString(), sender, text, ...extraInfo }];
     }
 
-    function processQuery(query) {
-        if (faqData.length === 0) return addMessage('bot', "Hiện tại hệ thống chưa có dữ liệu nào. Vui lòng liên hệ Admin.");
-        const normalizedQuery = normalizeStr(query);
-        let foundMatch = false;
+    // UX 2: Hàm Bôi Đậm Từ Khóa (Keyword Highlighting)
+    function highlightText(text, keyword) {
+        if (!keyword) return text;
+        const terms = keyword.split(/\s+/).filter(k => k.length > 1);
+        let highlighted = text;
+        terms.forEach(term => {
+            // Regex bỏ qua các chữ nằm trong thẻ HTML (VD: <b>, <br>)
+            const regex = new RegExp(`(${term})(?![^<]*>)`, 'gi');
+            highlighted = highlighted.replace(regex, '<mark class="bg-yellow-200 text-slate-900 rounded-sm px-0.5 font-bold shadow-sm">$1</mark>');
+        });
+        return highlighted;
+    }
 
-        for (let faq of faqData) {
-            for (let keyword of (faq.keywords || [])) {
-                if (normalizedQuery.includes(normalizeStr(keyword))) {
-                    addMessage('bot', faq.answer);
-                    foundMatch = true;
-                    break;
-                }
-            }
-            if (foundMatch) break;
+    // Xử lý khi user Enter hoặc Chọn Gợi ý
+    async function processQuery(query, exactItem = null) {
+        if (faqData.length === 0) return addMessage('bot', "Hệ thống chưa có dữ liệu.");
+
+        let bestMatch = exactItem;
+
+        // Nếu user Enter mà không chọn gợi ý, chạy Fuse.js
+        if (!bestMatch) {
+            const fuse = new Fuse(faqData, {
+                keys: ['category', 'keywords', 'master_category'],
+                threshold: 0.4,
+                ignoreLocation: true
+            });
+            const results = fuse.search(query);
+            if (results.length > 0) bestMatch = results[0].item;
         }
 
-        if (!foundMatch) addMessage('bot', "Xin lỗi, hệ thống chưa có dữ liệu cho câu hỏi này. Bạn hãy thử dùng từ khóa ngắn gọn hơn (VD: <i>truy thu, trả góp, kẹp nách</i>).");
+        if (bestMatch) {
+            const highlightedAnswer = highlightText(bestMatch.answer, query);
+            const contextHeader = `<div class="text-[10px] font-bold text-indigo-500 mb-1 border-b border-indigo-100 pb-1">${bestMatch.master_category || 'Chung'} > ${bestMatch.category}</div>`;
+            await addMessage('bot', contextHeader + highlightedAnswer, { queryForFeedback: query, allowFeedback: true });
+        } else {
+            await addMessage('bot', `Xin lỗi, mình không tìm thấy quy định cho <b>"${query}"</b>. Bạn thử dùng từ khóa khác ngắn gọn hơn xem sao.`, { queryForFeedback: query, allowFeedback: true });
+        }
     }
 
-    function handleCategoryClick(cat) {
-        addMessage('user', `Hỏi về: ${cat}`);
-        const related = faqData.filter(f => f.category === cat);
-        let responseHTML = `<b>Các quy định liên quan đến ${cat}:</b><br><ul class="list-disc pl-4 mt-1 space-y-1">`;
-        related.forEach(item => { responseHTML += `<li class="text-[13px]">${item.answer}</li>`; });
-        responseHTML += `</ul>`;
-        addMessage('bot', responseHTML);
+    // Xử lý Click Chủ Đề Gốc
+    async function handleCategoryClick(cat) {
+        await addMessage('user', `Hỏi về nhóm: ${cat}`);
+        const related = faqData.filter(f => (f.master_category === cat || f.category === cat));
+        
+        if (related.length === 1) {
+            await processQuery(cat, related[0]);
+        } else if (related.length > 1) {
+            const subCats = [...new Set(related.map(r => r.category))];
+            await addMessage('bot', `Trong nhóm <b>${cat}</b>, bạn muốn xem chi tiết về phần nào?`, { subCategories: subCats });
+        }
+    }
+
+    // UX 3: Ghi nhận Feedback của User
+    async function handleFeedback(e) {
+        const { msgId, type, query } = e.detail;
+        
+        // Update trạng thái UI ngay lập tức
+        messages = messages.map(m => m.id === msgId ? { ...m, feedbackType: type } : m);
+
+        if (type === 'down') {
+            await addMessage('bot', `Cảm ơn bạn! Hệ thống đã ghi nhận từ khóa thất bại <b>"${query}"</b> để Admin bổ sung thêm quy định này.`);
+            try {
+                // Đẩy lịch sử truy vấn thất bại lên một Collection mới để Admin theo dõi
+                await addDoc(collection(db, 'bot_feedback'), {
+                    query: query,
+                    type: 'downvote',
+                    timestamp: new Date()
+                });
+            } catch (error) { console.error("Lỗi lưu feedback", error); }
+        }
     }
 </script>
 
@@ -188,9 +239,19 @@
                 {messages} 
                 {categories} 
                 {loadingData} 
-                faqDataLength={faqData.length}
-                on:send={(e) => { addMessage('user', e.detail); processQuery(e.detail); }}
+                {faqData}
+                {isBotTyping}
+                on:send={(e) => { 
+                    addMessage('user', e.detail.query); 
+                    processQuery(e.detail.query, e.detail.exactItem); 
+                }}
                 on:categoryClick={(e) => handleCategoryClick(e.detail)}
+                on:subCategoryClick={(e) => {
+                    addMessage('user', e.detail);
+                    const item = faqData.find(f => f.category === e.detail);
+                    processQuery(e.detail, item);
+                }}
+                on:feedback={handleFeedback}
             />
         {/if}
     </div>
