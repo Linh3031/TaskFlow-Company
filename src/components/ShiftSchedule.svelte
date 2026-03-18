@@ -1,6 +1,7 @@
 <script>
   // Version 46.0 - Global Store Sync & Super Radar Locator (Fuzzy Match)
-  import { onMount } from 'svelte';
+  // [CodeGenesis] Đã import thêm onDestroy để Fix rò rỉ reads
+  import { onMount, onDestroy } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
   import { currentUser, activeStoreId } from '../lib/stores';
@@ -247,7 +248,8 @@
       if (!scheduleData || !scheduleData.data) return 0;
       let count = 0;
       const isHardRole = (r) => ['Kho', 'Thu Ngân', 'Giao Hàng', 'GH', 'TN', 'K'].includes(r);
-      const isWeekend = (d) => { const date = new Date(viewYear, viewMonth - 1, d); const day = date.getDay(); return day === 0 || day === 6; };
+      const isWeekend = (d) => { const date = new Date(viewYear, viewMonth - 1, d); const day = date.getDay();
+      return day === 0 || day === 6; };
       Object.keys(scheduleData.data).forEach(d => {
           if (isWeekend(d)) {
               const assign = scheduleData.data[d].find(a => a.staffId === staffId);
@@ -264,8 +266,6 @@
   // [CodeGenesis] Lắp đặt Siêu Radar (Fuzzy Match)
   function scrollToMyRow() {
       if (!$currentUser || !scheduleData || !scheduleData.stats) return;
-
-      // Hàm bóc tách từ: Xóa dấu tiếng Việt, xóa khoảng trắng, gạch ngang, đưa về chữ thường viết liền
       const normalizeStr = (str) => {
           if (!str) return '';
           return String(str)
@@ -274,11 +274,9 @@
               .toLowerCase()                        // Đưa về chữ thường
               .replace(/[^a-z0-9]/g, '');           // Xóa mọi khoảng trắng, gạch ngang, ký tự đặc biệt
       };
-      
       const cUsername = normalizeStr($currentUser.username);
       const cName = normalizeStr($currentUser.name);
       const cId = normalizeStr($currentUser.id);
-
       const myStat = scheduleData.stats.find(s => {
           const sId = normalizeStr(s.id);
           const sName = normalizeStr(s.name);
@@ -297,12 +295,10 @@
           
           return false;
       });
-      
       if (myStat) {
           const row = document.getElementById('staff-row-' + myStat.id);
           if (row) {
               row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              
               const td = row.firstElementChild;
               if (td) {
                   td.classList.add('!bg-yellow-200', 'transition-colors', 'duration-500');
@@ -323,8 +319,14 @@
       { target: '.overflow-x-auto', title: '1. Bảng Lịch Tổng', content: 'Đây là toàn bộ lịch làm việc trong tháng.' }, 
       { target: '#store-view-selector', title: '2. Chọn Kho Xem', content: 'Nếu quản lý nhiều kho, hãy chọn kho tại đây để xem lịch tương ứng.' }, 
       { target: '#tour-staff-name', title: '3. Xem Chi Tiết Cá Nhân', content: 'Bấm vào <b>Tên Nhân Viên</b> để mở popup xem lịch riêng.' }, 
-      { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng để xem tổng giờ công.', action: () => { const tableContainer = document.querySelector('.overflow-x-auto'); if(tableContainer) tableContainer.scrollLeft = tableContainer.scrollWidth; } } 
+      { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng để xem tổng giờ công.', action: () => { const tableContainer = document.querySelector('.overflow-x-auto');
+      if(tableContainer) tableContainer.scrollLeft = tableContainer.scrollWidth; } } 
   ];
+
+  // [CodeGenesis] Sửa lỗi Quota: Clear onSnapshot khi đóng/thoát Tab Lịch Ca
+  onDestroy(() => {
+      if (unsubscribe) unsubscribe();
+  });
 </script>
 
 <ScheduleControls 

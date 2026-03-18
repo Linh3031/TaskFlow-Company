@@ -5,7 +5,6 @@
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList, activeStoreId } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
-  
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
   import TaskList from './components/TaskList.svelte';
@@ -19,9 +18,8 @@
   import Chatbot from './components/Chatbot.svelte';
 
   // [CodeGenesis] Quản lý Phiên bản PWA
-  const APP_VERSION = 4; // Tăng số này lên khi bạn có bản cập nhật mới
+  const APP_VERSION = 4;
   let showUpdatePrompt = false;
-
   let activeTab = '8nttt';
   let showAdminModal = false;
   let showTaskModal = false;
@@ -30,7 +28,6 @@
   let selectedDate = getTodayStr();
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
-  
   const tourSteps = [
       { target: '.app-header', title: '1. Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Giao diện đã được nâng cấp.' },
       { target: '#store-selector-tour', title: '2. Chọn Kho', content: 'Chuyển đổi dữ liệu giữa các siêu thị.' },
@@ -44,6 +41,10 @@
   let unsubTasks = () => {};
   let unsubHandover = () => {}; 
   
+  // [CodeGenesis] Sửa lỗi Quota: Tách state để không bị load lại toàn bộ khi đổi ngày
+  let dailyTasks = [];
+  let handoverTasks = [];
+  
   let hasCheckedInit = false; 
   let isTasksLoaded = false;
   
@@ -52,14 +53,12 @@
       const [y, m, d] = selectedDate.split('-');
       return `${d}/${m}`;
   })();
-  
   $: displayDayOfWeek = (() => {
       if (!selectedDate) return '';
       const date = new Date(selectedDate);
       const days = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
       return days[date.getDay()];
   })();
-  
   function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
@@ -117,8 +116,43 @@
       }
   }
 
-  $: if ($currentUser && $activeStoreId) loadDataForUser($activeStoreId, selectedDate);
-  
+  // [CodeGenesis] Sửa lỗi Quota: Hàm gom data Tasks chung
+  function updateTasksStore() {
+      const allTasks = [...dailyTasks, ...handoverTasks];
+      const uniqueMap = new Map();
+      allTasks.forEach(t => uniqueMap.set(t.id, t));
+      currentTasks.set(Array.from(uniqueMap.values()));
+      isTasksLoaded = true; 
+  }
+
+  // [CodeGenesis] Sửa lỗi Quota: Chỉ lắng nghe Template và Bàn giao khi đổi KHO (Không phụ thuộc ngày)
+  $: if ($currentUser && $activeStoreId) {
+      if(unsubTemplate) unsubTemplate();
+      if(unsubHandover) unsubHandover();
+
+      unsubTemplate = onSnapshot(doc(db, 'settings', `template_${$activeStoreId}`), (docSnap) => {
+          taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
+      });
+
+      const qHandover = query(collection(db, 'tasks'), where('storeId', '==', $activeStoreId), where('type', '==', 'handover'), where('completed', '==', false));
+      unsubHandover = onSnapshot(qHandover, (snapshot) => {
+          handoverTasks = [];
+          snapshot.forEach(doc => { const data = doc.data(); if (data.type) handoverTasks.push({ id: doc.id, ...data }); });
+          updateTasksStore();
+      });
+  }
+
+  // [CodeGenesis] Sửa lỗi Quota: Chỉ lắng nghe Công việc hằng ngày khi đổi NGÀY hoặc KHO
+  $: if ($currentUser && $activeStoreId && selectedDate) {
+      if(unsubTasks) unsubTasks();
+      const qDaily = query(collection(db, 'tasks'), where('date', '==', selectedDate), where('storeId', '==', $activeStoreId));
+      unsubTasks = onSnapshot(qDaily, (snapshot) => {
+          dailyTasks = [];
+          snapshot.forEach(doc => { const data = doc.data(); if (data.type) dailyTasks.push({ id: doc.id, ...data }); });
+          updateTasksStore();
+      });
+  }
+
   $: if ($currentUser && $activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
            initDailyTasksSafe($activeStoreId, selectedDate, $currentTasks, $taskTemplate);
@@ -167,41 +201,6 @@
       }
   }
 
-  function loadDataForUser(storeId, dateStr) {
-      if(unsubTemplate) unsubTemplate();
-      if(unsubTasks) unsubTasks();
-      if(unsubHandover) unsubHandover();
-
-      unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
-          taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
-      });
-
-      let dailyTasks = [];
-      let handoverTasks = [];
-
-      const updateStore = () => {
-          const allTasks = [...dailyTasks, ...handoverTasks];
-          const uniqueMap = new Map();
-          allTasks.forEach(t => uniqueMap.set(t.id, t));
-          currentTasks.set(Array.from(uniqueMap.values()));
-          isTasksLoaded = true; 
-      };
-
-      const qDaily = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
-      unsubTasks = onSnapshot(qDaily, (snapshot) => {
-          dailyTasks = [];
-          snapshot.forEach(doc => { const data = doc.data(); if (data.type) dailyTasks.push({ id: doc.id, ...data }); });
-          updateStore();
-      });
-
-      const qHandover = query(collection(db, 'tasks'), where('storeId', '==', storeId), where('type', '==', 'handover'), where('completed', '==', false));
-      unsubHandover = onSnapshot(qHandover, (snapshot) => {
-          handoverTasks = [];
-          snapshot.forEach(doc => { const data = doc.data(); if (data.type) handoverTasks.push({ id: doc.id, ...data }); });
-          updateStore();
-      });
-  }
-
   function handleTaskClick(event) {
     const task = event.detail;
     if (task.completed) {
@@ -212,7 +211,8 @@
           });
       }
     } else {
-      selectedTask = task; noteInput = ''; showTaskModal = true;
+      selectedTask = task; noteInput = '';
+      showTaskModal = true;
     }
   }
 
@@ -291,7 +291,7 @@
                     {#if activeTab==='handover'}🤝 Bàn Giao{/if}
                  {/if}
                </h3>
-              {#if activeTab === 'warehouse' || activeTab === 'cashier' || activeTab === 'handover'}
+               {#if activeTab === 'warehouse' || activeTab === 'cashier' || activeTab === 'handover'}
                 <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
            </div>

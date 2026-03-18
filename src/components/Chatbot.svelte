@@ -19,7 +19,7 @@
     $: isAdmin = $currentUser?.role === 'super_admin';
     // Khởi tạo Decision Tree từ Master Category
     $: categories = [...new Set(faqData.map(item => item.master_category || item.category))].filter(Boolean);
-
+    
     // Kỹ thuật "Bong Bóng Chat" mượt mà 60FPS
     function draggable(node) {
         let isDragging = false;
@@ -27,7 +27,7 @@
         let startX, startY;
         let currentX = 0, currentY = 0; 
         let initialX, initialY;
-
+        
         const handleMousedown = (e) => {
             isDragging = true;
             wasDragged = false;
@@ -38,21 +38,18 @@
 
             initialX = currentX;
             initialY = currentY;
-
             document.addEventListener('mousemove', handleMousemove, { passive: false });
             document.addEventListener('mouseup', handleMouseup);
             document.addEventListener('touchmove', handleMousemove, { passive: false });
             document.addEventListener('touchend', handleMouseup);
         };
-
+        
         const handleMousemove = (e) => {
             if (!isDragging) return;
             const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
             const clientY = e.type === 'touchmove' ? e.touches[0].clientY : e.clientY;
-
             const dx = clientX - startX;
             const dy = clientY - startY;
-
             if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
                 wasDragged = true;
             }
@@ -74,7 +71,7 @@
             document.removeEventListener('touchmove', handleMousemove);
             document.removeEventListener('touchend', handleMouseup);
         };
-
+        
         const handleClick = (e) => {
             if (wasDragged) {
                 e.preventDefault();
@@ -107,12 +104,19 @@
                 }];
             }
 
+            // [CodeGenesis] Sửa lỗi Quota: Thêm Cache để tránh query 100% tài liệu mỗi lần mở
             if (faqData.length === 0 && !loadingData) {
                 loadingData = true;
                 try {
-                    const q = collection(db, 'faq_bot');
-                    const snapshot = await getDocs(q);
-                    faqData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    const cachedData = localStorage.getItem('taskflow_chatbot_faq');
+                    if (cachedData) {
+                        faqData = JSON.parse(cachedData);
+                    } else {
+                        const q = collection(db, 'faq_bot');
+                        const snapshot = await getDocs(q);
+                        faqData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                        localStorage.setItem('taskflow_chatbot_faq', JSON.stringify(faqData));
+                    }
                 } catch (error) {
                     console.error("Lỗi tải data Bot:", error);
                     addMessage('bot', "Xin lỗi, hệ thống đang bận tải dữ liệu. Vui lòng thử lại sau.");
@@ -150,7 +154,6 @@
     // Xử lý khi user Enter hoặc Chọn Gợi ý
     async function processQuery(query, exactItem = null) {
         if (faqData.length === 0) return addMessage('bot', "Hệ thống chưa có dữ liệu.");
-
         let bestMatch = exactItem;
 
         // Nếu user Enter mà không chọn gợi ý, chạy Fuse.js
@@ -177,7 +180,6 @@
     async function handleCategoryClick(cat) {
         await addMessage('user', `Hỏi về nhóm: ${cat}`);
         const related = faqData.filter(f => (f.master_category === cat || f.category === cat));
-        
         if (related.length === 1) {
             await processQuery(cat, related[0]);
         } else if (related.length > 1) {
@@ -189,10 +191,8 @@
     // UX 3: Ghi nhận Feedback của User
     async function handleFeedback(e) {
         const { msgId, type, query } = e.detail;
-        
         // Update trạng thái UI ngay lập tức
         messages = messages.map(m => m.id === msgId ? { ...m, feedbackType: type } : m);
-
         if (type === 'down') {
             await addMessage('bot', `Cảm ơn bạn! Hệ thống đã ghi nhận từ khóa thất bại <b>"${query}"</b> để Admin bổ sung thêm quy định này.`);
             try {
@@ -253,7 +253,7 @@
                 {faqData}
                 {isBotTyping}
                 on:send={(e) => { 
-                    addMessage('user', e.detail.query); 
+                    addMessage('user', e.detail.query);
                     processQuery(e.detail.query, e.detail.exactItem); 
                 }}
                 on:categoryClick={(e) => handleCategoryClick(e.detail)}
