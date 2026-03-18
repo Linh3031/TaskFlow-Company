@@ -104,18 +104,26 @@
                 }];
             }
 
-            // [CodeGenesis] Sửa lỗi Quota: Thêm Cache để tránh query 100% tài liệu mỗi lần mở
+            // [CodeGenesis] Sửa lỗi Quota: Cache có thời hạn 12 tiếng
             if (faqData.length === 0 && !loadingData) {
                 loadingData = true;
                 try {
                     const cachedData = localStorage.getItem('taskflow_chatbot_faq');
-                    if (cachedData) {
+                    const cachedTime = localStorage.getItem('taskflow_chatbot_faq_time');
+                    const CACHE_EXPIRY = 12 * 60 * 60 * 1000; // 12 tiếng (tính bằng milliseconds)
+
+                    // Kiểm tra: Nếu có cache VÀ chưa quá 12 tiếng -> Dùng luôn không cần tải
+                    if (cachedData && cachedTime && (Date.now() - parseInt(cachedTime) < CACHE_EXPIRY)) {
                         faqData = JSON.parse(cachedData);
                     } else {
+                        // Nếu chưa có cache hoặc cache đã quá 12 tiếng -> Tải bản mới từ Firebase
                         const q = collection(db, 'faq_bot');
                         const snapshot = await getDocs(q);
                         faqData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                        
+                        // Cất vào bộ nhớ và ghi lại thời gian lấy
                         localStorage.setItem('taskflow_chatbot_faq', JSON.stringify(faqData));
+                        localStorage.setItem('taskflow_chatbot_faq_time', Date.now().toString());
                     }
                 } catch (error) {
                     console.error("Lỗi tải data Bot:", error);
