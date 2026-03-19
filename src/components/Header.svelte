@@ -46,7 +46,6 @@
   async function handleLogout() {
     if(confirm("Đăng xuất khỏi hệ thống?")) {
         setUser(null);
-        
         if ('caches' in window) {
             try {
                 const cacheNames = await caches.keys();
@@ -70,7 +69,8 @@
 
   // --- LOGIC ĐỔI MẬT KHẨU ---
   let showProfileModal = false;
-  let oldPass = ''; let newPass = ''; let changePassLoading = false;
+  let oldPass = '';
+  let newPass = ''; let changePassLoading = false;
 
   async function handleChangePassword() {
       if (!oldPass || !newPass) return alert("Vui lòng nhập đầy đủ thông tin!");
@@ -95,7 +95,7 @@
   let showNotifDropdown = false;
   let unsubNotif = null;
   let notifContainer;
-
+  
   function handleWindowClick(event) {
       if (showNotifDropdown && notifContainer && !notifContainer.contains(event.target)) showNotifDropdown = false;
   }
@@ -105,25 +105,33 @@
       showNotifDropdown = false;
   }
 
-  // [CodeGenesis] Khiên bảo vệ Quota Firebase
-  $: if ($currentUser) {
+ // [CodeGenesis] Khiên bảo vệ Quota Firebase (Đã sửa lỗi Vòng lặp vô tận)
+  let activeNotifUser = null; // Biến cờ hiệu để chặn Svelte chạy lại
+
+  $: if ($currentUser && $currentUser.username && $currentUser.username !== activeNotifUser) {
+      activeNotifUser = $currentUser.username;
+      setupNotificationListener(activeNotifUser);
+  }
+
+  function setupNotificationListener(username) {
       if (unsubNotif) { unsubNotif(); unsubNotif = null; }
 
-      const username = $currentUser.username;
       const userVariants = [...new Set([username, username.toLowerCase()])];
-      
       const q = query(
           collection(db, 'notifications'), 
           where('toUser', 'in', userVariants),
           orderBy('createdAt', 'desc'),
-          limit(20) // CHỐT CHẶN CỨU MẠNG QUOTA!
+          limit(20) // VẪN GIỮ CHỐT CHẶN CỨU MẠNG QUOTA!
       );
-
+      
+      // Chuông báo động mới: Nó sẽ chỉ kêu ĐÚNG 1 LẦN!
+      console.warn("✅ ĐÃ FIX LỖI AN TOÀN: Chỉ gọi Firebase 1 lần duy nhất cho: " + username);
+      
       unsubNotif = onSnapshot(q, (snapshot) => {
           notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
           unreadCount = notifications.filter(n => !n.isRead).length;
       }, (error) => {
-          console.error("⚠️ BẠN CHƯA TẠO INDEX TRÊN FIREBASE. CLICK VÀO LINK NÀY ĐỂ TẠO: ", error.message);
+          console.error("⚠️ Firebase Error: ", error.message);
       });
   }
 

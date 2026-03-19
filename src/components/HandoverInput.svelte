@@ -25,6 +25,7 @@
           return;
       }
       try {
+          console.warn(`🚨🚨🚨 ĐANG GỌI FIREBASE [HandoverInput.svelte]: getDocs('users') - Tải user kho ${storeId}`);
           const q = query(collection(db, 'users'), where('storeIds', 'array-contains', storeId));
           const snap = await getDocs(q);
           const users = snap.docs.map(d => ({ username: d.data().username, name: d.data().name }));

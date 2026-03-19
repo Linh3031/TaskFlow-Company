@@ -118,6 +118,8 @@
                     } else {
                         // Nếu chưa có cache hoặc cache đã quá 12 tiếng -> Tải bản mới từ Firebase
                         const q = collection(db, 'faq_bot');
+                        // ---> GẮN CHUÔNG BÁO ĐỘNG Ở ĐÂY <---
+console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE: Đọc bảng faq_bot (Chatbot)");
                         const snapshot = await getDocs(q);
                         faqData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                         
