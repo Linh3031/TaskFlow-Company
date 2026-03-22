@@ -154,6 +154,9 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
     const weekdayDemands = getDemands(weekdayCombos);
     const weekendDemands = getDemands(weekendCombos);
 
+    // [THÊM MỚI] Tính toán độ lệch trượt (Offset) dựa trên Tháng và Năm liên tục
+    const monthOffset = staffList.length > 0 ? (year * 12 + month) % staffList.length : 0;
+
     let schedule = {};
     for (let d = 1; d <= daysInMonth; d++) {
         const dateObj = new Date(year, month - 1, d);
@@ -164,7 +167,10 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
         const currentDemands = JSON.parse(JSON.stringify(isWeekend ? weekendDemands : weekdayDemands));
 
         let currentDayAssignments = staffList.map((staff, index) => {
-            let poolIndex = (index + d) % staffList.length;
+            // [PHẪU THUẬT LOGIC] Trượt index ảo dựa theo tháng trước khi bốc ca từ Pool
+            let virtualIndex = (index + monthOffset) % staffList.length;
+            let poolIndex = (virtualIndex + d) % staffList.length;
+            
             let assignedShift = currentPool[poolIndex];
             return {
                 staffId: staff.id, name: staff.name, isMale: staff.isMale,

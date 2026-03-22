@@ -27,7 +27,10 @@ src/components/admin/schedule/AdminScheduleToolbar.svelte
 src/components/admin/schedule/ScheduleMatrix.svelte
 src/components/admin/schedule/AdminEditShiftModal.svelte
 src/components/admin/schedule/AdminDayStatsModal.svelte
+src/components/admin/schedule/SmartSwapModal.svelte
+src/components/admin/schedule/AdminScheduleSetup.svelte
 src/components/admin/schedule/SchedulePreview.svelte
+src/components/admin/schedule/AdminScheduleReview.svelte
 src/components/admin/schedule/AdminPersonalScheduleModal.svelte
 src/components/admin/schedule/scheduleConstants.js
 src/components/admin/AdminSchedule.svelte
@@ -36,10 +39,15 @@ src/components/admin/accounts
 src/components/admin/accounts/AdminAddUserModal.svelte
 src/components/admin/AdminTemplate.svelte
 src/components/TaskModal.svelte
+src/components/ChatbotParts
+src/components/ChatbotParts/AdminPanel.svelte
+src/components/ChatbotParts/ChatHeader.svelte
+src/components/ChatbotParts/ChatMessageArea.svelte
 src/components/InstallmentCalc.svelte
 src/components/NotificationDropdown.svelte
 src/components/TaskList.svelte
 src/components/AdminModal.svelte
+src/components/Chatbot.svelte
 src/components/CumulativeHistoryModal.svelte
 src/components/DailyChecklistParts
 src/components/DailyChecklistParts/ChecklistStatsModal.svelte
@@ -59,6 +67,7 @@ src/lib/comboCalculator.js
 src/lib/scheduleLogic.js
 src/lib/utils.js
 src/lib/firebase.js
+src/lib/smartSwap.js
 src/modules
 src/modules/settings.service.js
 src/assets

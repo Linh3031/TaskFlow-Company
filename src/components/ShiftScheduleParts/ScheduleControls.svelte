@@ -70,7 +70,11 @@
             <button class="flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg font-bold text-xs shadow hover:bg-indigo-100 transition-all border border-indigo-100 shrink-0" on:click={() => dispatch('openHistory')} title="Xem lịch sử giờ công các tháng trước">
                 <span class="material-icons-round text-[14px]">history</span> <span class="hidden sm:inline">Lũy Kế</span>
             </button>
-            {#if isAdmin}
+           {#if isAdmin}
+                <button class="flex items-center gap-1 bg-slate-800 text-slate-100 px-2 py-1 rounded-lg font-bold text-xs shadow hover:bg-slate-900 transition-all shrink-0" on:click={() => dispatch('lockBaseline')} title="Chốt Lịch Gốc để tính Lũy kế cho tháng sau">
+                    <span class="material-icons-round text-[14px]">lock_outline</span> <span class="hidden sm:inline">Chốt Lịch</span>
+                </button>
+
                  <button class="flex items-center gap-1 bg-slate-200 text-slate-700 px-2 py-1 rounded-lg font-bold text-xs shadow hover:bg-slate-300 transition-all shrink-0" on:click={() => dispatch('restoreBackup')} title="Hoàn tác về phiên bản trước khi áp dụng">
                     <span class="material-icons-round text-[14px]">restore</span> <span class="hidden sm:inline">Khôi Phục</span>
                 </button>

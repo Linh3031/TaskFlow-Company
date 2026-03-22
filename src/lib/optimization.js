@@ -1,5 +1,5 @@
 // src/lib/optimization.js
-// Version 37.0 - FIX: Manual Balance respects Weekend Load
+// Version 37.2 - FIX: Auto Fix Fatigue respects Gender constraint for Delivery (Giao Hàng)
 
 const SHIFT_GROUPS = {
     '123': 'SANG', '23': 'SANG', '12-56': 'SANG', '123-56': 'SANG', '12345': 'SANG',
@@ -233,7 +233,6 @@ export function manualBalanceGender(scheduleData, staffList, month, year, config
     const donors = staffList.filter(s => s.gender === config.fromGender);
     const receivers = staffList.filter(s => s.gender === config.toGender);
 
-    // Helper: Đếm số lượng ca cuối tuần hiện tại của một nhân viên
     const getWeekendLoad = (staffId) => {
         let count = 0;
         Object.keys(schedule).forEach(d => {
@@ -245,7 +244,6 @@ export function manualBalanceGender(scheduleData, staffList, month, year, config
         return count;
     };
 
-    // Helper: Đếm tổng số nghiệp vụ (để ưu tiên người ít việc)
     const getRoleCount = (staffId) => {
         let count = 0;
         Object.values(schedule).forEach(dayList => {
@@ -290,18 +288,14 @@ export function manualBalanceGender(scheduleData, staffList, month, year, config
                     
                     const isDayWeekend = isWeekend(d, month, year);
 
-                    // --- LOGIC MỚI: KIỂM TRA TẢI TRỌNG CUỐI TUẦN ---
                     if (isDayWeekend) {
                         const currentWeekendLoad = getWeekendLoad(receiver.id);
-                        // Phạt cực nặng nếu người này đã có nhiều ca cuối tuần (>=2)
-                        // Công thức: Mỗi ca cuối tuần đang có sẽ trừ 5000 điểm
                         score -= (currentWeekendLoad * 5000);
-                        score -= 1000; // Phạt chung vì là ngày cuối tuần
+                        score -= 1000; 
                     } else {
                         score += 100;
                     }
 
-                    // P2: Liên tiếp 2 ngày
                     if (d > 1) {
                         const prevDay = schedule[d-1];
                         const prevAssign = prevDay.find(a => a.staffId === receiver.id);
@@ -315,7 +309,6 @@ export function manualBalanceGender(scheduleData, staffList, month, year, config
                         }
                     }
 
-                    // P3: Xoay ca
                     if (d > 1) {
                         const prevDay = schedule[d-1];
                         const prevAssign = prevDay.find(a => a.staffId === receiver.id);
@@ -393,4 +386,69 @@ export function optimizeSchedule(scheduleData, staffList) {
         changesLog: allLogs, 
         finalStats: finalStats 
     };
+}
+
+// 6. AUTO FIX FATIGUE (Rã ca nghiệp vụ liên tiếp 2 ngày)
+export function autoFixFatigue(scheduleData, month, year) {
+    let newSchedule = JSON.parse(JSON.stringify(scheduleData));
+    let logs = [];
+    let count = 0;
+
+    const days = Object.keys(newSchedule).sort((a,b) => Number(a)-Number(b));
+    
+    for (let i = 1; i < days.length; i++) {
+        const today = days[i];
+        const prevDay = days[i-1];
+        const nextDay = days[i+1];
+
+        const todayAssigns = newSchedule[today];
+        const prevAssigns = newSchedule[prevDay];
+        
+        let violators = todayAssigns.filter(a => {
+            if (a.shift === 'OFF' || !isHardRole(a.role)) return false;
+            const prevA = prevAssigns.find(p => p.staffId === a.staffId);
+            return prevA && prevA.shift !== 'OFF' && isHardRole(prevA.role);
+        });
+
+        for (let violator of violators) {
+            // Kiểm tra xem ca nghiệp vụ của người vi phạm có phải là Giao Hàng không
+            const isGH = (violator.role === 'GH' || violator.role === 'Giao Hàng');
+
+            let candidate = todayAssigns.find(c => {
+                if (c.staffId === violator.staffId) return false;
+                
+                // [NEW FIX] Nếu ca bị trùng là Giao Hàng, thế thân BẮT BUỘC phải là Nam
+                if (isGH && c.gender !== 'Nam') return false;
+
+                if (c.shift !== 'OFF' && isHardRole(c.role)) return false;
+                
+                const cPrev = prevAssigns.find(p => p.staffId === c.staffId);
+                if (cPrev && cPrev.shift !== 'OFF' && isHardRole(cPrev.role)) return false;
+
+                if (nextDay) {
+                    const cNext = newSchedule[nextDay].find(n => n.staffId === c.staffId);
+                    if (cNext && cNext.shift !== 'OFF' && isHardRole(cNext.role)) return false;
+                }
+                return true;
+            });
+
+            if (candidate) {
+                let tempShift = violator.shift;
+                let tempRole = violator.role;
+                
+                violator.shift = candidate.shift;
+                violator.role = candidate.role || 'TV';
+                violator.isChanged = true;
+
+                candidate.shift = tempShift;
+                candidate.role = tempRole;
+                candidate.isChanged = true;
+
+                logs.push(`Ngày ${today}: Rã ca NV liên tiếp của [${violator.name}] sang cho [${candidate.name}]`);
+                count++;
+            }
+        }
+    }
+
+    return { success: count > 0, schedule: newSchedule, logs, count };
 }

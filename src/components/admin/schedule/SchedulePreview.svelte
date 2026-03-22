@@ -1,8 +1,8 @@
 <script>
-  // Version 55.0 - Add Cumulative History Modal
+  // Version 58.0 - Add Fatigue Fix Button
   import { createEventDispatcher } from 'svelte';
   import { utils, writeFile } from 'xlsx';
-  import CumulativeHistoryModal from '../../CumulativeHistoryModal.svelte'; // [GEM IMPORT]
+  import CumulativeHistoryModal from '../../CumulativeHistoryModal.svelte';
 
   export let previewScheduleData = null;
   export let previewStats = [];
@@ -17,16 +17,48 @@
   export let getRoleBadge = (role) => null;
   export let isCellRelevant = (d, assign, mode) => true;
 
-  // Cần truyền thêm storeId, month, year từ cha để Modal hoạt động
-  export let storeId = ''; 
+  export let storeId = '';
   export let viewMonth;
   export let viewYear;
 
   const dispatch = createEventDispatcher();
   
   let showBalanceModal = false;
-  let showHistoryModal = false; // [GEM STATE]
+  let showHistoryModal = false;
   let balanceConfig = { direction: 'male_to_female', role: 'tn', qty: 1 };
+  
+  let sortField = null;
+  let sortDirection = 'desc';
+
+  $: displayStats = previewStats ? [...previewStats].map((staff, origIdx) => {
+      const weCount = getWeekendHardRoleCount(staff.id);
+      const nvCount = (Number(staff.gh) || 0) + (Number(staff.tn) || 0) + (Number(staff.kho) || 0);
+      return { 
+          ...staff, 
+          weCount, 
+          nvCount, 
+          totalHoursNum: Number(staff.totalHours) || 0,
+          origIdx
+      };
+  }).sort((a, b) => {
+      if (!sortField) return a.origIdx - b.origIdx;
+      
+      let valA = a[sortField];
+      let valB = b[sortField];
+      
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+      return a.origIdx - b.origIdx;
+  }) : [];
+
+  function toggleSort(field) {
+      if (sortField === field) {
+          sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+          sortField = field;
+          sortDirection = 'desc'; 
+      }
+  }
 
   function onInspectionChange(e) { dispatch('inspectionChange', e.target.value); }
   function handleBalance() { showBalanceModal = false; dispatch('balanceGender', balanceConfig); }
@@ -38,11 +70,11 @@
       const wsData = [];
       const row1 = ["NHÂN SỰ"];
       days.forEach(d => row1.push(d));
-      row1.push("Tổng Giờ", "GH", "TN", "K", "Ca cuối tuần");
+      row1.push("Tổng Giờ", "GH", "TN", "K", "Tổng NV", "Ca cuối tuần");
       wsData.push(row1);
       const row2 = [""];
       days.forEach(d => row2.push(getWeekday(d)));
-      row2.push("", "", "", "", "");
+      row2.push("", "", "", "", "", "");
       wsData.push(row2);
       previewStats.forEach(staff => {
           const row = [staff.name];
@@ -54,7 +86,8 @@
                   row.push(cell);
               } else { row.push(""); }
           });
-          row.push(Math.round(staff.totalHours || 0), staff.gh || 0, staff.tn || 0, staff.kho || 0, getWeekendHardRoleCount(staff.id));
+          const nvCount = (Number(staff.gh)||0) + (Number(staff.tn)||0) + (Number(staff.kho)||0);
+          row.push(Math.round(staff.totalHours || 0), staff.gh || 0, staff.tn || 0, staff.kho || 0, nvCount, getWeekendHardRoleCount(staff.id));
           wsData.push(row);
       });
       const ws = utils.aoa_to_sheet(wsData);
@@ -86,6 +119,7 @@
           {#if inspectionMode === 'rotation'} <button class="px-3 py-1.5 bg-orange-100 text-orange-700 font-bold rounded-lg hover:bg-orange-200 text-xs flex items-center gap-1 animate-pulse" on:click={() => dispatch('fixRotation')}><span class="material-icons-round text-sm">build</span> Sửa Nhịp</button> {/if}
           {#if inspectionMode === 'weekend'} <button class="px-3 py-1.5 bg-indigo-100 text-indigo-700 font-bold rounded-lg hover:bg-indigo-200 text-xs flex items-center gap-1 animate-pulse" on:click={() => dispatch('fixWeekend')}><span class="material-icons-round text-sm">balance</span> Cân Bằng CT</button> {/if}
           {#if inspectionMode === 'gender'} <button class="px-3 py-1.5 bg-pink-100 text-pink-700 font-bold rounded-lg hover:bg-pink-200 text-xs flex items-center gap-1 animate-pulse" on:click={() => dispatch('fixGender')}><span class="material-icons-round text-sm">wc</span> Fix Giới Tính</button> {/if}
+          {#if inspectionMode === 'fatigue'} <button class="px-3 py-1.5 bg-red-100 text-red-700 font-bold rounded-lg hover:bg-red-200 text-xs flex items-center gap-1 animate-pulse" on:click={() => dispatch('fixFatigue')}><span class="material-icons-round text-sm">healing</span> Rã Ca Liên Tiếp</button> {/if}
       </div>
 
       <div class="flex gap-2">
@@ -99,6 +133,10 @@
 
           <button class="px-4 py-2 bg-purple-600 text-white font-bold rounded-lg shadow hover:bg-purple-700 flex items-center gap-2" on:click={() => showBalanceModal = true}>
               <span class="material-icons-round text-sm">swap_horiz</span> Cân Bằng Ca
+          </button>
+
+          <button class="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700 flex items-center gap-2" on:click={() => dispatch('openSmartSwap')}>
+              <span class="material-icons-round text-sm">psychology</span> Đổi Ca AI
           </button>
 
           <button id="btn-reset" disabled={!previewScheduleData} class="px-4 py-2 bg-gray-500 text-white font-bold rounded-lg shadow hover:bg-gray-600 flex items-center gap-2 disabled:opacity-50" on:click={() => dispatch('reset')}><span class="material-icons-round text-sm">restart_alt</span> Reset</button>
@@ -138,11 +176,12 @@
                               </div>
                           </th> 
                       {/each} 
-                      <th rowspan="2" class="p-2 w-12 bg-white border-l border-amber-300 z-[70] font-bold text-[10px] text-slate-600">GIỜ</th>
-                      <th rowspan="2" class="p-2 w-10 bg-blue-100 text-[10px] border-l border-amber-300 font-bold text-blue-800">GH</th> 
-                      <th rowspan="2" class="p-2 w-10 bg-purple-100 text-[10px] border-l border-amber-300 font-bold text-purple-800">TN</th> 
-                      <th rowspan="2" class="p-2 w-10 bg-orange-100 text-[10px] border-l border-amber-300 font-bold text-orange-800">K</th> 
-                      <th rowspan="2" class="p-2 w-14 bg-indigo-100 text-[10px] border-l border-amber-300 font-bold text-indigo-800" title="Số ca nghiệp vụ T7/CN">Ca<br>cuối tuần</th>
+                      <th rowspan="2" class="p-2 w-12 bg-white border-l border-amber-300 z-[70] font-bold text-[10px] text-slate-600 cursor-pointer hover:bg-slate-50 transition-colors" on:click={() => toggleSort('totalHoursNum')} title="Sắp xếp theo Tổng giờ">GIỜ {sortField==='totalHoursNum'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th>
+                      <th rowspan="2" class="p-2 w-10 bg-blue-100 text-[10px] border-l border-amber-300 font-bold text-blue-800 cursor-pointer hover:bg-blue-200 transition-colors" on:click={() => toggleSort('gh')} title="Sắp xếp theo Giao hàng">GH {sortField==='gh'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th> 
+                      <th rowspan="2" class="p-2 w-10 bg-purple-100 text-[10px] border-l border-amber-300 font-bold text-purple-800 cursor-pointer hover:bg-purple-200 transition-colors" on:click={() => toggleSort('tn')} title="Sắp xếp theo Thu ngân">TN {sortField==='tn'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th> 
+                      <th rowspan="2" class="p-2 w-10 bg-orange-100 text-[10px] border-l border-amber-300 font-bold text-orange-800 cursor-pointer hover:bg-orange-200 transition-colors" on:click={() => toggleSort('kho')} title="Sắp xếp theo Kho">K {sortField==='kho'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th> 
+                      <th rowspan="2" class="p-2 w-12 bg-emerald-100 text-[10px] border-l border-amber-300 font-bold text-emerald-800 cursor-pointer hover:bg-emerald-200 transition-colors" on:click={() => toggleSort('nvCount')} title="Sắp xếp theo Tổng số ca nghiệp vụ">Tổng NV {sortField==='nvCount'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th>
+                      <th rowspan="2" class="p-2 w-14 bg-indigo-100 text-[10px] border-l border-amber-300 font-bold text-indigo-800 cursor-pointer hover:bg-indigo-200 transition-colors" title="Sắp xếp theo Số ca nghiệp vụ T7/CN" on:click={() => toggleSort('weCount')}>Ca<br>cuối tuần {sortField==='weCount'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th>
                   </tr> 
                   <tr>
                       {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d}
@@ -151,10 +190,9 @@
                   </tr>
               </thead> 
               <tbody class="divide-y text-xs"> 
-                  {#each previewStats as staff} 
+                  {#each displayStats as staff} 
                       {@const weekendStatus = getWeekendFairnessStatus(staff.id)}
-                      {@const weCount = getWeekendHardRoleCount(staff.id)}
-                      <tr class="transition-colors"> 
+                      <tr class="transition-colors hover:bg-slate-50"> 
                           <td class="p-2 border font-bold text-left sticky left-0 z-[50] shadow-r cursor-pointer hover:text-indigo-600 transition-all {staff.gender==='Nam'?'text-blue-700':'text-pink-600'} {weekendStatus !== 0 && inspectionMode==='weekend' ? (weekendStatus===1?'bg-red-100 ring-inset ring-2 ring-red-400 z-[60]':'bg-green-100 ring-inset ring-2 ring-green-400 z-[60]') : 'bg-white'}" on:click={() => dispatch('staffClick', {id: staff.id, name: staff.name})}>
                               {staff.name}
                               {#if weekendStatus === 1}<span class="block text-[8px] text-red-500 font-normal animate-pulse">Quá tải cuối tuần</span>{/if}
@@ -176,12 +214,13 @@
                                   {/if} 
                               </td> 
                           {/each} 
-                          <td class="p-2 border font-bold text-center bg-white text-slate-700 border-l {inspectionMode!=='none'?'opacity-100':''}">{Math.round(staff.totalHours)||0}</td>
+                          <td class="p-2 border font-bold text-center bg-white text-slate-700 border-l {inspectionMode!=='none'?'opacity-100':''}">{staff.totalHoursNum}</td>
                           <td class="p-2 border font-bold text-center bg-blue-50 text-blue-600 {inspectionMode!=='none'?'opacity-100':''}">{staff.gh||'-'}</td> 
                           <td class="p-2 border font-bold text-center bg-purple-50 text-purple-600 {inspectionMode!=='none'?'opacity-100':''}">{staff.tn||0}</td> 
                           <td class="p-2 border font-bold text-center bg-orange-50 text-orange-600 {inspectionMode!=='none'?'opacity-100':''}">{staff.kho||0}</td> 
+                          <td class="p-2 border font-bold text-center bg-emerald-50 text-emerald-700 border-l {inspectionMode!=='none'?'opacity-100':''}">{staff.nvCount||0}</td>
                           <td class="p-2 border font-bold text-center border-l {inspectionMode==='weekend' ? 'opacity-100' : 'opacity-100'} {weekendStatus===1?'text-red-600 bg-red-50':(weekendStatus===-1?'text-green-600 bg-green-50':'text-slate-600')}">
-                              {weCount}
+                              {staff.weCount}
                           </td>
                       </tr> 
                   {/each} 

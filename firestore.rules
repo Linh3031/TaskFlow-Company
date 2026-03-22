@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{document=**} { allow read, write: if true; }
+    match /tasks/{document=**} { allow read, write: if true; }
+    match /stores/{document=**} { allow read, write: if true; }
+    match /settings/{document=**} { allow read, write: if true; }
+    match /faq_bot/{document=**} { allow read, write: if true; }
+    match /bot_feedback/{document=**} { allow read, write: if true; }
+    match /8nttt_daily_records/{document=**} { allow read, write: if true; }
+    match /8nttt_monthly_stats/{document=**} { allow read, write: if true; }
+    match /debug_8nttt_logs/{document=**} { allow read, write: if true; }
+    // ĐÃ THÊM BẢNG NOTIFICATIONS ĐỂ SỬA LỖI THÔNG BÁO
+    match /notifications/{document=**} { allow read, write: if true; }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

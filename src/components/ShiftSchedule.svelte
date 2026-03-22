@@ -1,6 +1,4 @@
 <script>
-  // Version 46.0 - Global Store Sync & Super Radar Locator (Fuzzy Match)
-  // [CodeGenesis] Đã import thêm onDestroy để Fix rò rỉ reads
   import { onMount, onDestroy } from 'svelte';
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
@@ -24,8 +22,7 @@
   let viewYear = new Date().getFullYear();
   $: currentMonthStr = `${viewYear}-${String(viewMonth).padStart(2,'0')}`;
   
-  let currentMode = 'NV'; 
-
+  let currentMode = 'NV';
   let selectedStaff = null;
   let editingShift = null;
   let selectedDayStats = null;
@@ -38,8 +35,138 @@
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
   let unsubscribe = () => {};
+  
   $: if (activeTab === 'schedule' && $activeStoreId && currentMonthStr && currentMode === 'NV') { 
       loadSchedule(currentMonthStr, $activeStoreId);
+  }
+
+  // [NEW] Logic Smart Cover: Tạo mảng gợi ý trám ca khi có người OFF
+  let smartCoverSuggestions = [];
+  $: if (editingShift && editingShift.isOFF && scheduleData && isAdmin) {
+      smartCoverSuggestions = buildSmartCover(editingShift);
+  } else {
+      smartCoverSuggestions = [];
+  }
+
+  function buildSmartCover(target) {
+      let dayAssigns = scheduleData.data[target.day].filter(a => a.staffId !== target.staffId && a.shift !== 'OFF');
+      let stats = scheduleData.stats;
+
+      // Ưu tiên: Sort theo tổng giờ làm hiện tại tăng dần (Ai đói ca xếp trước)
+      dayAssigns.sort((a, b) => {
+          let hA = stats.find(s => s.id === a.staffId)?.totalHours || 0;
+          let hB = stats.find(s => s.id === b.staffId)?.totalHours || 0;
+          return hA - hB;
+      });
+
+      let suggestions = [];
+      let offShift = target.originalShift; 
+      if (offShift === 'OFF') return []; 
+
+      const addSugg = (type, title, acts) => suggestions.push({ type, title, actions: acts });
+
+      if (offShift === '123') {
+          // Priority 1: Dây chuyền (23 -> 123, 45 -> 2345)
+          let bList = dayAssigns.filter(a => a.shift === '23');
+          let cList = dayAssigns.filter(a => ['45', '456'].includes(a.shift));
+          bList.forEach(b => {
+              cList.forEach(c => {
+                  if (b.staffId !== c.staffId) {
+                      addSugg('chain', `Đẩy ca 1 cho ${b.name}, ghép ${c.shift} cho ${c.name}`, [
+                          { staffId: b.staffId, name: b.name, oldShift: b.shift, newShift: '123', role: target.originalRole },
+                          { staffId: c.staffId, name: c.name, oldShift: c.shift, newShift: c.shift === '45' ? '2345' : '23456', role: b.role }
+                      ]);
+                  }
+              });
+          });
+          // Priority 2: Trực tiếp (45 -> 12345)
+          let dList = dayAssigns.filter(a => ['45', '456'].includes(a.shift));
+          dList.forEach(d => {
+              addSugg('direct', `Ghép thẳng 123 cho ${d.name}`, [
+                  { staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '45' ? '12345' : '123456', role: target.originalRole }
+              ]);
+          });
+      }
+      else if (offShift === '456') {
+          // Priority 1: Dây chuyền (45 -> 456, 23 -> 2345)
+          let bList = dayAssigns.filter(a => a.shift === '45');
+          let cList = dayAssigns.filter(a => ['23', '123'].includes(a.shift));
+          bList.forEach(b => {
+              cList.forEach(c => {
+                  if (b.staffId !== c.staffId) {
+                      addSugg('chain', `Đẩy ca 6 cho ${b.name}, ghép ${c.shift} cho ${c.name}`, [
+                          { staffId: b.staffId, name: b.name, oldShift: b.shift, newShift: '456', role: target.originalRole },
+                          { staffId: c.staffId, name: c.name, oldShift: c.shift, newShift: c.shift === '23' ? '2345' : '12345', role: b.role }
+                      ]);
+                  }
+              });
+          });
+          // Priority 2: Trực tiếp (23 -> 23456)
+          let dList = dayAssigns.filter(a => ['23', '123'].includes(a.shift));
+          dList.forEach(d => {
+              addSugg('direct', `Ghép thẳng 456 cho ${d.name}`, [
+                  { staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '23' ? '23456' : '123456', role: target.originalRole }
+              ]);
+          });
+      }
+      else if (offShift === '23') {
+          let dList = dayAssigns.filter(a => ['45', '456'].includes(a.shift));
+          dList.forEach(d => addSugg('direct', `Ghép ca 23 cho ${d.name}`, [{ staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '45' ? '2345' : '23456', role: target.originalRole }]));
+      }
+      else if (offShift === '45') {
+          let dList = dayAssigns.filter(a => ['23', '123'].includes(a.shift));
+          dList.forEach(d => addSugg('direct', `Ghép ca 45 cho ${d.name}`, [{ staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '23' ? '2345' : '12345', role: target.originalRole }]));
+      }
+      return suggestions.slice(0, 5); // Hiển thị 5 option tốt nhất
+  }
+
+  // [NEW] Hàm thực thi ghi đè khi Admin chọn một phương án Trám Ca
+  async function executeSmartCover(actions) {
+      if (!editingShift || !scheduleData) return;
+      if (!confirm("Xác nhận ÁP DỤNG phương án Trám Ca Thông Minh này?")) return;
+
+      const dayKey = String(editingShift.day);
+      const dayList = [...scheduleData.data[dayKey]];
+      const newStats = [...scheduleData.stats];
+
+      // 1. Chuyển người hiện tại thành OFF
+      const tIdx = dayList.findIndex(x => x.staffId === editingShift.staffId);
+      if (tIdx > -1) {
+          const oldRole = dayList[tIdx].role;
+          dayList[tIdx] = { ...dayList[tIdx], shift: 'OFF', role: '' };
+
+          let rOld = ['GH', 'Giao Hàng'].includes(oldRole) ? 'gh' : (['TN', 'Thu Ngân'].includes(oldRole) ? 'tn' : (['K', 'Kho'].includes(oldRole) ? 'kho' : ''));
+          const sIdx = newStats.findIndex(s => s.id === editingShift.staffId);
+          if (rOld && sIdx > -1) newStats[sIdx][rOld] = Math.max(0, (newStats[sIdx][rOld]||0) - 1);
+      }
+
+      // 2. Chuyển những người trám ca sang ca mới
+      actions.forEach(act => {
+          const idx = dayList.findIndex(x => x.staffId === act.staffId);
+          if (idx > -1) {
+              const oldRole = dayList[idx].role;
+              dayList[idx] = { ...dayList[idx], shift: act.newShift, role: act.role };
+
+              let rOld = ['GH', 'Giao Hàng'].includes(oldRole) ? 'gh' : (['TN', 'Thu Ngân'].includes(oldRole) ? 'tn' : (['K', 'Kho'].includes(oldRole) ? 'kho' : ''));
+              let rNew = ['GH', 'Giao Hàng'].includes(act.role) ? 'gh' : (['TN', 'Thu Ngân'].includes(act.role) ? 'tn' : (['K', 'Kho'].includes(act.role) ? 'kho' : ''));
+
+              const sIdx = newStats.findIndex(s => s.id === act.staffId);
+              if (sIdx > -1) {
+                  if (rOld && rOld !== rNew) newStats[sIdx][rOld] = Math.max(0, (newStats[sIdx][rOld]||0) - 1);
+                  if (rNew && rOld !== rNew) newStats[sIdx][rNew] = (newStats[sIdx][rNew]||0) + 1;
+              }
+          }
+      });
+
+      // 3. Đồng bộ lên Cloud
+      try {
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), {
+              [`data.${dayKey}`]: dayList,
+              stats: newStats
+          });
+          editingShift = null; // Đóng modal
+          alert("✅ Đã Trám ca tự động và lưu lịch thành công!");
+      } catch (e) { alert("Lỗi hệ thống: " + e.message); }
   }
 
   function isPastDay(d) {
@@ -67,7 +194,8 @@
               if(snap.exists()) { scheduleData = snap.data(); } 
               else { scheduleData = null; }
           });
-      } catch (e) { loading = false; errorMsg = e.message; }
+      } catch (e) { loading = false; errorMsg = e.message;
+      }
   }
 
   async function handleRestoreBackup() {
@@ -77,11 +205,25 @@
       try {
           const backupRef = doc(db, 'stores', $activeStoreId, 'schedules', `${currentMonthStr}_backup`);
           const backupSnap = await getDoc(backupRef);
-          if (!backupSnap.exists()) { alert("❌ Không tìm thấy bản sao lưu nào."); loading = false; return; }
+          if (!backupSnap.exists()) { alert("❌ Không tìm thấy bản sao lưu nào."); loading = false; return;
+          }
           const mainRef = doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr);
           await setDoc(mainRef, backupSnap.data());
           alert("✅ Đã khôi phục thành công!");
-      } catch (e) { alert("Lỗi: " + e.message); } finally { loading = false; }
+      } catch (e) { alert("Lỗi: " + e.message);
+      } finally { loading = false; }
+  }
+
+  async function handleLockBaseline() {
+      if (!isAdmin || !scheduleData) return;
+      if (!confirm(`🔒 CHỐT LỊCH GỐC THÁNG ${viewMonth}/${viewYear}?\n\nHệ thống sẽ lưu toàn bộ kết quả sau khi bạn đã chỉnh sửa xong làm LỊCH GỐC (Baseline) để tính toán Lũy kế cho các tháng sau.\n\nBạn có chắc chắn?`)) return;
+      try {
+          const ref = doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr);
+          await updateDoc(ref, { baselineStats: scheduleData.stats });
+          alert("✅ Đã CHỐT Lịch Gốc thành công! Lũy kế các tháng sau sẽ dựa trên bản này.");
+      } catch (e) {
+          alert("Lỗi: " + e.message);
+      }
   }
 
   function getShiftColor(code) {
@@ -115,7 +257,8 @@
       if (startDayIdx === 0) startDayIdx = 6;
       else startDayIdx = startDayIdx - 1; 
       let blankCells = Array(startDayIdx).fill(null); 
-      const stat = scheduleData.stats.find(s => s.id === staffId) || { totalHours:0, gh:0, tn:0, kho:0 }; 
+      const stat = scheduleData.stats.find(s => s.id === staffId) ||
+      { totalHours:0, gh:0, tn:0, kho:0 }; 
       selectedStaff = { id: staffId, name: staffName, days, blankCells, stats: stat };
   }
   
@@ -123,10 +266,14 @@
       if (!isAdmin) return;
       const staffInfo = scheduleData.stats.find(s => s.id === staffId);
       tempEditingShift = { 
-          day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', 
-          isOFF: assign.shift === 'OFF', gender: staffInfo ? staffInfo.gender : 'Nữ', 
-          originalRole: assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV'), 
-          originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift 
+          day, staffId, name: assign.name, shift: assign.shift, role: assign.role ||
+          'TV', 
+          isOFF: assign.shift === 'OFF', gender: staffInfo ?
+          staffInfo.gender : 'Nữ', 
+          originalRole: assign.originalRole !== undefined ?
+          assign.originalRole : (assign.role || 'TV'), 
+          originalShift: assign.originalShift !== undefined ?
+          assign.originalShift : assign.shift 
       }; 
       editingShift = JSON.parse(JSON.stringify(tempEditingShift));
   }
@@ -141,22 +288,26 @@
           const dayKey = String(editingShift.day);
           const currentDayAssignments = scheduleData.data[dayKey]; 
           let targetRoleCode = 'TV'; 
-          if (editingShift.role === 'GH') targetRoleCode = 'GH';
-          else if (editingShift.role === 'Thu Ngân') targetRoleCode = 'TN'; 
-          else if (editingShift.role === 'Kho') targetRoleCode = 'Kho';
+          
+          if (editingShift.role === 'GH' || editingShift.role === 'Giao Hàng') targetRoleCode = 'GH';
+          else if (editingShift.role === 'Thu Ngân' || editingShift.role === 'TN') targetRoleCode = 'TN';
+          else if (editingShift.role === 'Kho' || editingShift.role === 'K') targetRoleCode = 'Kho';
           const comboConfig = approvedCombos.find(c => { 
-              let cRole = c.role || 'TV'; if (cRole === 'Thu Ngân') cRole = 'TN'; 
+              let cRole = c.role || 'TV'; if (cRole === 'Thu Ngân' || cRole === 'TN') cRole = 'TN'; 
               return c.code === editingShift.shift && cRole === targetRoleCode; 
           });
           const quota = comboConfig ? (parseInt(comboConfig.qty) || 0) : 0;
           const currentCount = currentDayAssignments.filter(a => { 
               if (a.staffId === editingShift.staffId) return false; 
-              let r = a.role || 'TV'; if (r === 'Giao Hàng') r = 'GH'; if (r === 'Thu Ngân') r = 'TN'; if (r === 'Kho') r = 'Kho'; 
+              let r = a.role || 'TV'; 
+              if (r === 'Giao Hàng' || r === 'GH') r = 'GH'; 
+              if (r === 'Thu Ngân' || r === 'TN') r = 'TN'; 
+              if (r === 'Kho' || r === 'K') r = 'Kho'; 
               return a.shift === editingShift.shift && r === targetRoleCode; 
           }).length;
-          
           if (currentCount + 1 > quota) { 
-              const msg = quota === 0 ? `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
+              const msg = quota === 0 ?
+              `⛔ CẢNH BÁO: Combo [${editingShift.shift} - ${targetRoleCode}] KHÔNG CÓ trong bảng định mức!\n(Quota = 0)\n\nBạn có muốn ép buộc gán không?` : `⚠️ CẢNH BÁO VƯỢT ĐỊNH MỨC:\n\nCombo [${editingShift.shift} - ${targetRoleCode}] quy định: ${quota}.\nHiện tại: ${currentCount}.\nThêm mới thành: ${currentCount + 1}.\n\nTiếp tục?`;
               if (!confirm(msg)) return; 
           } 
       } 
@@ -165,7 +316,8 @@
       const dayList = [...scheduleData.data[dayKey]];
       const idx = dayList.findIndex(x => x.staffId === editingShift.staffId);
       if (idx !== -1) { 
-          const oldRole = dayList[idx].role || 'TV';
+          const oldRole = dayList[idx].role ||
+          'TV';
           const newRole = editingShift.isOFF ? '' : (editingShift.role === 'TV' ? '' : editingShift.role);
           const updatedAssignment = { ...dayList[idx], shift: editingShift.isOFF ? 'OFF' : editingShift.shift, role: newRole }; 
           dayList[idx] = updatedAssignment;
@@ -173,15 +325,19 @@
           const statIdx = newStats.findIndex(s => s.id === editingShift.staffId);
           if (statIdx !== -1) { 
               const s = newStats[statIdx];
-              let rOld = oldRole === 'Giao Hàng' ? 'gh' : (oldRole === 'Thu Ngân' ? 'tn' : (oldRole === 'Kho' ? 'kho' : ''));
+              let rOld = (oldRole === 'Giao Hàng' || oldRole === 'GH') ?
+              'gh' : ((oldRole === 'Thu Ngân' || oldRole === 'TN') ? 'tn' : ((oldRole === 'Kho' || oldRole === 'K') ? 'kho' : ''));
               if(rOld) s[rOld] = Math.max(0, (s[rOld]||0) - 1); 
-              let rNew = newRole === 'Giao Hàng' ? 'gh' : (newRole === 'Thu Ngân' ? 'tn' : (newRole === 'Kho' ? 'kho' : ''));
+              
+              let rNew = (newRole === 'Giao Hàng' || newRole === 'GH') ?
+              'gh' : ((newRole === 'Thu Ngân' || newRole === 'TN') ? 'tn' : ((newRole === 'Kho' || newRole === 'K') ? 'kho' : ''));
               if(rNew) s[rNew] = (s[rNew]||0) + 1; 
           } 
           try { 
               await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
               editingShift = null; 
-          } catch (e) { alert("Lỗi: " + e.message); } 
+          } catch (e) { alert("Lỗi: " + e.message);
+          } 
       } 
   }
   
@@ -263,16 +419,11 @@
       exportScheduleToExcel({ scheduleData, viewMonth, viewYear, selectedViewStore: $activeStoreId, getWeekday, getWeekendHardRoleCount });
   }
 
-  // [CodeGenesis] Lắp đặt Siêu Radar (Fuzzy Match)
   function scrollToMyRow() {
       if (!$currentUser || !scheduleData || !scheduleData.stats) return;
       const normalizeStr = (str) => {
           if (!str) return '';
-          return String(str)
-              .normalize('NFD')                     // Tách dấu ra khỏi chữ
-              .replace(/[\u0300-\u036f]/g, '')      // Xóa các dấu vừa tách
-              .toLowerCase()                        // Đưa về chữ thường
-              .replace(/[^a-z0-9]/g, '');           // Xóa mọi khoảng trắng, gạch ngang, ký tự đặc biệt
+          return String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
       };
       const cUsername = normalizeStr($currentUser.username);
       const cName = normalizeStr($currentUser.name);
@@ -281,18 +432,11 @@
           const sId = normalizeStr(s.id);
           const sName = normalizeStr(s.name);
           const sUsername = normalizeStr(s.username);
-
-          // 1. So sánh tuyệt đối ID (đã lột bỏ rác)
           if (sId && (sId === cId || sId === cUsername)) return true;
-          
-          // 2. So sánh tuyệt đối Username (đã lột bỏ rác)
           if (sUsername && sUsername === cUsername) return true;
-          
-          // 3. So sánh Tên bằng phương pháp nhúng (Includes):
-          // Chỉ cần chuỗi này nằm trong chuỗi kia là hợp lệ (ví dụ: tran4118 nằm trong nguyenthitran4118)
-          if (sName && cName && (sName.includes(cName) || cName.includes(sName))) return true;
+          if (sName && cName && (sName.includes(cName) || cName.includes(sName))) 
+          return true;
           if (sName && cUsername && (sName.includes(cUsername) || cUsername.includes(sName))) return true;
-          
           return false;
       });
       if (myStat) {
@@ -302,9 +446,7 @@
               const td = row.firstElementChild;
               if (td) {
                   td.classList.add('!bg-yellow-200', 'transition-colors', 'duration-500');
-                  setTimeout(() => {
-                      td.classList.remove('!bg-yellow-200');
-                  }, 2000);
+                  setTimeout(() => { td.classList.remove('!bg-yellow-200'); }, 2000);
               }
           } else {
               alert("Đã tìm thấy dữ liệu của bạn, nhưng giao diện chưa kịp hiển thị. Vui lòng thử lại!");
@@ -323,7 +465,6 @@
       if(tableContainer) tableContainer.scrollLeft = tableContainer.scrollWidth; } } 
   ];
 
-  // [CodeGenesis] Sửa lỗi Quota: Clear onSnapshot khi đóng/thoát Tab Lịch Ca
   onDestroy(() => {
       if (unsubscribe) unsubscribe();
   });
@@ -336,7 +477,7 @@
     on:locate={scrollToMyRow}
     on:openHistory={() => showHistoryModal = true}
     on:restoreBackup={handleRestoreBackup}
-    on:exportExcel={handleExportExcel}
+    on:lockBaseline={handleLockBaseline} on:exportExcel={handleExportExcel}
     on:startTour={() => showScheduleTour = true}
 />
 
@@ -353,6 +494,7 @@
             {#if isAdmin}<p class="text-xs text-indigo-500 mt-1">Vui lòng vào mục "Quản trị" để tạo.</p>{/if}
         </div>
     {:else}
+
         <ScheduleTable 
             {scheduleData} {showPastDays} {highlightedDay} {isAdmin}
             {isPastDay} {getWeekday} {getRoleBadge} {getShiftColor} {getWeekendHardRoleCount}
@@ -377,7 +519,14 @@
 {/if}
 
 {#if editingShift}
-    <EditShiftModal bind:editingShift {tempEditingShift} on:close={() => editingShift = null} on:save={saveShiftChange} />
+    <EditShiftModal 
+        bind:editingShift 
+        {tempEditingShift} 
+        suggestions={smartCoverSuggestions}
+        on:close={() => editingShift = null} 
+        on:save={saveShiftChange} 
+        on:applySmartCover={(e) => executeSmartCover(e.detail)}
+    />
 {/if}
 
 {#if selectedDayStats}
