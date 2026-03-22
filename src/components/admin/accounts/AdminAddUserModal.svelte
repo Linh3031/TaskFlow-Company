@@ -1,38 +1,36 @@
 <script>
   import { db } from '../../../lib/firebase';
-  import { doc, writeBatch, serverTimestamp, updateDoc } from 'firebase/firestore';
+  // [MODIFIED] Bổ sung thêm setDoc và deleteDoc để phục vụ thuật toán đổi ID tài khoản
+  import { doc, writeBatch, serverTimestamp, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
   import { safeString } from '../../../lib/utils';
   import { createEventDispatcher } from 'svelte';
-  import { currentUser } from '../../../lib/stores'; // Import để lấy danh sách kho của Admin
+  import { currentUser } from '../../../lib/stores'; 
 
   export let show = false;
   export let isSuperAdmin = false;
   export let selectedStoreId = '';
   export let targetStoreInput = '';
-  export let editUser = null; // Props mới để nhận data sửa
+  export let editUser = null; 
   
   let singleUsername = '';
-  let singlePass = '123456'; 
+  let singlePass = '123456';
   let singleRole = 'admin';
   let isLoading = false;
   
-  // [CodeGenesis v2] Biến lưu dữ liệu mở rộng cho PG
   let singleName = '';
   let singleBrand = '';
   let singleCategory = '';
   
-  let selectedStoreIdsForAdmin = []; // Mảng chứa các kho mà Admin thường tick chọn
+  let selectedStoreIdsForAdmin = [];
 
   const dispatch = createEventDispatcher();
 
-  // Theo dõi khi mở Modal hoặc đổi User Edit
   $: if (show) {
       if (editUser) {
           singleUsername = editUser.username || '';
           singleRole = editUser.role || 'staff';
-          singlePass = ''; // Để trống là không đổi mật khẩu
+          singlePass = ''; 
           
-          // Nạp dữ liệu cũ của PG vào form nếu có
           singleName = editUser.name !== editUser.username ? (editUser.name || '') : '';
           singleBrand = editUser.brand || '';
           singleCategory = editUser.category || '';
@@ -47,7 +45,6 @@
           singlePass = '123456';
           singleRole = 'staff';
           
-          // Reset dữ liệu PG
           singleName = '';
           singleBrand = '';
           singleCategory = '';
@@ -61,6 +58,7 @@
   async function handleSaveUser() {
       if (!singleUsername) return alert("Thiếu tên đăng nhập!");
       let finalStoreIds = [];
+      
       if (isSuperAdmin) {
           finalStoreIds = targetStoreInput.split(/[,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
           if (finalStoreIds.length === 0) return alert("Chưa nhập Mã Kho!");
@@ -69,67 +67,102 @@
           if (finalStoreIds.length === 0) return alert("Phải chọn ít nhất 1 kho!");
       }
 
-      const uid = safeString(singleUsername).toLowerCase();
+      // [NEW] Lấy string gốc để lưu hiển thị, và uid chữ thường để làm khóa chính (Document ID)
+      const exactUsername = singleUsername.trim();
+      const newUid = safeString(exactUsername).toLowerCase();
+      
       isLoading = true;
+
       try {
           if (editUser) {
-              // LOGIC CẬP NHẬT (EDIT)
+              // --- LOGIC CẬP NHẬT (EDIT) ---
+              const oldUid = safeString(editUser.username).toLowerCase();
+
+              // Nếu có đổi Username, cảnh báo Admin trước khi Migration
+              if (newUid !== oldUid) {
+                  if (!confirm(`⚠️ BẠN ĐANG ĐỔI TÊN ĐĂNG NHẬP!\n\nHệ thống sẽ chuyển tài khoản từ [${editUser.username}] sang [${exactUsername}]. Lịch sử phân ca cũ sẽ không đi theo ID mới.\n\nBạn có chắc chắn muốn đổi không?`)) {
+                      isLoading = false;
+                      return;
+                  }
+              }
+
               const updateData = {
+                  username: exactUsername, // Giữ nguyên chữ hoa/thường theo Admin nhập
                   role: singleRole,
                   storeIds: finalStoreIds,
-                  storeId: finalStoreIds[0] // Lấy kho đầu tiên làm kho hiển thị chính
+                  storeId: finalStoreIds[0] 
               };
+
               if (singlePass.trim()) {
                   updateData.pass = singlePass.trim();
               }
               
-              // [CodeGenesis v2] Lưu thêm dữ liệu nếu là PG
               if (singleRole === 'pg') {
-                  updateData.name = singleName.trim() || uid;
+                  updateData.name = singleName.trim() || exactUsername;
                   updateData.brand = singleBrand.trim();
                   updateData.category = singleCategory.trim();
               }
 
-              await updateDoc(doc(db, 'users', uid), updateData);
-              if (isSuperAdmin) {
+              if (newUid !== oldUid) {
+                  // THUẬT TOÁN DI DỜI TÀI KHOẢN (MIGRATION)
+                  const fullNewData = { ...editUser, ...updateData };
+                  fullNewData.username_idx = newUid;
+
                   const batch = writeBatch(db);
-                  finalStoreIds.forEach(s => {
-                      batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}` }, { merge: true });
-                  });
+                  batch.set(doc(db, 'users', newUid), fullNewData); // Tạo Doc mới
+                  batch.delete(doc(db, 'users', oldUid)); // Xóa Doc cũ
+                  
+                  if (isSuperAdmin) {
+                      finalStoreIds.forEach(s => {
+                          batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}` }, { merge: true });
+                      });
+                  }
                   await batch.commit();
+              } else {
+                  // CẬP NHẬT BÌNH THƯỜNG (Không đổi Username)
+                  await updateDoc(doc(db, 'users', oldUid), updateData);
+                  if (isSuperAdmin) {
+                      const batch = writeBatch(db);
+                      finalStoreIds.forEach(s => {
+                          batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}` }, { merge: true });
+                      });
+                      await batch.commit();
+                  }
               }
-              alert(`✅ Đã cập nhật ${uid}!`);
+
+              alert(`✅ Đã cập nhật thành công tài khoản [${exactUsername}]!`);
               dispatch('success', finalStoreIds[0]);
+              
           } else {
-              // LOGIC TẠO MỚI (CREATE)
+              // --- LOGIC TẠO MỚI (CREATE) ---
               if (!singlePass) return alert("Thiếu mật khẩu!");
               const batch = writeBatch(db);
               
               const payload = {
-                  username: uid, username_idx: uid,
+                  username: exactUsername, // [FIX] Lưu chính xác chữ hoa/thường
+                  username_idx: newUid,
                   pass: singlePass,
-                  // Tên hiển thị sẽ theo Tên PG hoặc lấy Username làm mặc định
-                  name: (singleRole === 'pg' && singleName.trim()) ? singleName.trim() : uid,
+                  name: (singleRole === 'pg' && singleName.trim()) ? singleName.trim() : exactUsername,
                   role: singleRole,
                   storeId: finalStoreIds[0],
                   storeIds: finalStoreIds,
                   createdAt: serverTimestamp()
               };
 
-              // [CodeGenesis v2] Gắn thêm dữ liệu nếu chọn Role là PG
               if (singleRole === 'pg') {
                   payload.brand = singleBrand.trim();
                   payload.category = singleCategory.trim();
               }
 
-              batch.set(doc(db, 'users', uid), payload);
+              batch.set(doc(db, 'users', newUid), payload);
+              
               if (isSuperAdmin) {
                   finalStoreIds.forEach(s => {
                       batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}`, createdAt: serverTimestamp() }, { merge: true });
                   });
               }
               await batch.commit();
-              alert(`✅ Đã thêm ${uid} vào ${finalStoreIds.join(', ')}!`);
+              alert(`✅ Đã thêm [${exactUsername}] vào ${finalStoreIds.join(', ')}!`);
               dispatch('success', finalStoreIds[0]);
           }
       } catch (e) { 
@@ -178,7 +211,7 @@
                   <label for="single-user" class="text-[10px] font-bold text-slate-400 uppercase">Tên đăng nhập</label>
                   <div class="relative mt-1">
                       <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">person</span>
-                      <input id="single-user" type="text" bind:value={singleUsername} disabled={!!editUser} class="w-full pl-9 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 disabled:opacity-60 disabled:bg-gray-100" placeholder="VD: nv_moi">
+                      <input id="single-user" type="text" bind:value={singleUsername} class="w-full pl-9 p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200" placeholder="VD: NV_Moi">
                   </div>
               </div>
               
