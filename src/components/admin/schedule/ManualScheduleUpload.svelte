@@ -9,7 +9,7 @@
     export let scheduleStaffList = [];
     export let isLoading = false;
 
-    // [SURGICAL EXCEL LOGIC] Tách biệt hoàn toàn khỏi Container
+    // [SURGICAL EXCEL LOGIC] Thêm dữ liệu mẫu 5 ngày đầu cho nhân viên số 1
     function downloadManualTemplate() {
         const wb = utils.book_new();
         const daysInMonth = new Date(scheduleYear, scheduleMonth, 0).getDate();
@@ -26,10 +26,21 @@
 
         const wsData = [headers, weekdaysRow];
         
-        scheduleStaffList.forEach((s) => {
+        scheduleStaffList.forEach((s, index) => {
             let row = [s.id, s.name, s.gender || 'Nữ']; 
-            for(let i=1; i<=daysInMonth; i++) {
-                row.push(""); 
+            
+            for (let i = 1; i <= daysInMonth; i++) {
+                // Đổ dữ liệu mẫu cho 5 ngày đầu tiên của nhân viên dòng đầu tiên
+                if (index === 0) {
+                    if (i === 1) row.push("123");          // Mẫu Tư vấn
+                    else if (i === 2) row.push("456-TN");  // Mẫu Thu ngân
+                    else if (i === 3) row.push("12-56-K"); // Mẫu Kho gãy
+                    else if (i === 4) row.push("OFF");     // Mẫu Nghỉ
+                    else if (i === 5) row.push("2345-GH"); // Mẫu Giao hàng
+                    else row.push("");
+                } else {
+                    row.push(""); // Các nhân viên khác để trống hoàn toàn
+                }
             }
             wsData.push(row);
         });
@@ -72,7 +83,7 @@
         if (!file) return;
         
         isLoading = true;
-        dispatch('loading', true); // Báo lên cha để hiện spinner nếu cần
+        dispatch('loading', true);
 
         try {
             const data = await file.arrayBuffer();
@@ -136,7 +147,6 @@
 
             const statsArray = orderedStaffIds.map(id => parsedStatsMap[id]);
 
-            // Phát sự kiện đẩy dữ liệu lên cha
             dispatch('manualPreview', { schedule: parsedSchedule, stats: statsArray });
 
         } catch(e) { 
