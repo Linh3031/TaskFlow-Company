@@ -19,7 +19,7 @@
   import Chatbot from './components/Chatbot.svelte';
 
   // [CodeGenesis] Quản lý Phiên bản PWA
-  const APP_VERSION = 6; // Tăng số này lên khi bạn có bản cập nhật mới
+  const APP_VERSION = 7; // Tăng số này lên khi bạn có bản cập nhật mới
   let showUpdatePrompt = false;
 
   let activeTab = '8nttt';
