@@ -1,12 +1,11 @@
 <script>
-  // Version 60.0 - Architectural Refactor (Tách God Component)
+  // Version 61.0 - Architectural Refactor (Hỗ trợ Data Flow cho Upload Excel thủ công)
   import AdminScheduleSetup from './schedule/AdminScheduleSetup.svelte';
   import AdminScheduleReview from './schedule/AdminScheduleReview.svelte';
   import { defaultMatrix, DEFAULT_COLS } from './schedule/scheduleConstants.js';
 
   export let targetStore = '';
   
-  // -- STATE DÙNG CHUNG CỦA CẢ 2 GIAI ĐOẠN --
   let isLoading = false;
   let scheduleStaffList = [];
   let staffStats = { total: 0, male: 0, female: 0 };
@@ -21,7 +20,9 @@
   let genderConfig = { kho: 'none', tn: 'none' };
   let customComboCols = [...DEFAULT_COLS]; 
 
-  let triggerPreview = 0; // Biến tín hiệu để kích hoạt hàm Preview ở file con
+  let triggerPreview = 0; 
+  // [NEW] Biến hứng dữ liệu dịch ngược từ file Excel
+  let manualPreviewPayload = null; 
 </script>
 
 <div class="flex flex-col gap-6 w-full pb-20 animate-fadeIn">
@@ -41,6 +42,7 @@
         bind:genderConfig
         bind:customComboCols
         on:preview={() => triggerPreview++}
+        on:manualPreview={(e) => manualPreviewPayload = e.detail} 
     />
 
     <AdminScheduleReview 
@@ -58,6 +60,7 @@
         {weekendMatrix}
         {activeMatrixMode}
         {triggerPreview}
+        {manualPreviewPayload}
         on:switchTab
     />
 </div>

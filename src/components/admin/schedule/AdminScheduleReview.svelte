@@ -10,11 +10,11 @@
     import AdminEditShiftModal from './AdminEditShiftModal.svelte';
     import AdminPersonalScheduleModal from './AdminPersonalScheduleModal.svelte';
     import AdminDayStatsModal from './AdminDayStatsModal.svelte';
-    import SmartSwapModal from './SmartSwapModal.svelte';
-    // [NEW IMPORT]
+    import SmartSwapModal from './SmartSwapModal.svelte'; 
     import { INSPECTION_OPTIONS, getShiftColor, getRoleBadge, isHardRole } from './scheduleConstants.js';
 
     const dispatch = createEventDispatcher();
+
     export let targetStore;
     export let isLoading;
     export let scheduleStaffList;
@@ -29,6 +29,7 @@
     export let weekendMatrix;
     export let activeMatrixMode;
     export let triggerPreview = 0;
+    export let manualPreviewPayload = null; // [NEW] Nhận Payload từ Excel
 
     let previewScheduleData = null;
     let previewStats = [];
@@ -44,15 +45,30 @@
     let selectedStaff = null;
     let selectedDayStats = null;
     let showSmartSwap = false;
-    // [NEW STATE]
 
     $: activeSuggestedCombos = activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos;
     $: totalCombos = activeSuggestedCombos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
-    // Lắng nghe lệnh sinh lịch từ Component cha
-    $: if (triggerPreview > 0) { handleGeneratePreview(); }
     
-    // Nếu đổi Kho khác, reset bảng Review
+    $: if (triggerPreview > 0) { handleGeneratePreview(); }
     $: if (targetStore) { handleResetPreview(); }
+
+    // [NEW] Chặn ngang dòng thác dữ liệu để render dữ liệu Excel
+    $: if (manualPreviewPayload) {
+        previewScheduleData = manualPreviewPayload.schedule;
+        previewStats = manualPreviewPayload.stats;
+        pureSystemStats = JSON.parse(JSON.stringify(manualPreviewPayload.stats));
+        // Lừa hệ thống để khi ấn Áp dụng vẫn giữ nguyên cấu trúc lưu trữ
+        originalResult = { endOffset: 0 }; 
+        optimizationLogs = ["📥 Đã tải lên dữ liệu phân ca thủ công từ file Excel thành công."];
+        inspectionMode = 'none';
+        
+        setTimeout(() => { 
+            const previewEl = document.getElementById('preview-schedule-container'); 
+            if(previewEl) previewEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); 
+        }, 100);
+        
+        manualPreviewPayload = null; // Reset lại để hứng lần upload tiếp theo
+    }
 
     async function handleGeneratePreview() { 
         if (totalCombos > staffStats.total) { 
@@ -198,8 +214,7 @@
         isLoading = true;
         setTimeout(() => { const result = autoFixRotation(previewScheduleData, scheduleMonth, scheduleYear); if (result.success) { previewScheduleData = result.schedule; optimizationLogs = [...optimizationLogs, ...result.logs]; alert(`✅ Đã sửa thành công ${result.count} lỗi!`); } else { alert("✅ Hệ thống đã tối ưu."); } isLoading = false; }, 300);
     }
-    
-    // [NEW] Xử lý cân bằng mệt mỏi
+
     function handleAutoFixFatigue() {
         if (!previewScheduleData) return;
         isLoading = true;
@@ -209,7 +224,6 @@
                 previewScheduleData = result.schedule;
                 optimizationLogs = [...optimizationLogs, ...result.logs];
                 
-                // Cập nhật lại Stats cho UI
                 const newRoleStats = {};
                 scheduleStaffList.forEach(s => {
                     let tn=0, kho=0, gh=0;
@@ -286,7 +300,7 @@
             }
             await setDoc(mainRef, { 
                 config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig, comboCols: customComboCols }, 
-                data: previewScheduleData, stats: previewStats, systemStats: pureSystemStats, baselineStats: pureSystemStats, endOffset: originalResult.endOffset, updatedAt: serverTimestamp(), updatedBy: $currentUser.username 
+                data: previewScheduleData, stats: previewStats, systemStats: pureSystemStats, baselineStats: pureSystemStats, endOffset: originalResult?.endOffset || 0, updatedAt: serverTimestamp(), updatedBy: $currentUser.username 
             });
             alert("✅ Đã áp dụng lịch thành công!"); 
             dispatch('switchTab', 'schedule'); 
@@ -372,7 +386,7 @@
     function handleDayHeaderClick(d) { showDayStats(d); }
 </script>
 
-<div id="combo-table-area">
+<div id="combo-table-area" class="animate-fadeIn">
     <div class="flex items-center gap-2 mb-4 px-2">
         <label class="flex items-center gap-2 cursor-pointer bg-amber-50 text-amber-800 px-4 py-2.5 rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors shadow-sm">
             <input type="checkbox" bind:checked={ignoreHistory} class="w-4 h-4 text-amber-600 rounded">
@@ -398,9 +412,9 @@
         {isCellRelevant}
         on:inspectionChange={(e) => inspectionMode = e.detail}
         on:fixRotation={handleAutoFixRotation}
-        on:fixFatigue={handleAutoFixFatigue}
         on:fixWeekend={handleAutoFixWeekend}
         on:fixGender={handleAutoFixGender}
+        on:fixFatigue={handleAutoFixFatigue}
         on:optimize={handleOptimize}
         on:reset={handleResetPreview}
         on:apply={handleApplySchedule}
@@ -461,7 +475,6 @@
             });
             previewScheduleData = newSchedule;
             
-            // Tính toán lại Stats
             const newRoleStats = {};
             scheduleStaffList.forEach(s => {
                 let tn=0, kho=0, gh=0;

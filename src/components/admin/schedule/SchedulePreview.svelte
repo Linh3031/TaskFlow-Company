@@ -194,10 +194,10 @@
                       {@const weekendStatus = getWeekendFairnessStatus(staff.id)}
                       <tr class="transition-colors hover:bg-slate-50"> 
                           <td class="p-2 border font-bold text-left sticky left-0 z-[50] shadow-r cursor-pointer hover:text-indigo-600 transition-all {staff.gender==='Nam'?'text-blue-700':'text-pink-600'} {weekendStatus !== 0 && inspectionMode==='weekend' ? (weekendStatus===1?'bg-red-100 ring-inset ring-2 ring-red-400 z-[60]':'bg-green-100 ring-inset ring-2 ring-green-400 z-[60]') : 'bg-white'}" on:click={() => dispatch('staffClick', {id: staff.id, name: staff.name})}>
-                              {staff.name}
-                              {#if weekendStatus === 1}<span class="block text-[8px] text-red-500 font-normal animate-pulse">Quá tải cuối tuần</span>{/if}
-                              {#if weekendStatus === -1}<span class="block text-[8px] text-green-600 font-normal animate-pulse">Thiếu ca cuối tuần</span>{/if}
-                          </td> 
+    <span class="capitalize">{staff.name}</span>
+    {#if weekendStatus === 1}<span class="block text-[8px] text-red-500 font-normal animate-pulse">Quá tải cuối tuần</span>{/if}
+    {#if weekendStatus === -1}<span class="block text-[8px] text-green-600 font-normal animate-pulse">Thiếu ca cuối tuần</span>{/if}
+</td>
                           {#each Object.keys(previewScheduleData).sort((a,b)=>Number(a)-Number(b)) as d} 
                               {@const assign = previewScheduleData[d].find(x => x.staffId === staff.id)} 
                               {@const errorMsg = checkInspectionError(d, assign, inspectionMode)}

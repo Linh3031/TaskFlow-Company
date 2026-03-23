@@ -88,7 +88,7 @@
         <tbody class="divide-y text-xs">
             {#each displayStats as staff, i}
                 <tr id="staff-row-{staff.id}" class="hover:bg-blue-50 transition-colors">
-                    <td id={i===0 ? 'tour-staff-name' : ''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-20 cursor-pointer hover:text-indigo-600 hover:underline underline-offset-2 shadow pl-3 truncate min-w-[140px] max-w-[140px] {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}" title="Click để xem lịch cá nhân" on:click={() => dispatch('clickStaff', { id: staff.id, name: staff.name })}>{staff.name}</td>
+                    <td id={i===0 ? 'tour-staff-name' : ''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-20 cursor-pointer hover:text-indigo-600 hover:underline underline-offset-2 shadow pl-3 truncate min-w-[140px] max-w-[140px] {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}" title="Click để xem lịch cá nhân" on:click={() => dispatch('clickStaff', ... { id: staff.id, name: staff.name })}><span class="capitalize">{staff.name}</span></td>
                     {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
                         {#if showPastDays || !isPastDay(d)}
                             {@const assign = (scheduleData.data[d]||[]).find(x => x.staffId === staff.id)}
