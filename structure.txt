@@ -14,6 +14,7 @@ src/components/ShiftScheduleParts/DayStatsModal.svelte
 src/components/ShiftScheduleParts/PGInfoModal.svelte
 src/components/ShiftScheduleParts/EditShiftModal.svelte
 src/components/ShiftScheduleParts/ScheduleControls.svelte
+src/components/ShiftScheduleParts/LegacySyncManager.svelte
 src/components/ShiftScheduleParts/RoadshowPanel.svelte
 src/components/ShiftScheduleParts/PersonalScheduleModal.svelte
 src/components/ShiftScheduleParts/PGScheduleTable.svelte
@@ -63,11 +64,13 @@ src/lib/stores.js
 src/lib/optimization.js
 src/lib/Counter.svelte
 src/lib/shiftConstants.js
+src/lib/smartCover.js
 src/lib/comboCalculator.js
 src/lib/scheduleLogic.js
 src/lib/utils.js
 src/lib/firebase.js
 src/lib/smartSwap.js
+src/lib/shiftUtils.js
 src/modules
 src/modules/settings.service.js
 src/assets
