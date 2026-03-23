@@ -1,5 +1,5 @@
 <script>
-  // Version 47.0 - Clean Header (Moved Config to Schedule)
+  // Version 48.0 - [CodeGenesis] Kích hoạt lại Tab Quản lý Mẫu Công Việc (AdminTemplate)
   import { createEventDispatcher } from 'svelte';
   import { currentUser } from '../lib/stores';
   import { db } from '../lib/firebase';
@@ -11,12 +11,11 @@
   const dispatch = createEventDispatcher();
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
   $: myStores = $currentUser?.storeIds || [];
-  
   let targetStore = '';
   $: if (myStores.length > 0 && !targetStore) { targetStore = myStores[0]; }
   
   $: isDemoMode = targetStore?.includes('DEMO');
-  let activeSection = 'schedule'; 
+  let activeSection = 'schedule';
 
   function handleSwitchTab(e) {
       dispatch('switchTab', e.detail);
@@ -42,6 +41,8 @@
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>Phân Ca</button>
                     
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>Nhân Sự</button>
+
+                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Mẫu Việc</button>
                 </div>
             </div>
         </div>
@@ -54,6 +55,10 @@
         
         {#if activeSection === 'accounts'} 
             <AdminAccounts {targetStore} {isSuperAdmin} />
+        {/if}
+
+        {#if activeSection === 'template'}
+            <AdminTemplate {targetStore} />
         {/if}
     </div>
 </div>

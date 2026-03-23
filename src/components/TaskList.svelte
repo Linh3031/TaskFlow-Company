@@ -1,12 +1,12 @@
 <script>
-  // Version 41.0 - [CodeGenesis] Thêm tính năng Inline Edit Bàn Giao & Lưu Lịch sử
+  // Version 44.0 - [CodeGenesis] Ẩn tiêu đề "Khác" cho tab Bàn Giao
   import { createEventDispatcher } from 'svelte';
   import { currentTasks, currentUser } from '../lib/stores';
   import { formatDateTime, getCurrentTimeShort } from '../lib/utils';
   
-  // [CodeGenesis] Import Firebase để cập nhật dữ liệu trực tiếp từ TaskList
   import { db } from '../lib/firebase';
   import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+  import LightboxModal from './DailyChecklistParts/LightboxModal.svelte';
   
   export let activeTab = 'warehouse';
   const dispatch = createEventDispatcher();
@@ -15,17 +15,17 @@
   $: showStoreBadge = myStores.length > 1;
   
   let expandedHistoryTaskId = null;
-
-  // [CodeGenesis] State cho tính năng Chỉnh sửa
   let editingTaskId = null;
   let editTitle = '';
   let editDeadline = '';
   let editLoading = false;
 
-  // 1. Lọc theo Tab
+  let showLightbox = false;
+  let lightboxImages = [];
+  let lightboxIndex = 0;
+
   $: filteredTasks = $currentTasks.filter(t => t.type === activeTab);
 
-  // 2. GOM NHÓM & SẮP XẾP
   $: groupedTasks = (() => {
       const groups = {};
       
@@ -35,21 +35,22 @@
               groups[timeKey] = { timeSlot: timeKey, tasks: [], allDone: true };
           }
           groups[timeKey].tasks.push(task);
-          if (!task.completed) groups[timeKey].allDone = false;
+          if (!task.completed && task.status !== 'failed') groups[timeKey].allDone = false;
       });
 
       const groupArray = Object.values(groups);
 
-      // Sort Group: Xong hết xuống đáy
       groupArray.sort((a, b) => {
           if (a.allDone !== b.allDone) return a.allDone - b.allDone;
           return a.timeSlot.localeCompare(b.timeSlot);
       });
 
-      // Sort Task trong Group
       groupArray.forEach(group => {
           group.tasks.sort((a, b) => {
-             if (a.completed !== b.completed) return a.completed - b.completed; 
+             const statusScoreA = a.completed ? 2 : (a.status === 'failed' ? 1 : 0);
+             const statusScoreB = b.completed ? 2 : (b.status === 'failed' ? 1 : 0);
+             if (statusScoreA !== statusScoreB) return statusScoreA - statusScoreB; 
+             
              const impA = a.isImportant ? 1 : 0;
              const impB = b.isImportant ? 1 : 0;
              if (impA !== impB) return impB - impA;
@@ -67,7 +68,6 @@
   }
 
   function handleTaskClick(task) { 
-      // Chặn click hoàn thành khi đang mở ô Edit
       if (editingTaskId === task.id) return; 
       dispatch('taskClick', task);
   }
@@ -86,9 +86,8 @@
       return { mainText, tags: matches };
   }
 
-  // --- [CodeGenesis] LOGIC CHỈNH SỬA CÔNG VIỆC ---
   function startEdit(e, task) {
-      e.stopPropagation(); // Ngăn sự kiện click lan ra ngoài làm check/uncheck
+      e.stopPropagation(); 
       editingTaskId = task.id;
       editTitle = task.title;
       editDeadline = task.deadline || '';
@@ -110,7 +109,6 @@
           
           let updateData = {
               title: editTitle.trim(),
-              // Đẩy thêm 1 dòng lịch sử ghi nhận người Edit
               history: arrayUnion({ action: 'edit', user, time, fullTime: new Date().toISOString() })
           };
 
@@ -119,27 +117,36 @@
           }
 
           await updateDoc(doc(db, 'tasks', task.id), updateData);
-          editingTaskId = null; // Thành công thì đóng form
+          editingTaskId = null; 
       } catch (error) {
           alert("Lỗi khi lưu chỉnh sửa: " + error.message);
       } finally {
           editLoading = false;
       }
   }
+
+  function openLightbox(e, images, index) {
+      e.stopPropagation();
+      lightboxImages = images;
+      lightboxIndex = index;
+      showLightbox = true;
+  }
 </script>
 
 <div class="flex-1 overflow-y-auto pb-20 w-full px-1 scroll-smooth" id="task-list-container">
   {#each groupedTasks as group (group.timeSlot)}
-    <div class="flex items-center gap-2 px-4 py-2 rounded-lg mt-4 mb-2 font-bold text-sm shadow-sm border sticky top-0 z-10 backdrop-blur-sm transition-all duration-500
-        {group.allDone ? 'bg-gray-100 text-gray-500 border-gray-200' : 'bg-cyan-50 text-cyan-800 border-cyan-100 bg-cyan-50/90'}">
-        <span class="material-icons-round text-base">schedule</span> 
-        {group.timeSlot}
-        {#if group.allDone}
-            <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Hoàn tất</span>
-        {/if}
-    </div>
+    
+    {#if group.timeSlot !== 'Khác'}
+        <div class="flex items-center gap-2 px-4 py-2 rounded-lg mt-4 mb-2 font-bold text-sm shadow-sm border sticky top-0 z-10 backdrop-blur-sm transition-all duration-500 {group.allDone ? 'bg-gray-100 text-gray-500 border-gray-200' : 'bg-cyan-50 text-cyan-800 border-cyan-100 bg-cyan-50/90'}">
+            <span class="material-icons-round text-base">schedule</span> 
+            {group.timeSlot}
+            {#if group.allDone}
+                <span class="ml-auto text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Hoàn tất</span>
+            {/if}
+        </div>
+    {/if}
 
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-2 {group.timeSlot === 'Khác' ? 'mt-2' : ''}">
         {#each group.tasks as task (task.id)}
             {@const titleData = formatTaskTitle(task.title || "")}
             
@@ -149,17 +156,18 @@
                   tabindex="0"
                   id={"task-" + task.id}
                   class="w-full p-4 rounded-xl flex items-start gap-3 shadow-sm border-l-4 transition-all active:scale-[0.99] duration-300 relative overflow-hidden cursor-pointer select-none
-                  {task.completed ? 'bg-gray-50 opacity-60 border-l-gray-400' : (task.isImportant ? 'bg-red-50 border-l-red-500' : 'bg-white')}
-                  {!task.completed && !task.isImportant && activeTab==='warehouse' ? 'border-l-orange-500' : ''}
-                  {!task.completed && !task.isImportant && activeTab==='cashier' ? 'border-l-green-500' : ''}
-                  {!task.completed && !task.isImportant && activeTab==='handover' ? 'border-l-purple-500' : ''}"
+                  {task.status === 'failed' ? 'bg-orange-50 opacity-90 border-l-orange-500' : (task.completed ? 'bg-gray-50 opacity-60 border-l-gray-400' : (task.isImportant ? 'bg-red-50 border-l-red-500' : 'bg-white'))}
+                  {!task.completed && task.status !== 'failed' && !task.isImportant && activeTab==='warehouse' ? 'border-l-orange-500' : ''}
+                  {!task.completed && task.status !== 'failed' && !task.isImportant && activeTab==='cashier' ? 'border-l-green-500' : ''}
+                  {!task.completed && task.status !== 'failed' && !task.isImportant && activeTab==='handover' ? 'border-l-purple-500' : ''}"
                   on:click={() => handleTaskClick(task)}
                   on:keydown={(e) => handleKeydown(e, task)}
                 >
                   <div class="w-6 h-6 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-colors
-                    {task.completed ? 'bg-gray-400 border-gray-400' : (task.isImportant ? 'border-red-400 bg-red-100' : 'border-gray-300')}">
+                    {task.status === 'failed' ? 'bg-orange-400 border-orange-400' : (task.completed ? 'bg-gray-400 border-gray-400' : (task.isImportant ? 'border-red-400 bg-red-100' : 'border-gray-300'))}">
                       {#if task.completed}<span class="text-white text-sm font-bold">✓</span>{/if}
-                      {#if !task.completed && task.isImportant}<span class="text-red-500 text-[10px]">★</span>{/if}
+                      {#if task.status === 'failed'}<span class="text-white text-[14px] font-black">!</span>{/if}
+                      {#if !task.completed && task.status !== 'failed' && task.isImportant}<span class="text-red-500 text-[10px]">★</span>{/if}
                   </div>
 
                   {#if editingTaskId === task.id}
@@ -221,9 +229,23 @@
                               {/if}
                           </div>
                           
-                          {#if task.note}
-                              <div class="mt-2 bg-yellow-50 text-yellow-800 text-xs p-2 rounded border border-yellow-100 italic flex gap-1">
+                          {#if task.status === 'failed'}
+                               <div class="mt-2 bg-orange-100 text-orange-800 text-xs p-2 rounded border border-orange-200 italic flex gap-1 font-bold">
+                                  <span class="material-icons-round text-[14px] mt-0.5">warning</span> Lỗi: {task.note}
+                              </div>
+                          {:else if task.note}
+                               <div class="mt-2 bg-yellow-50 text-yellow-800 text-xs p-2 rounded border border-yellow-100 italic flex gap-1">
                                   <span class="material-icons-round text-[10px] mt-0.5">sticky_note_2</span>{task.note}
+                              </div>
+                          {/if}
+
+                          {#if task.imageLinks && task.imageLinks.length > 0}
+                              <div class="flex gap-2 mt-2 overflow-x-auto pb-1">
+                                  {#each task.imageLinks as img, index}
+                                      <button type="button" class="outline-none" on:click={(e) => openLightbox(e, task.imageLinks, index)} title="Phóng to hình ảnh">
+                                          <img src={img} class="w-10 h-10 object-cover rounded shadow-sm border border-gray-200 hover:scale-110 transition-transform" alt="Task img">
+                                      </button>
+                                  {/each}
                               </div>
                           {/if}
                       </div>
@@ -249,11 +271,11 @@
                                 {#each task.history.slice().reverse() as log}
                                     <div class="flex justify-between items-center border-b border-gray-200 pb-1 last:border-0">
                                         <div class="flex items-center gap-2">
-                                            <span class="material-icons-round text-[14px] {log.action==='done'?'text-green-600':log.action==='edit'?'text-blue-500':'text-orange-500'}">
-                                                {log.action==='done'?'check_circle':log.action==='edit'?'edit':'undo'}
+                                            <span class="material-icons-round text-[14px] {log.action==='done'?'text-green-600':log.action==='edit'?'text-blue-500':log.action==='failed'?'text-red-500':'text-orange-500'}">
+                                                {log.action==='done'?'check_circle':log.action==='edit'?'edit':log.action==='failed'?'warning':'undo'}
                                             </span>
-                                            <span class="font-bold {log.action==='done'?'text-green-700':log.action==='edit'?'text-blue-700':'text-orange-700'}">
-                                                {log.action==='done'?'Hoàn thành':log.action==='edit'?'Chỉnh sửa':'Hoàn tác'}
+                                            <span class="font-bold {log.action==='done'?'text-green-700':log.action==='edit'?'text-blue-700':log.action==='failed'?'text-red-700':'text-orange-700'}">
+                                                {log.action==='done'?'Hoàn thành':log.action==='edit'?'Chỉnh sửa':log.action==='failed'?'Báo lỗi':'Hoàn tác'}
                                             </span>
                                             <span>bởi <b>{log.user}</b></span>
                                         </div>
@@ -275,6 +297,14 @@
     <div class="text-center py-10 text-gray-400 flex flex-col items-center"><span class="material-icons-round text-4xl mb-2 opacity-30">assignment_turned_in</span><p class="text-sm">Chưa có công việc nào</p></div>
   {/if}
 </div>
+
+<LightboxModal 
+    show={showLightbox} 
+    images={lightboxImages} 
+    currentIndex={lightboxIndex} 
+    on:close={() => showLightbox = false} 
+    on:updateIndex={(e) => lightboxIndex = e.detail} 
+/>
 
 <style>
   .animate-fadeIn { animation: fadeIn 0.2s ease-out; } 
