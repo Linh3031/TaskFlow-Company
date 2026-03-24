@@ -21,8 +21,8 @@
 
         {#if isAdmin}
             <button class="bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm" on:click={() => dispatch('openStats')}>
-                <span class="material-icons-round text-[14px]">bar_chart</span> 
-                <span class="hidden sm:inline">Thống Kê Tháng</span>
+                <span class="material-icons-round text-[14px]">pie_chart</span> 
+                <span class="hidden sm:inline">Thống Kê</span>
             </button>
 
             <button class="bg-cyan-50 border border-cyan-200 text-cyan-700 hover:bg-cyan-100 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-sm" on:click={() => dispatch('openAdmin')}>

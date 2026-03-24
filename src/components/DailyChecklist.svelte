@@ -1,7 +1,6 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
     import { db, storage } from '../lib/firebase';
-    // [CodeGenesis] Đã thêm getDocs vào import
     import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, query, where, updateDoc, serverTimestamp, addDoc, runTransaction } from 'firebase/firestore';
     import { currentUser } from '../lib/stores';
     import { getCurrentTimeShort, getTodayStr } from '../lib/utils';
@@ -28,6 +27,7 @@
     let allStaff = [];
     let newAreaName = '';
     let selectedStaffIds = [];
+    let currentItemAssignees = []; 
     
     let showLightbox = false;
     let lightboxImages = [];
@@ -41,7 +41,7 @@
         if (a.completed === b.completed) return 0;
         return a.completed ? 1 : -1;
     });
-    
+
     $: if (activeStoreId && dateStr) {
         activeRecordId = '';
         initAndLoadChecklist();
@@ -52,7 +52,7 @@
     }
     
     function getOldFormatDate(dStr) { 
-        if (!dStr) return ''; 
+        if (!dStr) return '';
         const parts = dStr.split('-');
         if (parts.length !== 3) return dStr; 
         return `${parts[0]}-${parseInt(parts[1], 10)}-${parseInt(parts[2], 10)}`;
@@ -71,14 +71,11 @@
         const oldRecordId = `${activeStoreId}_${getOldFormatDate(dateStr)}`;
 
         let dailyRef = doc(db, '8nttt_daily_records', standardRecordId);
-        
-        console.warn(`🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_daily_records', '${standardRecordId}')`);
         let dailySnap = await getDoc(dailyRef);
         activeRecordId = standardRecordId;
 
         if (!dailySnap.exists() && standardRecordId !== oldRecordId) {
             const oldDailyRef = doc(db, '8nttt_daily_records', oldRecordId);
-            console.warn(`🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_daily_records', '${oldRecordId}') - Bản cũ`);
             const oldDailySnap = await getDoc(oldDailyRef);
             if (oldDailySnap.exists()) { dailyRef = oldDailyRef; dailySnap = oldDailySnap; activeRecordId = oldRecordId; }
         }
@@ -89,10 +86,7 @@
         if (!dailySnap.exists()) {
             if (isPastDate) await writeDebugLog('DETECTED_MISSING', 'Load template mặc định');
             const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
-            
-            console.warn(`🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_template/config')`);
             const templateSnap = await getDoc(templateRef);
-            
             let defaultData = templateSnap.exists() && templateSnap.data().items ?
             templateSnap.data().items.map(item => ({ ...item, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null })) : [];
             
@@ -100,7 +94,6 @@
             else { checklistData = defaultData; loading = false; return; }
         }
 
-        console.warn(`🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: onSnapshot('8nttt_daily_records') - Lắng nghe realtime`);
         unsubscribe = onSnapshot(dailyRef, (docSnap) => {
             if (docSnap.exists() && docSnap.data().items) {
                 checklistData = docSnap.data().items.map(i => ({ ...i, imageUrls: i.imageUrls || (i.imageUrl ? [i.imageUrl] : []), uploaders: i.uploaders || [] }));
@@ -126,67 +119,117 @@
         } else { alert("Hôm nay bạn chưa được phân công!"); }
     }
 
+    async function fetchAllStaff() {
+        if (allStaff.length === 0) {
+            const q = query(collection(db, 'users'), where('storeIds', 'array-contains', activeStoreId));
+            const snap = await getDocs(q);
+            allStaff = snap.docs.map(d => ({ id: d.id, username: d.data().username, role: d.data().role })).filter(s => s.role !== 'admin' && s.role !== 'super_admin' && s.username).sort((a, b) => a.username.localeCompare(b.username));
+        }
+    }
+
+    // [CodeGenesis] Phẫu Thuật Cào Data + Cắm Radar Debug
     async function loadAndShowStats() {
         showStatsModal = true;
         statsLoading = true;
-        
+        await fetchAllStaff();
+
+        console.warn("====== 🚀 BẮT ĐẦU CÀO DATA THỐNG KÊ (DEBUG MODE) ======");
         const [year, month] = dateStr.split('-');
+        console.warn(`[Stats Radar] DateStr gốc: ${dateStr} -> Year: ${year}, Month: ${month}`);
+
         const daysInMonth = new Date(year, month, 0).getDate();
         const daysArray = Array.from({length: daysInMonth}, (_, i) => i + 1);
         
         try {
-            const monthlyStatsRef = doc(db, '8nttt_monthly_stats', `${activeStoreId}_${year}-${month}`);
-            console.warn(`🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_monthly_stats')`);
-            const snap = await getDoc(monthlyStatsRef);
+            let usersStats = {};
+            const fetchPromises = [];
             
-            let matrix = [];
-            if (snap.exists() && snap.data().users) {
-                matrix = Object.values(snap.data().users);
+            for(let i = 1; i <= daysInMonth; i++) {
+                // Tạo ID quét 2 kiểu định dạng: Có số 0 và không có số 0
+                const paddedMonth = month.toString().padStart(2, '0');
+                const paddedDay = i.toString().padStart(2, '0');
+                const standardRecordId = `${activeStoreId}_${year}-${paddedMonth}-${paddedDay}`;
+                const oldRecordId = `${activeStoreId}_${year}-${parseInt(month, 10)}-${i}`;
+
+                fetchPromises.push(
+                    Promise.all([
+                        getDoc(doc(db, '8nttt_daily_records', standardRecordId)),
+                        getDoc(doc(db, '8nttt_daily_records', oldRecordId))
+                    ]).then(([snapNew, snapOld]) => {
+                        const finalSnap = snapNew.exists() ? snapNew : (snapOld.exists() ? snapOld : null);
+                        if (finalSnap) {
+                            console.log(`[Stats Radar] 🟢 TÌM THẤY DATA Ngày ${i}: (ID: ${finalSnap.id}) -> Có ${finalSnap.data().items?.length || 0} khu vực`);
+                        } else {
+                            console.log(`[Stats Radar] 🔴 Rỗng Ngày ${i} (Đã thử: ${standardRecordId} và ${oldRecordId})`);
+                        }
+                        return { day: i, snap: finalSnap };
+                    })
+                );
             }
-            statsData = { month: `${month}/${year}`, days: daysArray, matrix: matrix };
+            
+            const results = await Promise.all(fetchPromises);
+            let totalImagesFound = 0;
+
+            results.forEach(({day, snap}) => {
+                if(snap && snap.data().items) {
+                    snap.data().items.forEach(item => {
+                        // 1. Cố gắng cào từ luồng Data mới (uploaders)
+                        if(item.uploaders && item.uploaders.length > 0) {
+                            item.uploaders.forEach(username => {
+                                if(!username) return;
+                                if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {} };
+                                usersStats[username].total++;
+                                usersStats[username].days[day] = (usersStats[username].days[day] || 0) + 1;
+                                totalImagesFound++;
+                            });
+                        }
+                        // 2. Dự phòng cào từ luồng Data cũ (completedBy - Quy chuẩn 4 ảnh/lượt)
+                        else if (item.completedBy && item.completed) {
+                            const username = item.completedBy;
+                            if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {} };
+                            usersStats[username].total += 4;
+                            usersStats[username].days[day] = (usersStats[username].days[day] || 0) + 4;
+                            totalImagesFound += 4;
+                        }
+                    });
+                }
+            });
+            
+            console.warn(`[Stats Radar] 🚀 TỔNG KẾT: Cào thành công ${totalImagesFound} lượt ảnh trong toàn tháng.`, usersStats);
+            statsData = { month: `${month}/${year}`, days: daysArray, matrix: Object.values(usersStats) };
         } catch (error) {
             console.error("Lỗi lấy thống kê tháng:", error);
-        } finally {
-            statsLoading = false;
-        }
+        } finally { statsLoading = false; }
     }
 
     async function openAdminModal(event) {
         const item = event?.detail || null;
         showAdminModal = true;
         
-        if (allStaff.length === 0) {
-            const q = query(collection(db, 'users'), where('storeIds', 'array-contains', activeStoreId));
-            
-            console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDocs('users') - Tải danh sách nhân viên");
-            const snap = await getDocs(q);
-            allStaff = snap.docs.map(d => ({ id: d.id, username: d.data().username, role: d.data().role })).filter(s => s.role !== 'admin' && s.role !== 'super_admin' && s.username).sort((a, b) => a.username.localeCompare(b.username));
-        }
+        await fetchAllStaff();
         
         if (item) { 
             editingAreaId = item.id;
             newAreaName = item.areaName;
             selectedStaffIds = (item.assignees || []).map(a => a.id);
-        } 
-        else { 
+            currentItemAssignees = item.assignees || []; 
+        } else { 
             editingAreaId = null;
-            newAreaName = ''; selectedStaffIds = [];
+            newAreaName = ''; selectedStaffIds = []; currentItemAssignees = [];
         }
     }
 
     async function saveAreaToTemplate() {
         if (!newAreaName.trim() || selectedStaffIds.length === 0) return alert("Vui lòng nhập tên và chọn người phụ trách!");
+        
         const assigneesData = allStaff.filter(s => selectedStaffIds.includes(s.id)).map(s => ({ id: s.id, username: s.username }));
         
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
-        console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_template/config') - Lưu area");
         const snap = await getDoc(templateRef);
         let currentItems = snap.exists() ? (snap.data().items || []) : [];
         let newItemData = null;
-
-        if (editingAreaId) { 
-            currentItems = currentItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), assignees: assigneesData } : i);
-        } 
+        
+        if (editingAreaId) { currentItems = currentItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), assignees: assigneesData } : i); } 
         else { 
             newItemData = { id: 'area_' + Date.now(), areaName: newAreaName.trim(), assignees: assigneesData };
             currentItems.push(newItemData); 
@@ -194,7 +237,6 @@
         await setDoc(templateRef, { items: currentItems }, { merge: true });
         
         const dailyRef = getDailyRecordRef();
-        console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_daily_records') - Update daily area");
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
             let dailyItems = dailySnap.data().items || [];
@@ -210,16 +252,13 @@
     async function deleteArea(event) {
         const { id, name } = event.detail;
         if (!confirm(`⚠️ XÁC NHẬN XÓA:\nBạn có chắc chắn muốn xóa khu vực "${name}" không?`)) return;
-        
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
-        console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_template/config') - Xóa area");
         const snap = await getDoc(templateRef);
         if (snap.exists()) { 
-            let currentItems = snap.data().items || []; await setDoc(templateRef, { items: currentItems.filter(i => i.id !== id) }, { merge: true });
+            let currentItems = snap.data().items || []; 
+            await setDoc(templateRef, { items: currentItems.filter(i => i.id !== id) }, { merge: true });
         }
-        
         const dailyRef = getDailyRecordRef();
-        console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: getDoc('8nttt_daily_records') - Xóa area daily");
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) { 
             let dailyItems = dailySnap.data().items || [];
@@ -232,7 +271,6 @@
             const reader = new FileReader(); reader.readAsDataURL(file);
             reader.onload = (event) => {
                 const img = new Image(); img.src = event.target.result;
-               
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     let width = img.width; let height = img.height;
@@ -240,7 +278,6 @@
                     else { if (height > maxEdge) { width = Math.round((width * maxEdge) / height); height = maxEdge; } }
                     canvas.width = width; canvas.height = height;
                     const ctx = canvas.getContext('2d');
-                 
                     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, width, height); ctx.drawImage(img, 0, 0, width, height);
                     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
                 };
@@ -267,27 +304,20 @@
                 const fileName = `8nttt_${activeStoreId}_${dateStr}_${itemId}_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
                 const imageRef = ref(storage, `8nttt_images/${activeStoreId}/${dateStr}/${fileName}`);
                 await uploadBytes(imageRef, compressedBlob);
- 
                 return await getDownloadURL(imageRef);
             });
             const newUploadedUrls = await Promise.all(uploadPromises);
             const currentUserUsername = $currentUser.username || 'unknown';
             const newUploaders = newUploadedUrls.map(() => currentUserUsername);
-            
             const dailyRef = getDailyRecordRef();
             const yyyyMM = dateStr.substring(0, 7);
             const currentDayNumber = parseInt(dateStr.split('-')[2], 10);
             const monthlyStatsRef = doc(db, '8nttt_monthly_stats', `${activeStoreId}_${yyyyMM}`);
             
             await runTransaction(db, async (transaction) => {
-                console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: transaction.get(dailyRef) - Upload ảnh");
                 const dailyDoc = await transaction.get(dailyRef);
-                
-                console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [DailyChecklist.svelte]: transaction.get(monthlyStatsRef) - Upload ảnh");
                 const monthlyDoc = await transaction.get(monthlyStatsRef);
-                
                 let serverItems = dailyDoc.exists() ? (dailyDoc.data().items || []) : checklistData;
-              
                 const updatedItems = serverItems.map(i => {
                     if (i.id === itemId) {
                         const mergedUrls = [...(i.imageUrls || []), ...newUploadedUrls];
@@ -300,15 +330,11 @@
 
                 let monthlyData = monthlyDoc.exists() ? monthlyDoc.data() : { users: {} };
                 let usersStats = monthlyData.users || {};
-                
-                if (!usersStats[currentUserUsername]) {
-                    usersStats[currentUserUsername] = { name: currentUserUsername, total: 0, days: {} };
-                }
+                if (!usersStats[currentUserUsername]) { usersStats[currentUserUsername] = { name: currentUserUsername, total: 0, days: {} }; }
                 
                 const addedCount = newUploadedUrls.length;
                 usersStats[currentUserUsername].total += addedCount;
                 usersStats[currentUserUsername].days[currentDayNumber] = (usersStats[currentUserUsername].days[currentDayNumber] || 0) + addedCount;
-                
                 transaction.set(dailyRef, { items: updatedItems, createdAt: dailyDoc.exists() ? dailyDoc.data().createdAt : serverTimestamp() }, { merge: true });
                 transaction.set(monthlyStatsRef, { users: usersStats }, { merge: true });
             });
@@ -320,9 +346,7 @@
         }
     }
 
-    function openLightbox(event) { lightboxImages = event.detail.images; lightboxIndex = event.detail.index;
-        showLightbox = true; }
-        
+    function openLightbox(event) { lightboxImages = event.detail.images; lightboxIndex = event.detail.index; showLightbox = true; }
     onDestroy(() => { if (unsubscribe) unsubscribe(); });
 </script>
 
@@ -347,6 +371,7 @@
 </div>
 
 <LightboxModal show={showLightbox} images={lightboxImages} currentIndex={lightboxIndex} on:close={() => showLightbox = false} on:updateIndex={(e) => lightboxIndex = e.detail} />
-<AreaAdminModal show={showAdminModal} {editingAreaId} {allStaff} bind:newAreaName 
-bind:selectedStaffIds on:close={() => showAdminModal = false} on:save={saveAreaToTemplate} />
-<ChecklistStatsModal show={showStatsModal} {statsData} {statsLoading} on:close={() => showStatsModal = false} />
+
+<AreaAdminModal show={showAdminModal} {editingAreaId} {allStaff} {currentItemAssignees} bind:newAreaName bind:selectedStaffIds on:close={() => showAdminModal = false} on:save={saveAreaToTemplate} />
+
+<ChecklistStatsModal show={showStatsModal} {statsData} {statsLoading} {allStaff} checklistData={sortedChecklistData} on:close={() => showStatsModal = false} on:editArea={(e) => openAdminModal({detail: e.detail})} />

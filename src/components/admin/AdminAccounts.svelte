@@ -1,8 +1,10 @@
 <script>
   import { db } from '../../lib/firebase';
-  import { query, collection, getDocs, writeBatch, doc, serverTimestamp, where } from 'firebase/firestore';
+  // [CodeGenesis] Thêm getDoc, setDoc
+  import { query, collection, getDocs, writeBatch, doc, serverTimestamp, where, getDoc, setDoc } from 'firebase/firestore';
   import { read, utils, writeFile } from 'xlsx';
-  import { safeString } from '../../lib/utils';
+  // [CodeGenesis] Thêm getTodayStr
+  import { safeString, getTodayStr } from '../../lib/utils';
   import { onMount } from 'svelte';
   import { accountService } from '../../services/accountService';
   import AdminAddUserModal from './accounts/AdminAddUserModal.svelte';
@@ -20,7 +22,6 @@
   let userToEdit = null; 
 
   let searchQuery = '';
-  
   $: filteredAccounts = accountList.filter(acc => {
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
@@ -35,12 +36,12 @@
   ];
 
   $: isDemoMode = (selectedStoreId || targetStore)?.includes('DEMO');
-  
+
   onMount(async () => {
       if (isSuperAdmin) { await fetchAllStores(); } 
       else { selectedStoreId = targetStore; loadAccountList(targetStore); }
   });
-  
+
   $: if (targetStore && targetStore !== selectedStoreId) {
       selectedStoreId = targetStore;
       loadAccountList(targetStore);
@@ -72,7 +73,6 @@
           const q = query(collection(db, 'users'), where('storeIds', 'array-contains', sid));
           const snap = await getDocs(q);
           accountList = snap.docs.map(d => ({id: d.id, ...d.data()}));
-          // [NEW] Giữ nguyên thứ tự up Excel
           accountList.sort((a,b) => a.role.localeCompare(b.role) || (a.orderIndex || 9999) - (b.orderIndex || 9999) || a.username.localeCompare(b.username));
       } catch(e) {
           console.error("Lỗi fetch DB, fallback:", e);
@@ -81,10 +81,54 @@
       isLoading = false;
   }
 
+  // [CodeGenesis] Phẫu thuật hàm deleteAccount: Thêm Cascade Delete 8NTTT
   async function deleteAccount(uid) {
       if (checkDemoAndBlock() || !confirm(`Xóa tài khoản ${uid}?`)) return;
+      
+      isLoading = true;
+      // 1. Xóa User khỏi hệ thống tài khoản
       await accountService.deleteAccount(uid);
+
+      // 2. Dọn dẹp bóng ma trong hệ thống 8NTTT
+      try {
+          const templateRef = doc(db, 'stores', selectedStoreId, '8nttt_template', 'config');
+          const dailyRef = doc(db, '8nttt_daily_records', `${selectedStoreId}_${getTodayStr()}`);
+          
+          const [tplSnap, dailySnap] = await Promise.all([getDoc(templateRef), getDoc(dailyRef)]);
+          
+          // Quét và xóa trong file Template
+          if (tplSnap.exists()) {
+              let items = tplSnap.data().items || [];
+              let changed = false;
+              items = items.map(item => {
+                  if (item.assignees && item.assignees.some(a => a.id === uid)) {
+                      changed = true;
+                      return { ...item, assignees: item.assignees.filter(a => a.id !== uid) };
+                  }
+                  return item;
+              });
+              if (changed) await setDoc(templateRef, { items }, { merge: true });
+          }
+          
+          // Quét và xóa trong file Daily Record (Ngày hiện tại)
+          if (dailySnap.exists()) {
+              let items = dailySnap.data().items || [];
+              let changed = false;
+              items = items.map(item => {
+                  if (item.assignees && item.assignees.some(a => a.id === uid)) {
+                      changed = true;
+                      return { ...item, assignees: item.assignees.filter(a => a.id !== uid) };
+                  }
+                  return item;
+              });
+              if (changed) await setDoc(dailyRef, { items }, { merge: true });
+          }
+      } catch(e) { 
+          console.error("Lỗi đồng bộ dọn dẹp 8NTTT:", e); 
+      }
+
       await loadAccountList(selectedStoreId);
+      isLoading = false;
   }
 
   async function changeRole(uid, newRole) {
@@ -116,11 +160,9 @@
       const wsData = [
           ["Username", "Mật_Khẩu", "Tên_Hiển_Thị", "Giới_Tính", "Quyền_Hạn(admin/staff/pg)", "Mã_Kho"]
       ];
-      
       accountList.forEach(acc => {
           if (acc.role === 'pg') return; 
           
-          // [SURGICAL FIX] Tên có sao tải về y hệt vậy, không ẩn bừa bãi
           let displayName = acc.name || '';
           let gender = acc.gender || '';
           let stores = acc.storeIds ? acc.storeIds.join(', ') : (acc.storeId || selectedStoreId);
@@ -146,7 +188,6 @@
       const wsData = [
           ["username", "pass", "name", "gender", "brand", "category", "ma_kho"]
       ];
-      
       accountList.forEach(acc => {
           if (acc.role !== 'pg') return; 
           
@@ -183,10 +224,9 @@
               const batch = writeBatch(db);
               
               let c = 0;
-              // [NEW] Dùng index để đóng mộc orderIndex
               json.forEach((row, index) => {
                   let u = '', p = '', n = '', g = '', s = '', r = '';
-                  
+                   
                   Object.keys(row).forEach(key => {
                       const k = key.normalize('NFC').toLowerCase().replace(/\s+/g, '_');
                       if (k.includes('user') || k.includes('tai_khoan')) u = row[key];
@@ -203,7 +243,7 @@
                       const storeArray = String(s).split(/[,;]+/).map(x=>x.trim().toUpperCase()).filter(Boolean);
                       
                       let rawRole = String(r).toLowerCase();
-                      let finalRole = 'staff'; 
+                      let finalRole = 'staff';
                       if (rawRole.includes('admin') || rawRole.includes('ql')) finalRole = 'admin';
                       else if (rawRole.includes('pg')) finalRole = 'pg';
 
@@ -213,7 +253,7 @@
                           role: finalRole, 
                           storeId: storeArray[0], 
                           storeIds: storeArray,
-                          orderIndex: index + 1, // [NEW] Lưu số thứ tự của Excel vào DB
+                          orderIndex: index + 1,
                           updatedAt: serverTimestamp()
                       };
 
@@ -224,21 +264,33 @@
                       if (g && String(g).trim() !== '') { updatePayload.gender = String(g).toLowerCase().includes('nam') ? 'Nam' : 'Nữ'; }
 
                       batch.set(doc(db, 'users', uid), updatePayload, { merge: true });
-         
                       if (isSuperAdmin) { 
                           storeArray.forEach(k => { batch.set(doc(db, 'stores', k), { id: k, name: `Kho ${k}` }, { merge: true }); });
                       }
                       c++;
                   }
               });
-              if (c > 0) { await batch.commit(); alert(`Đã cập nhật/import ${c} nhân sự. Thứ tự Excel đã được bảo lưu!`); await loadAccountList(selectedStoreId); }
-          } catch (e) { alert(e.message); } finally { isLoading = false; e.target.value = null; }
+
+              if (c > 0) { 
+                  await batch.commit(); 
+                  alert(`Đã cập nhật/import ${c} nhân sự. Thứ tự Excel đã được bảo lưu!`);
+                  await loadAccountList(selectedStoreId); 
+              }
+          } catch (e) { 
+              alert(e.message);
+          } finally { 
+              isLoading = false; 
+              e.target.value = null; 
+          }
       }, 100);
   }
 
   function downloadPGSample() {
       const wb = utils.book_new();
-      const wsData = [["username", "pass", "name", "gender", "brand", "category", "ma_kho"], [`Nghĩa-Oppo`, "123456", "Nguyễn Trọng Nghĩa", "Nam", "Oppo", "ICT", selectedStoreId||'kho']];
+      const wsData = [
+          ["username", "pass", "name", "gender", "brand", "category", "ma_kho"], 
+          [`Nghĩa-Oppo`, "123456", "Nguyễn Trọng Nghĩa", "Nam", "Oppo", "ICT", selectedStoreId||'kho']
+      ];
       const ws = utils.aoa_to_sheet(wsData);
       ws['!cols'] = [{wch: 15}, {wch: 10}, {wch: 25}, {wch: 10}, {wch: 15}, {wch: 15}, {wch: 15}];
       utils.book_append_sheet(wb, ws, "DS_PG");
@@ -255,7 +307,7 @@
               const wb = read(data);
               const json = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
               const batch = writeBatch(db);
-           
+              
               let c = 0;
               json.forEach((row, index) => {
                   let u = '', p = '', n = '', g = '', s = '', brand = '', category = '';
@@ -284,7 +336,7 @@
                           orderIndex: index + 1,
                           updatedAt: serverTimestamp()
                       };
-                      
+
                       let passStr = String(p).trim();
                       if (passStr && passStr !== '*** (Giữ nguyên)' && passStr !== '***') payload.pass = passStr;
                       if (n && String(n).trim() !== '') payload.name = String(n).trim();
@@ -294,8 +346,18 @@
                       c++;
                   }
               });
-              if (c > 0) { await batch.commit(); alert(`Đã cập nhật/import ${c} PG.`); await loadAccountList(selectedStoreId); }
-          } catch (e) { alert(e.message); } finally { isLoading = false; e.target.value = null; }
+
+              if (c > 0) { 
+                  await batch.commit(); 
+                  alert(`Đã cập nhật/import ${c} PG.`); 
+                  await loadAccountList(selectedStoreId);
+              }
+          } catch (e) { 
+              alert(e.message);
+          } finally { 
+              isLoading = false; 
+              e.target.value = null; 
+          }
       }, 100);
   }
 </script>
@@ -386,7 +448,6 @@
                       <tr class="hover:bg-indigo-50/30 transition-colors group">
                           <td class="p-3">
                               <div class="font-bold text-slate-700">{acc.username}</div>
-                              
                               {#if acc.name}
                                   <div class="text-[11px] text-gray-500">{acc.name}</div>
                               {:else}
