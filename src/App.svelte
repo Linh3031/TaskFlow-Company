@@ -18,7 +18,7 @@
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
 
-  const APP_VERSION = 8; 
+  const APP_VERSION = 9; 
   let showUpdatePrompt = false;
 
   let activeTab = '8nttt';
