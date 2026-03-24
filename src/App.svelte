@@ -1,5 +1,5 @@
 <script>
-  // Version 16.0 - [CodeGenesis] Cache-First Stores, Dual-Channel Tasks & Force Update PWA
+  // Version 16.1 - [CodeGenesis] Fix lỗi bốc hơi Bàn Giao (Ghim ngày khi hoàn tất)
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
@@ -18,8 +18,7 @@
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
 
-  // [CodeGenesis] Quản lý Phiên bản PWA
-  const APP_VERSION = 7; // Tăng số này lên khi bạn có bản cập nhật mới
+  const APP_VERSION = 8; 
   let showUpdatePrompt = false;
 
   let activeTab = '8nttt';
@@ -28,6 +27,7 @@
   let selectedTask = null;
   let noteInput = '';
   let selectedDate = getTodayStr();
+  
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
   const tourSteps = [
@@ -45,19 +45,20 @@
   
   let hasCheckedInit = false; 
   let isTasksLoaded = false;
-  
+
   $: displayDateLabel = (() => {
       if (!selectedDate) return '';
       const [y, m, d] = selectedDate.split('-');
       return `${d}/${m}`;
   })();
+
   $: displayDayOfWeek = (() => {
       if (!selectedDate) return '';
       const date = new Date(selectedDate);
       const days = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
       return days[date.getDay()];
   })();
-  
+
   function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
@@ -78,13 +79,11 @@
   }
 
   onMount(async () => {
-    // [CodeGenesis] CACHE-FIRST LOGIC CHO CỬA HÀNG (Cứu hàng ngàn lượt Reads)
     const cachedStores = localStorage.getItem('taskflow_stores_list');
     if (cachedStores) {
         storeList.set(JSON.parse(cachedStores));
     } else {
         try {
-            console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [App.svelte]: getDocs('stores') - Tải danh sách cửa hàng");
             const snap = await getDocs(collection(db, 'stores'));
             const stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
             storeList.set(stores);
@@ -92,12 +91,9 @@
         } catch (e) { console.error("Lỗi tải danh sách cửa hàng", e); }
     }
 
-    // [CodeGenesis] Lắng nghe Công tắc Phiên bản từ Firebase
-    console.warn("🚨🚨🚨 ĐANG GỌI FIREBASE [App.svelte]: onSnapshot('app_config') - Lắng nghe version PWA");
     onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
         if (docSnap.exists()) {
             const serverVersion = docSnap.data().currentVersion || 1;
-            // Nếu Server có số lớn hơn Code hiện tại -> Bật còi báo động!
             if (serverVersion > APP_VERSION) {
                 showUpdatePrompt = true;
             }
@@ -167,18 +163,18 @@
       }
   }
 
-  let fetchTimer; // [CodeGenesis] Biến giữ nhịp Debounce
+  let fetchTimer;
   function loadDataForUser(storeId, dateStr) {
       if(unsubTemplate) unsubTemplate();
       if(unsubTasks) unsubTasks();
       if(unsubHandover) unsubHandover();
 
-      // [CodeGenesis] Đợi 500ms khi người dùng ngừng bấm chuyển ngày mới kéo data
       if (fetchTimer) clearTimeout(fetchTimer);
       fetchTimer = setTimeout(() => {
           unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
               taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
           });
+          
           let dailyTasks = [];
           let handoverTasks = [];
 
@@ -189,12 +185,14 @@
               currentTasks.set(Array.from(uniqueMap.values()));
               isTasksLoaded = true; 
           };
+          
           const qDaily = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
           unsubTasks = onSnapshot(qDaily, (snapshot) => {
               dailyTasks = [];
               snapshot.forEach(doc => { const data = doc.data(); if (data.type) dailyTasks.push({ id: doc.id, ...data }); });
               updateStore();
           });
+          
           const qHandover = query(collection(db, 'tasks'), where('storeId', '==', storeId), where('type', '==', 'handover'), where('completed', '==', false));
           unsubHandover = onSnapshot(qHandover, (snapshot) => {
               handoverTasks = [];
@@ -219,19 +217,24 @@
     }
   }
 
- function confirmComplete(event) {
+  // [CodeGenesis] Phẫu thuật cắm đinh Dữ Liệu
+  function confirmComplete(event) {
     if (!selectedTask) return;
-    const { status, imageLinks } = event.detail; // Lấy dữ liệu từ Modal đẩy lên
+    const { status, imageLinks } = event.detail; 
     const user = $currentUser.name || $currentUser.username;
     const time = getCurrentTimeShort();
     
     updateDoc(doc(db, 'tasks', selectedTask.id), {
-      status: status, // 'completed' hoặc 'failed'
-      completed: status === 'completed', // Giữ để code cũ không sập
-      completedBy: user, time: time, note: noteInput,
+      status: status, 
+      completed: status === 'completed', 
+      completedBy: user, 
+      time: time, 
+      note: noteInput,
+      date: selectedDate, // <-- SỬA LỖI BỐC HƠI: Ghim chặt công việc vào ngày đang xem khi hoàn tất
       imageLinks: imageLinks || [],
       history: arrayUnion({ action: status === 'completed' ? 'done' : 'failed', user, time, fullTime: new Date().toISOString() })
     });
+    
     showTaskModal = false; selectedTask = null;
   }
 
@@ -248,7 +251,6 @@
       } else { alert("Không tìm thấy công việc này!"); }
   }
 
-  // [CodeGenesis] Hàm ép cập nhật PWA
   async function forceUpdateApp() {
       if ('caches' in window) {
           try {
@@ -276,10 +278,7 @@
             {id:'8nttt', icon:'fact_check', label:'8NTTT', color:'#00bcd4'},
             {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7'}, 
             {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'},
-            
-            /* [SURGICAL FIX] Đánh thức Tab Công Việc Kho ở đây */
             {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'}, 
-            
             {id:'handover', icon:'assignment_ind', label:'Bàn Giao', color:'#9c27b0'}
         ] as t}
             <button class="tab-btn {activeTab===t.id?'active':''}" on:click={() => activeTab=t.id} style="--theme-color: {t.color};">
@@ -338,10 +337,10 @@
   {/if}
   
   {#if showAdminModal} <AdminModal on:close={() => showAdminModal = false} on:switchTab={(e) => { activeTab = e.detail; showAdminModal = false; }} /> {/if}
-{#if showTaskModal && selectedTask} 
+  {#if showTaskModal && selectedTask} 
       <TaskModal taskTitle={selectedTask.title} taskId={selectedTask.id} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> 
   {/if}
-    {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
+  {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
   
   {#if showUpdatePrompt}
   <div class="fixed inset-0 z-[9999] bg-slate-900/80 flex items-center justify-center p-4 backdrop-blur-sm">

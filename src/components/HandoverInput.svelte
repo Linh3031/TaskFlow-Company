@@ -1,5 +1,5 @@
 <script>
-  // Version 44.0 - [CodeGenesis] Thu gọn Bàn Giao thành Button mở Modal
+  // Version 44.2 - [CodeGenesis] Xóa bỏ hoàn toàn tiền tố "Bàn giao: " thừa thãi trong tiêu đề
   import { onMount } from 'svelte';
   import { db } from '../lib/firebase';
   import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
@@ -40,12 +40,13 @@
   }
 
   onMount(() => {
-      deadline = getCurrentTimeShort() + "T12:00"; 
+      deadline = ""; 
   });
 
   function handleInput(e) {
       const val = e.target.value; cursorPosition = e.target.selectionStart;
-      const textBeforeCursor = val.slice(0, cursorPosition); const lastWord = textBeforeCursor.split(/\s+/).pop();
+      const textBeforeCursor = val.slice(0, cursorPosition);
+      const lastWord = textBeforeCursor.split(/\s+/).pop();
       if (lastWord.startsWith('@')) {
           const queryText = lastWord.slice(1).toLowerCase();
           suggestionList = storeUsers.filter(u => u.name.toLowerCase().includes(queryText) || u.username.toLowerCase().includes(queryText));
@@ -54,10 +55,12 @@
   }
 
   function selectUser(user) {
-      const textBeforeCursor = note.slice(0, cursorPosition); const textAfterCursor = note.slice(cursorPosition);
+      const textBeforeCursor = note.slice(0, cursorPosition);
+      const textAfterCursor = note.slice(cursorPosition);
       const lastAtIndex = textBeforeCursor.lastIndexOf('@');
       note = textBeforeCursor.slice(0, lastAtIndex) + `@${user.username} ` + textAfterCursor;
-      showSuggestions = false; document.getElementById('handover-input').focus();
+      showSuggestions = false;
+      document.getElementById('handover-input').focus();
   }
 
   async function handleFileSelected(event) {
@@ -81,26 +84,37 @@
 
   async function addTask() {
       if (isCreating || isUploading || !note.trim()) return;
-      if (!deadline) return alert('Vui lòng chọn hạn chót!');
       
-      const parts = deadline.split('T'); 
-      const dayParts = parts[0].split('-');
-      const day = dayParts.length === 3 ? `${dayParts[2]}/${dayParts[1]}/${dayParts[0]}` : parts[0]; 
-      const time = parts[1] ? parts[1].replace(':', 'h') : '';
-      
-      const finalTitle = `⏰ [Deadline ${time} ${day}] Bàn giao: ${note.trim()}`;
+      // [CodeGenesis] Phẫu thuật: Gọt sạch hoàn toàn các tiền tố thừa thãi, lấy đúng nội dung người dùng gõ
+      const finalTitle = note.trim();
       const user = $currentUser.name || $currentUser.username;
+      
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const todayStr = `${yyyy}-${mm}-${dd}`;
+      
+      const taskDate = deadline ? deadline.split('T')[0] : todayStr;
       
       isCreating = true;
       try {
           await addDoc(collection(db, 'tasks'), {
-              title: finalTitle, storeId: $activeStoreId, date: parts[0], timeSlot: 'Khác', type: 'handover', deadline: deadline, isImportant: true, completed: false, createdBy: user, timestamp: serverTimestamp(),
+              title: finalTitle, 
+              storeId: $activeStoreId, 
+              date: taskDate, 
+              timeSlot: 'Khác', 
+              type: 'handover', 
+              deadline: deadline || "", 
+              isImportant: true, 
+              completed: false, 
+              createdBy: user, 
+              timestamp: serverTimestamp(),
               imageLinks: imageLinks,
               history: [{ action: 'create', user: user, time: getCurrentTimeShort(), fullTime: new Date().toISOString() }]
           });
-          
-          note = ''; deadline = getCurrentTimeShort() + "T12:00"; imageLinks = []; 
-          showModal = false; // Tắt modal sau khi tạo xong
+          note = ''; deadline = ""; imageLinks = []; 
+          showModal = false;
       } catch (e) { alert("Lỗi tạo bàn giao: " + e.message); } 
       finally { isCreating = false; }
   }
@@ -122,7 +136,6 @@
         </div>
 
         <div class="p-4 overflow-y-auto flex flex-col gap-4">
-            
             <div class="w-full relative">
                 <label class="text-[10px] font-bold text-purple-700 block ml-1 mb-1">NỘI DUNG</label>
                 <textarea id="handover-input" bind:value={note} on:input={handleInput} rows="3" placeholder="Nội dung bàn giao... (Dùng @ để tag tên)" class="w-full p-3 border border-purple-200 rounded-xl resize-none text-sm focus:border-purple-500 outline-none bg-gray-50 focus:bg-white transition-colors shadow-sm"></textarea>
@@ -130,7 +143,7 @@
                 {#if showSuggestions && suggestionList.length > 0}
                   <div class="absolute bottom-full left-0 mb-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto animate-popIn">
                        <div class="p-2 bg-gray-50 text-[10px] font-bold text-gray-500 border-b">CHỌN NGƯỜI NHẮC TÊN</div>
-                      {#each suggestionList as user}
+                       {#each suggestionList as user}
                           <button class="w-full text-left p-2 hover:bg-purple-50 flex items-center gap-2 border-b border-gray-50 last:border-0" on:click={() => selectUser(user)}>
                               <div class="w-7 h-7 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center text-[11px] font-bold shrink-0">{user.name.charAt(0)}</div>
                               <div class="truncate">
@@ -145,7 +158,7 @@
 
             <div class="w-full grid grid-cols-2 gap-3">
                 <div>
-                    <label class="text-[10px] font-bold text-purple-700 block ml-1 mb-1" for="deadline-input">HẠN CHÓT</label>
+                    <label class="text-[10px] font-bold text-purple-700 block ml-1 mb-1" for="deadline-input">HẠN CHÓT (TÙY CHỌN)</label>
                     <input id="deadline-input" type="datetime-local" bind:value={deadline} class="w-full p-2 border border-purple-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:border-purple-500 outline-none text-gray-700 shadow-sm transition-colors">
                 </div>
                 
@@ -187,7 +200,6 @@
                 {/if}
             </button>
         </div>
-
     </div>
 </div>
 {/if}
