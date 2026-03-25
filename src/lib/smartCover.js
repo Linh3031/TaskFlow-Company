@@ -12,7 +12,12 @@ export function buildSmartCover(target, scheduleData) {
     });
 
     let suggestions = [];
-    let offShift = target.originalShift; 
+    
+    // [CodeGenesis] Phẫu Thuật Trực Tiếp: 
+    // Truy thẳng vào dữ liệu thật của ngày hôm đó để xem ca NGAY TRƯỚC KHI BẤM OFF là gì.
+    let realAssignInDB = scheduleData.data[target.day].find(a => a.staffId === target.staffId);
+    let offShift = realAssignInDB ? realAssignInDB.shift : target.originalShift;
+
     if (offShift === 'OFF') return []; 
 
     const addSugg = (type, title, acts) => suggestions.push({ type, title, actions: acts });
