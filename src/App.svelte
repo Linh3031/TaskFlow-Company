@@ -18,7 +18,7 @@
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
 
-  const APP_VERSION = 9; 
+  const APP_VERSION = 10; 
   let showUpdatePrompt = false;
 
   let activeTab = '8nttt';
@@ -59,12 +59,13 @@
       return days[date.getDay()];
   })();
 
-  function changeDate(offset) {
+ function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
+      // [CodeGenesis] Phẫu thuật: Bỏ padStart để đồng bộ 100% với định dạng của getTodayStr()
       const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
+      const month = d.getMonth() + 1;
+      const day = d.getDate();
       selectedDate = `${year}-${month}-${day}`;
   }
   

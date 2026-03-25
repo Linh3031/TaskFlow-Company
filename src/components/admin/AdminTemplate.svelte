@@ -1,11 +1,12 @@
 <script>
-  // Version 6.1 - Auto-Create Always & User Tracking + Tour Guide
+  // Version 6.2 - [CodeGenesis] Lộ diện "Bóng Ma" Mặc định + Theo dõi Người tạo
   import { onMount } from 'svelte';
   import { db } from '../../lib/firebase';
   import { doc, setDoc, addDoc, collection, serverTimestamp, onSnapshot } from 'firebase/firestore';
   import { getTodayStr } from '../../lib/utils';
-  import { currentUser } from '../../lib/stores';
-  import TourGuide from '../TourGuide.svelte'; // Import TourGuide
+  // [CodeGenesis] Import thêm DEFAULT_TEMPLATE
+  import { currentUser, DEFAULT_TEMPLATE } from '../../lib/stores'; 
+  import TourGuide from '../TourGuide.svelte';
 
   export let targetStore = ''; 
 
@@ -19,7 +20,6 @@
   let localTemplateData = {};
   let unsub = () => {};
 
-  // --- TOUR GUIDE CONFIG ---
   let showTour = false;
   const tourSteps = [
       { target: '#dept-select-container', title: '1. Chọn Bộ Phận', content: 'Chọn tab mà công việc này sẽ xuất hiện (Kho, Thu Ngân hay Bàn Giao).' },
@@ -27,7 +27,6 @@
       { target: '#weekdays-container', title: '3. Chọn Ngày Lặp', content: 'Chọn các thứ trong tuần mà công việc này cần làm (Màu xanh là được chọn).' },
       { target: '#btn-save-template', title: '4. Thêm/Lưu', content: 'Bấm vào đây để lưu mẫu. Nếu ngày lặp trùng hôm nay, công việc sẽ tự động hiện ra ngoài trang chủ.' }
   ];
-  // -------------------------
 
   const weekDays = [
       { val: 1, label: 'T2' }, { val: 2, label: 'T3' }, { val: 3, label: 'T4' },
@@ -40,8 +39,12 @@
       if (unsub) unsub();
       localTemplateData = {};
       unsub = onSnapshot(doc(db, 'settings', `template_${sid}`), (docSnap) => {
-          if (docSnap.exists()) localTemplateData = docSnap.data();
-          else localTemplateData = {};
+          if (docSnap.exists()) {
+              localTemplateData = docSnap.data();
+          } else {
+              // [CodeGenesis] Lộ diện "Bóng ma" bằng cách nạp Mẫu Mặc Định nếu chưa có data
+              localTemplateData = JSON.parse(JSON.stringify(DEFAULT_TEMPLATE));
+          }
       });
   }
 
@@ -64,9 +67,13 @@
       const up = { ...localTemplateData };
       if (!up[activeTemplateType]) return;
       up[activeTemplateType].splice(idx, 1);
+      
       try {
           await setDoc(doc(db, 'settings', `template_${targetStore}`), up);
-          if (editingTemplateIndex === idx) { editingTemplateIndex = -1; newTemplateTitle = ''; }
+          if (editingTemplateIndex === idx) { 
+              editingTemplateIndex = -1; 
+              newTemplateTitle = '';
+          }
       } catch (e) { alert(e.message); }
   }
 
@@ -77,24 +84,25 @@
       const up = { ...localTemplateData };
       if (!up[activeTemplateType]) up[activeTemplateType] = [];
       
+      const creatorName = $currentUser?.name || $currentUser?.username || 'Quản lý'; // [CodeGenesis] Lấy thông tin người tạo
+
       const newItem = { 
           title: newTemplateTitle, 
           time: newTemplateTime, 
           isImportant: newTemplateImportant, 
-          days: selectedDays 
+          days: selectedDays,
+          createdBy: creatorName // [CodeGenesis] Lưu dấu vết
       };
 
       if (editingTemplateIndex >= 0) up[activeTemplateType][editingTemplateIndex] = newItem;
       else up[activeTemplateType].push(newItem);
 
       up[activeTemplateType].sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
-
+      
       try {
           await setDoc(doc(db, 'settings', `template_${targetStore}`), up);
-          
           const today = new Date().getDay();
           if (selectedDays.includes(today)) {
-              const creatorName = $currentUser?.name || $currentUser?.username || 'Quản lý';
               await addDoc(collection(db, 'tasks'), {
                   type: activeTemplateType,
                   title: newTemplateTitle,
@@ -113,7 +121,7 @@
 
           newTemplateTitle = ''; 
           newTemplateImportant = false; 
-          editingTemplateIndex = -1; 
+          editingTemplateIndex = -1;
           selectedDays = [0, 1, 2, 3, 4, 5, 6];
           
       } catch (e) { alert(e.message); }
@@ -189,6 +197,12 @@
                   <div class="font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg text-sm">{item.time}</div>
                   <div class="flex-1">
                       <div class="font-bold text-slate-800 text-base mb-1 {item.isImportant?'text-red-600':''}">{item.isImportant ? '★ ' : ''}{item.title}</div>
+                      
+                      <div class="text-[10px] text-indigo-400 font-bold mb-1.5 flex items-center gap-1">
+                          <span class="material-icons-round text-[12px]">account_circle</span> 
+                          {item.createdBy || 'Hệ thống (Mặc định)'}
+                      </div>
+
                       <div class="flex gap-1 flex-wrap">
                           {#each weekDays as d}
                               {#if item.days && item.days.includes(d.val)}

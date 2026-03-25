@@ -5,6 +5,9 @@ src/utils/excelExport.js
 src/App.svelte
 src/main.js
 src/components
+src/components/InstallmentCalcParts
+src/components/InstallmentCalcParts/InstallmentFooter.svelte
+src/components/InstallmentCalcParts/InstallmentHistory.svelte
 src/components/Login.svelte
 src/components/ShiftSchedule.svelte
 src/components/StoreConfig.svelte
@@ -26,6 +29,7 @@ src/components/admin
 src/components/admin/schedule
 src/components/admin/schedule/AdminScheduleToolbar.svelte
 src/components/admin/schedule/ScheduleMatrix.svelte
+src/components/admin/schedule/ManualScheduleUpload.svelte
 src/components/admin/schedule/AdminEditShiftModal.svelte
 src/components/admin/schedule/AdminDayStatsModal.svelte
 src/components/admin/schedule/SmartSwapModal.svelte
@@ -68,8 +72,10 @@ src/lib/smartCover.js
 src/lib/comboCalculator.js
 src/lib/scheduleLogic.js
 src/lib/utils.js
+src/lib/imageUtils.js
 src/lib/firebase.js
 src/lib/smartSwap.js
+src/lib/installmentUtils.js
 src/lib/shiftUtils.js
 src/modules
 src/modules/settings.service.js
