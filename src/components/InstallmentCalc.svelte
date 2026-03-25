@@ -170,7 +170,7 @@
             </div>
 
             <div class="flex items-center gap-2">
-                <span class="text-[10px] font-bold text-slate-600 w-16 shrink-0 uppercase">BH Mở Rộng</span>
+                <span class="text-[10px] font-bold text-slate-600 w-16 shrink-0 uppercase">BHMR</span>
                 <select bind:value={bhmrCategory} class="flex-1 bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded p-1.5 outline-none focus:border-indigo-400">
                     <option value="none">Không mua</option>
                     <option value="apple">Sản phẩm Apple</option>

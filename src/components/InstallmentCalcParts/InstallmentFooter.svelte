@@ -71,6 +71,7 @@
             <span class="text-orange-600 font-bold">Lệch: +{formatCompact(diffPrice)}</span>
         </div>
         
+        <div class="text-center mt-2 opacity-40"><span class="text-[8px] font-mono font-bold text-slate-500">Design by 3031</span></div>
     </div>
 </div>
 
