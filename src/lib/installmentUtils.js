@@ -36,11 +36,12 @@ function getRate(price, ratesArray) {
     return tier ? tier.fee : 0;
 }
 
+// MA TRẬN TÍNH GIÁ BẢO HIỂM MỞ RỘNG (Đồng bộ 100% từ CSV)
 export const calculateBHMR = (category, isDMX, years, price) => {
     if (category === 'none' || !price || price <= 0) return 0;
     
     if (isDMX) {
-        if (category === 'phone' || category === 'apple') { // Tạm gộp Apple và Phone, bạn có thể tách mảng giá riêng sau
+        if (category === 'phone' || category === 'apple') {
             if (years === 1) return getRate(price, [
                 { min: 0, max: 3000000, fee: 80000 },
                 { min: 3000000, max: 5000000, fee: 260000 },
@@ -53,18 +54,81 @@ export const calculateBHMR = (category, isDMX, years, price) => {
             return 0; 
         }
         if (['tivi', 'fridge', 'ac', 'washer'].includes(category)) {
-            if (years === 1) return getRate(price, [{ min: 0, max: 5000000, fee: 190000 }, { min: 5000000, max: 10000000, fee: 340000 }, { min: 10000000, max: 20000000, fee: 750000 }, { min: 20000000, max: 40000000, fee: 1340000 }]);
-            if (years === 2) return getRate(price, [{ min: 0, max: 5000000, fee: 370000 }, { min: 5000000, max: 10000000, fee: 650000 }, { min: 10000000, max: 20000000, fee: 1420000 }]);
-            if (years === 3) return getRate(price, [{ min: 0, max: 5000000, fee: 590000 }, { min: 5000000, max: 10000000, fee: 1040000 }, { min: 10000000, max: 20000000, fee: 2270000 }]);
+            if (years === 1) return getRate(price, [
+                { min: 0, max: 5000000, fee: 190000 }, { min: 5000000, max: 10000000, fee: 340000 },
+                { min: 10000000, max: 15000000, fee: 520000 }, { min: 15000000, max: 20000000, fee: 750000 },
+                { min: 20000000, max: 25000000, fee: 930000 }, { min: 25000000, max: 30000000, fee: 1050000 },
+                { min: 30000000, max: 40000000, fee: 1340000 }, { min: 40000000, max: 50000000, fee: 1700000 },
+                { min: 50000000, max: 100000000, fee: 2590000 }
+            ]);
+            if (years === 2) return getRate(price, [
+                { min: 0, max: 5000000, fee: 370000 }, { min: 5000000, max: 10000000, fee: 650000 },
+                { min: 10000000, max: 15000000, fee: 1010000 }, { min: 15000000, max: 20000000, fee: 1420000 },
+                { min: 20000000, max: 25000000, fee: 1860000 }, { min: 25000000, max: 30000000, fee: 2030000 },
+                { min: 30000000, max: 40000000, fee: 2550000 }, { min: 40000000, max: 50000000, fee: 3240000 }
+            ]);
+            if (years === 3) return getRate(price, [
+                { min: 0, max: 5000000, fee: 590000 }, { min: 5000000, max: 10000000, fee: 1040000 },
+                { min: 10000000, max: 15000000, fee: 1620000 }, { min: 15000000, max: 20000000, fee: 2270000 },
+                { min: 20000000, max: 25000000, fee: 2980000 }, { min: 25000000, max: 30000000, fee: 3250000 },
+                { min: 30000000, max: 40000000, fee: 4080000 }, { min: 40000000, max: 50000000, fee: 5190000 }
+            ]);
         }
-    } else {
+    } 
+    else {
         if (category === 'phone' || category === 'apple') {
-            if (years === 1) return getRate(price, [{ min: 0, max: 5000000, fee: 300000 }, { min: 5000000, max: 15000000, fee: 750000 }, { min: 15000000, max: 30000000, fee: 1450000 }]);
-            if (years === 2) return getRate(price, [{ min: 0, max: 5000000, fee: 570000 }, { min: 5000000, max: 15000000, fee: 1450000 }, { min: 15000000, max: 30000000, fee: 2500000 }]);
+            if (years === 1) return getRate(price, [
+                { min: 0, max: 2000000, fee: 90000 }, { min: 2000000, max: 5000000, fee: 300000 },
+                { min: 5000000, max: 10000000, fee: 550000 }, { min: 10000000, max: 15000000, fee: 750000 },
+                { min: 15000000, max: 20000000, fee: 1050000 }, { min: 20000000, max: 25000000, fee: 1250000 }
+            ]);
+            if (years === 2) return getRate(price, [
+                { min: 0, max: 2000000, fee: 170000 }, { min: 2000000, max: 5000000, fee: 570000 },
+                { min: 5000000, max: 10000000, fee: 1050000 }, { min: 10000000, max: 15000000, fee: 1450000 },
+                { min: 15000000, max: 20000000, fee: 2000000 }, { min: 20000000, max: 25000000, fee: 2380000 }
+            ]);
         }
         if (category === 'laptop' || category === 'tivi') {
-            if (years === 1) return getRate(price, [{ min: 0, max: 10000000, fee: 500000 }, { min: 10000000, max: 20000000, fee: 1050000 }]);
-            if (years === 2) return getRate(price, [{ min: 0, max: 10000000, fee: 950000 }, { min: 10000000, max: 20000000, fee: 2000000 }]);
+            if (years === 1) return getRate(price, [
+                { min: 0, max: 5000000, fee: 280000 }, { min: 5000000, max: 10000000, fee: 500000 },
+                { min: 10000000, max: 15000000, fee: 700000 }, { min: 15000000, max: 20000000, fee: 1050000 },
+                { min: 20000000, max: 25000000, fee: 1250000 }, { min: 25000000, max: 30000000, fee: 1550000 },
+                { min: 30000000, max: 40000000, fee: 1850000 }
+            ]);
+            if (years === 2) return getRate(price, [
+                { min: 0, max: 5000000, fee: 530000 }, { min: 5000000, max: 10000000, fee: 950000 },
+                { min: 10000000, max: 15000000, fee: 1350000 }, { min: 15000000, max: 20000000, fee: 2000000 },
+                { min: 20000000, max: 25000000, fee: 2380000 }, { min: 25000000, max: 30000000, fee: 2950000 },
+                { min: 30000000, max: 40000000, fee: 3500000 }
+            ]);
+        }
+        // [FIXED] ĐÃ BỔ SUNG MÁY LẠNH
+        if (category === 'ac') { 
+            if (years === 1) return getRate(price, [
+                { min: 0, max: 5000000, fee: 240000 }, { min: 5000000, max: 10000000, fee: 420000 },
+                { min: 10000000, max: 15000000, fee: 640000 }, { min: 15000000, max: 20000000, fee: 920000 },
+                { min: 20000000, max: 25000000, fee: 1150000 }, { min: 25000000, max: 30000000, fee: 1350000 },
+                { min: 30000000, max: 40000000, fee: 1650000 }
+            ]);
+            if (years === 2) return getRate(price, [
+                { min: 0, max: 5000000, fee: 460000 }, { min: 5000000, max: 10000000, fee: 800000 },
+                { min: 10000000, max: 15000000, fee: 1250000 }, { min: 15000000, max: 20000000, fee: 1750000 },
+                { min: 20000000, max: 25000000, fee: 2150000 }, { min: 25000000, max: 30000000, fee: 2500000 },
+                { min: 30000000, max: 40000000, fee: 3100000 }
+            ]);
+        }
+        // [FIXED] ĐÃ BỔ SUNG TỦ LẠNH, MÁY GIẶT
+        if (category === 'fridge' || category === 'washer') {
+            if (years === 1) return getRate(price, [
+                { min: 0, max: 5000000, fee: 220000 }, { min: 5000000, max: 10000000, fee: 390000 },
+                { min: 10000000, max: 15000000, fee: 600000 }, { min: 15000000, max: 20000000, fee: 880000 },
+                { min: 20000000, max: 25000000, fee: 1100000 }
+            ]);
+            if (years === 2) return getRate(price, [
+                { min: 0, max: 5000000, fee: 420000 }, { min: 5000000, max: 10000000, fee: 740000 },
+                { min: 10000000, max: 15000000, fee: 1150000 }, { min: 15000000, max: 20000000, fee: 1680000 },
+                { min: 20000000, max: 25000000, fee: 2100000 }
+            ]);
         }
     }
     return 0;

@@ -49,10 +49,18 @@
         displayBasePrice = raw > 0 ? raw.toLocaleString('vi-VN') : "";
     }
 
-    function handleDownPaymentPercentInput(e) {
-        let val = parseFloat(e.target.value) || 0;
-        if (val > 100) val = 100; if (val < 0) val = 0;
-        downPaymentPercent = val; recalcDownPayment();
+   function handleDownPaymentPercentInput() {
+        // [FIX] Nếu người dùng xóa trắng ô, để giá trị null/rỗng tự nhiên, không ép về 0
+        if (downPaymentPercent === null || downPaymentPercent === "") {
+            recalcDownPayment();
+            return;
+        }
+        
+        // Chặn nhập quá 100% hoặc nhỏ hơn 0%
+        if (downPaymentPercent > 100) downPaymentPercent = 100;
+        if (downPaymentPercent < 0) downPaymentPercent = 0;
+        
+        recalcDownPayment();
     }
 
     let displayDownPaymentAmount = "";
@@ -66,7 +74,8 @@
 
     function recalcDownPayment() {
         if (downPaymentType === 'percent') {
-            downPaymentAmount = (productPrice * downPaymentPercent) / 100;
+            const pct = downPaymentPercent || 0; // [FIX] Gán an toàn bằng 0 nếu ô đang trống để tính toán
+            downPaymentAmount = (productPrice * pct) / 100;
             displayDownPaymentAmount = downPaymentAmount > 0 ? formatFull(Math.round(downPaymentAmount / 1000)) : "";
         } else {
             downPaymentPercent = productPrice > 0 ? (downPaymentAmount / productPrice) * 100 : 0;
