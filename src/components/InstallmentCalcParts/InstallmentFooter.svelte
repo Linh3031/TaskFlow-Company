@@ -30,7 +30,7 @@
             </div>
             <button on:click={() => dispatch('save')} class="bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-600 p-2 rounded-lg flex flex-col items-center justify-center transition-all border border-indigo-100 shrink-0 shadow-sm" title="Lưu vào lịch sử">
                 <span class="material-icons-round text-xl">save</span>
-                <span class="text-[8px] font-bold uppercase mt-0.5">Lưu</span>
+                <span class="text-[8px] font-bold uppercase mt-0.5">Lưu vào Combo</span>
             </button>
         </div>
 

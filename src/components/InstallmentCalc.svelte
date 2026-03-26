@@ -12,13 +12,12 @@
     let downPaymentPercent = 0; 
     let downPaymentAmount = 0;
     let termMonths = 6;
-    
     let selectedBh11Group = 'none';
     let bhmrCategory = 'none';
     let bhmrYears = 1;
     let bhmrIsDMX = false;
 
-    let activeTab = 'calc'; 
+    let activeTab = 'calc';
     let history = [];
     
     // Trạng thái Tắt/Mở Phí
@@ -30,7 +29,6 @@
         const savedHistory = localStorage.getItem('installment_history_v2'); 
         if (savedHistory) try { history = JSON.parse(savedHistory); } catch (e) {}
     });
-
     $: { if (history) localStorage.setItem('installment_history_v2', JSON.stringify(history)); }
 
     // --- LOGIC NHẬP LIỆU ---
@@ -93,13 +91,11 @@
     $: loanAmount = Math.max(0, productPrice - downPaymentAmount);
     $: bhkvBase = (loanAmount > 0 && loanAmount <= 5000000) ? 5000000 : loanAmount;
     $: bhkvRatePercent = (() => { if (termMonths <= 6) return 2.6; if (termMonths <= 9) return 2.9; return 3.5; })();
-    
     $: bhkvValue = loanAmount > 0 ? (bhkvBase * bhkvRatePercent / 100) : 0;
     $: monthlyBase = (loanAmount > 0 && termMonths > 0) ? (loanAmount / termMonths) : 0;
     $: monthlyPayment = monthlyBase + 12000; // Thu hộ
     
     $: totalInstallmentAmount = monthlyPayment * termMonths;
-    
     // TỔNG TIỀN (Chỉ cộng vào Tổng nếu các công tắc được BẬT)
     $: finalTotalPrice = downPaymentAmount + (includeBhkvInPrepaid ? bhkvValue : 0) + (includeBh11 ? bh11Fee : 0) + (includeBhmr ? bhmrFee : 0) + totalInstallmentAmount;
     $: totalPrepaid = downPaymentAmount + (includeBhkvInPrepaid ? bhkvValue : 0) + (includeBh11 ? bh11Fee : 0) + (includeBhmr ? bhmrFee : 0);
@@ -115,7 +111,7 @@
     <div class="bg-white px-2 pt-1 pb-0 z-10 flex gap-2 border-b border-slate-200 sticky top-0">
         <button class="flex-1 pb-2 text-sm font-bold uppercase transition-all border-b-2 {activeTab === 'calc' ? 'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}" on:click={() => activeTab = 'calc'}>Tính Toán</button>
         <button class="flex-1 pb-2 text-sm font-bold uppercase transition-all border-b-2 {activeTab === 'history' ? 'text-indigo-600 border-indigo-600' : 'text-slate-400 border-transparent hover:text-slate-600'}" on:click={() => activeTab = 'history'}>
-            Lịch Sử <span class="ml-1 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{history.length}</span>
+            Combo góp <span class="ml-1 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{history.length}</span>
         </button>
     </div>
 
@@ -165,16 +161,20 @@
         </div>
 
         <div class="bg-indigo-50/30 p-2.5 rounded-lg shadow-sm border border-indigo-100 space-y-2">
+            
             <div class="flex items-center gap-2">
                 <span class="text-[10px] font-bold text-slate-600 w-16 shrink-0 uppercase">BH 1 Đổi 1</span>
                 <select bind:value={selectedBh11Group} class="flex-1 bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded p-1.5 outline-none focus:border-indigo-400">
                     <option value="none">Không mua</option>
-                    <option value="smartphone">Smartphone (4.62%)</option>
-                    <option value="laptop_tablet">Laptop - Tablet (6.0%)</option>
-                    <option value="smart_watch">Smart Watch (5.5%)</option>
-                    <option value="tv">Điện tử - Tivi (7.0%)</option>
-                    <option value="air_conditioner">Máy Lạnh</option>
-                    <option value="fridge">Tủ lạnh, Máy giặt</option>
+                    <option value="phone">Điện thoại (4.62%)</option>
+                    <option value="laptop_tablet">Laptop - Tablet (6%)</option>
+                    <option value="fridge_freezer">Tủ lạnh - Đông - Mát (6%)</option>
+                    <option value="washer_dryer">Máy giặt - Sấy - Rửa chén (6%)</option>
+                    <option value="ac">Máy lạnh (6%)</option>
+                    <option value="water_purifier">Máy lọc nước (6%)</option>
+                    <option value="home_appliances">Gia dụng, Gia dụng lắp đặt (6%)</option>
+                    <option value="speaker">Loa karaoke, loa thanh (6%)</option>
+                    <option value="tv">Tivi (7%)</option>
                 </select>
             </div>
 

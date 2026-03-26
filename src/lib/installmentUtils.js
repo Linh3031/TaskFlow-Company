@@ -18,15 +18,32 @@ export const formatCompact = (val) => {
     }
 };
 
+// ĐÃ PHẪU THUẬT: Cập nhật lại logic tính BH 1-1 theo chuẩn mới
 export const calculateBH11 = (group, p) => {
     if (group === 'none' || p === 0) return 0;
-    if (group === 'air_conditioner') return p <= 10000000 ? 250000 : 350000;
-    if (group === 'fridge' || group === 'washer') return p <= 10000000 ? 400000 : (p <= 25000000 ? 700000 : 1350000);
-    if (group === 'water_purifier') return p <= 8000000 ? 280000 : (p <= 11000000 ? 380000 : 460000);
-    if (group === 'smartphone') { const fee = p * 0.0462; return fee < 200000 ? 200000 : fee; }
-    if (group === 'laptop_tablet') { const fee = p * 0.06; return fee < 200000 ? 200000 : fee; }
-    if (group === 'smart_watch') { const fee = p * 0.055; return fee < 200000 ? 200000 : fee; }
+    
+    // Nhóm phí Min 200.000đ
+    if (group === 'phone') { 
+        const fee = p * 0.0462; 
+        return fee < 200000 ? 200000 : fee; 
+    }
+    if (group === 'laptop_tablet') { 
+        const fee = p * 0.06; 
+        return fee < 200000 ? 200000 : fee; 
+    }
+    
+    // Nhóm phí Min 100.000đ
+    if (['water_purifier', 'home_appliances', 'speaker'].includes(group)) {
+        const fee = p * 0.06;
+        return fee < 100000 ? 100000 : fee;
+    }
+    
+    // Nhóm KHÔNG có phí Min
+    if (['fridge_freezer', 'washer_dryer', 'ac'].includes(group)) {
+        return p * 0.06;
+    }
     if (group === 'tv') return p * 0.07;
+    
     return 0;
 };
 
