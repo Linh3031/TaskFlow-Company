@@ -58,7 +58,13 @@ export const calculateBHMR = (category, isDMX, years, price) => {
     if (category === 'none' || !price || price <= 0) return 0;
     
     if (isDMX) {
-        if (category === 'phone' || category === 'apple') {
+        // [FIXED] Tách riêng nhóm Apple khi chọn gói ĐMX, áp dụng giá chung 590k
+        if (category === 'apple') {
+            return 590000;
+        }
+        
+        // Nhóm smartphone khác vẫn tính theo khung giá cũ
+        if (category === 'phone') {
             if (years === 1) return getRate(price, [
                 { min: 0, max: 3000000, fee: 80000 },
                 { min: 3000000, max: 5000000, fee: 260000 },
