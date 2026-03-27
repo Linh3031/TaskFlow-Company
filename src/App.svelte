@@ -1,5 +1,5 @@
 <script>
-  // Version 16.1 - [CodeGenesis] Fix lỗi bốc hơi Bàn Giao (Ghim ngày khi hoàn tất)
+  // Version 16.2 - [CodeGenesis] Global Super Admin Override & Fix lỗi bốc hơi Bàn Giao
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
@@ -20,6 +20,16 @@
 
   const APP_VERSION = 12; 
   let showUpdatePrompt = false;
+
+  // =========================================================================
+  // [NEW] ĐẶC QUYỀN TỐI CAO: Hack Global State cho linh-3031
+  // Đoạn code này sẽ tự động chạy ngầm, biến linh-3031 thành Super Admin 
+  // trên toàn bộ hệ thống (Header, AdminModal, Schedule...) mà không cần sửa DB.
+  // =========================================================================
+  $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {
+      $currentUser.role = 'super_admin';
+  }
+  // =========================================================================
 
   let activeTab = '8nttt';
   let showAdminModal = false;
@@ -59,10 +69,9 @@
       return days[date.getDay()];
   })();
 
- function changeDate(offset) {
+  function changeDate(offset) {
       const d = new Date(selectedDate);
       d.setDate(d.getDate() + offset);
-      // [CodeGenesis] Phẫu thuật: Bỏ padStart để đồng bộ 100% với định dạng của getTodayStr()
       const year = d.getFullYear();
       const month = d.getMonth() + 1;
       const day = d.getDate();
@@ -103,7 +112,7 @@
 
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
-  
+
   onDestroy(() => { unsubTemplate(); unsubTasks(); unsubHandover(); });
 
   $: if ($currentUser && !$activeStoreId) {
@@ -115,7 +124,7 @@
   }
 
   $: if ($currentUser && $activeStoreId) loadDataForUser($activeStoreId, selectedDate);
-  
+
   $: if ($currentUser && $activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
            initDailyTasksSafe($activeStoreId, selectedDate, $currentTasks, $taskTemplate);
@@ -165,6 +174,7 @@
   }
 
   let fetchTimer;
+
   function loadDataForUser(storeId, dateStr) {
       if(unsubTemplate) unsubTemplate();
       if(unsubTasks) unsubTasks();
@@ -218,20 +228,18 @@
     }
   }
 
-  // [CodeGenesis] Phẫu thuật cắm đinh Dữ Liệu
   function confirmComplete(event) {
     if (!selectedTask) return;
     const { status, imageLinks } = event.detail; 
     const user = $currentUser.name || $currentUser.username;
     const time = getCurrentTimeShort();
-    
     updateDoc(doc(db, 'tasks', selectedTask.id), {
       status: status, 
       completed: status === 'completed', 
       completedBy: user, 
       time: time, 
       note: noteInput,
-      date: selectedDate, // <-- SỬA LỖI BỐC HƠI: Ghim chặt công việc vào ngày đang xem khi hoàn tất
+      date: selectedDate, 
       imageLinks: imageLinks || [],
       history: arrayUnion({ action: status === 'completed' ? 'done' : 'failed', user, time, fullTime: new Date().toISOString() })
     });

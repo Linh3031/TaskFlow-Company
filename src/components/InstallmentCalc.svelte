@@ -31,37 +31,48 @@
     let insuranceRatesData = [];
 
     onMount(async () => {
-        // 1. Tải lịch sử cũ
+        // 1. Tải lịch sử cũ một cách an toàn
         const savedHistory = localStorage.getItem('installment_history_v2'); 
-        if (savedHistory) try { history = JSON.parse(savedHistory); } catch (e) {}
-
-        // 2. Load Cache LocalStorage (Khởi tạo 0ms)
-        const cachedRates = localStorage.getItem('insurance_rates_cache');
-        if (cachedRates) {
-            try { insuranceRatesData = JSON.parse(cachedRates); } catch (e) {}
+        if (savedHistory) {
+            try { history = JSON.parse(savedHistory); } catch (e) {}
         }
 
-        // 3. Đồng bộ Firebase (1 Read/lần mở App)
+        // 2. KHIÊN BẢO VỆ QUOTA FIREBASE (Cache 24 giờ)
+        const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24 tiếng
+        const cachedRates = localStorage.getItem('insurance_rates_cache');
+        const cacheTime = localStorage.getItem('insurance_rates_time');
+        const now = Date.now();
+
+        // Nếu Cache còn hạn -> Dùng Cache, Tuyệt đối KHÔNG gọi Firebase
+        if (cachedRates && cacheTime && (now - Number(cacheTime) < CACHE_EXPIRY)) {
+            try { 
+                insuranceRatesData = JSON.parse(cachedRates); 
+                return; // Thoát luồng ngay lập tức để cứu Quota
+            } catch (e) {}
+        }
+
+        // 3. Chỉ gọi Firebase khi Cache hết hạn hoặc chưa có
         try {
             const docSnap = await getDoc(doc(db, 'system_configs', 'insurance_rates'));
             if (docSnap.exists()) {
                 const newData = docSnap.data().data;
                 insuranceRatesData = newData;
+                // Cập nhật lại Cache và mốc thời gian
                 localStorage.setItem('insurance_rates_cache', JSON.stringify(newData));
+                localStorage.setItem('insurance_rates_time', now.toString());
             }
         } catch (err) {
             console.error("Lỗi đồng bộ cấu hình bảo hiểm:", err);
         }
     });
 
-    $: { if (history) localStorage.setItem('installment_history_v2', JSON.stringify(history)); }
+    // [SURGICAL FIX] Đã xóa bỏ khối Reactive $: localStorage gây ra lỗi Race Condition bốc hơi dữ liệu.
 
     // --- BẪY LỖI: KIỂM TRA ĐMX ---
     $: {
         if (bhmrIsDMX && bhmrCategory !== 'none' && insuranceRatesData.length > 0) {
             const hasDmxPackage = insuranceRatesData.some(r => r.LoaiBaoHiem === 'BHMR_DMX' && r.NhomHang === bhmrCategory);
             if (!hasDmxPackage) {
-                // Thoát luồng reactive để tránh lỗi vòng lặp render
                 setTimeout(() => {
                     alert('⚠️ ĐMX không hỗ trợ gói bảo hiểm cho nhóm sản phẩm này! Hệ thống tự động lùi về gói Thường.');
                     bhmrIsDMX = false;
@@ -120,18 +131,19 @@
     $: if (!showOriginalPrice) { originalBasePrice = 0; displayBasePrice = ""; }
     $: if (!bhmrIsDMX && bhmrYears === 3) bhmrYears = 2; // Khóa 3 năm nếu ko phải ĐMX
 
-    // Đẩy ratesData vào hàm tính toán
     $: bh11Fee = includeBh11 ? calculateBH11(selectedBh11Group, originalBasePrice, insuranceRatesData) : 0;
     $: bhmrFee = includeBhmr ? calculateBHMR(bhmrCategory, bhmrIsDMX, bhmrYears, originalBasePrice, insuranceRatesData) : 0;
     
     $: loanAmount = Math.max(0, productPrice - downPaymentAmount);
     $: bhkvBase = (loanAmount > 0 && loanAmount <= 5000000) ? 5000000 : loanAmount;
     $: bhkvRatePercent = (() => { if (termMonths <= 6) return 2.6; if (termMonths <= 9) return 2.9; return 3.5; })();
+    
     $: bhkvValue = loanAmount > 0 ? (bhkvBase * bhkvRatePercent / 100) : 0;
     $: monthlyBase = (loanAmount > 0 && termMonths > 0) ? (loanAmount / termMonths) : 0;
     $: monthlyPayment = monthlyBase + 12000; // Thu hộ
     
     $: totalInstallmentAmount = monthlyPayment * termMonths;
+    
     // TỔNG TIỀN
     $: finalTotalPrice = downPaymentAmount + (includeBhkvInPrepaid ? bhkvValue : 0) + (includeBh11 ? bh11Fee : 0) + (includeBhmr ? bhmrFee : 0) + totalInstallmentAmount;
     $: totalPrepaid = downPaymentAmount + (includeBhkvInPrepaid ? bhkvValue : 0) + (includeBh11 ? bh11Fee : 0) + (includeBhmr ? bhmrFee : 0);
@@ -140,6 +152,8 @@
     function saveToHistory() {
         if (productPrice === 0) return;
         history = [{ id: Date.now(), timestamp: new Date().toLocaleString('vi-VN', { hour: '2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'}), price: productPrice, prepaid: totalPrepaid, monthly: monthlyPayment, term: termMonths, diff: diffPrice, selected: false }, ...history].slice(0, 10);
+        // [SURGICAL FIX] Lưu trực tiếp khi nhấn nút, không dùng Reactive nữa!
+        localStorage.setItem('installment_history_v2', JSON.stringify(history));
     }
 </script>
 
