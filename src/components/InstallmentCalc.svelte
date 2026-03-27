@@ -1,5 +1,7 @@
 <script>
     import { onMount } from 'svelte';
+    import { db } from '../lib/firebase';
+    import { doc, getDoc } from 'firebase/firestore';
     import { parseNumber, formatFull, calculateBH11, calculateBHMR } from '../lib/installmentUtils.js';
     import InstallmentHistory from './InstallmentCalcParts/InstallmentHistory.svelte';
     import InstallmentFooter from './InstallmentCalcParts/InstallmentFooter.svelte';
@@ -25,11 +27,48 @@
     let includeBh11 = true;
     let includeBhmr = true;
 
-    onMount(() => {
+    // --- BỘ NHỚ DATA ĐỘNG ---
+    let insuranceRatesData = [];
+
+    onMount(async () => {
+        // 1. Tải lịch sử cũ
         const savedHistory = localStorage.getItem('installment_history_v2'); 
         if (savedHistory) try { history = JSON.parse(savedHistory); } catch (e) {}
+
+        // 2. Load Cache LocalStorage (Khởi tạo 0ms)
+        const cachedRates = localStorage.getItem('insurance_rates_cache');
+        if (cachedRates) {
+            try { insuranceRatesData = JSON.parse(cachedRates); } catch (e) {}
+        }
+
+        // 3. Đồng bộ Firebase (1 Read/lần mở App)
+        try {
+            const docSnap = await getDoc(doc(db, 'system_configs', 'insurance_rates'));
+            if (docSnap.exists()) {
+                const newData = docSnap.data().data;
+                insuranceRatesData = newData;
+                localStorage.setItem('insurance_rates_cache', JSON.stringify(newData));
+            }
+        } catch (err) {
+            console.error("Lỗi đồng bộ cấu hình bảo hiểm:", err);
+        }
     });
+
     $: { if (history) localStorage.setItem('installment_history_v2', JSON.stringify(history)); }
+
+    // --- BẪY LỖI: KIỂM TRA ĐMX ---
+    $: {
+        if (bhmrIsDMX && bhmrCategory !== 'none' && insuranceRatesData.length > 0) {
+            const hasDmxPackage = insuranceRatesData.some(r => r.LoaiBaoHiem === 'BHMR_DMX' && r.NhomHang === bhmrCategory);
+            if (!hasDmxPackage) {
+                // Thoát luồng reactive để tránh lỗi vòng lặp render
+                setTimeout(() => {
+                    alert('⚠️ ĐMX không hỗ trợ gói bảo hiểm cho nhóm sản phẩm này! Hệ thống tự động lùi về gói Thường.');
+                    bhmrIsDMX = false;
+                }, 10);
+            }
+        }
+    }
 
     // --- LOGIC NHẬP LIỆU ---
     let displayPrice = "";
@@ -48,16 +87,12 @@
     }
 
    function handleDownPaymentPercentInput() {
-        // [FIX] Nếu người dùng xóa trắng ô, để giá trị null/rỗng tự nhiên, không ép về 0
         if (downPaymentPercent === null || downPaymentPercent === "") {
             recalcDownPayment();
             return;
         }
-        
-        // Chặn nhập quá 100% hoặc nhỏ hơn 0%
         if (downPaymentPercent > 100) downPaymentPercent = 100;
         if (downPaymentPercent < 0) downPaymentPercent = 0;
-        
         recalcDownPayment();
     }
 
@@ -72,7 +107,7 @@
 
     function recalcDownPayment() {
         if (downPaymentType === 'percent') {
-            const pct = downPaymentPercent || 0; // [FIX] Gán an toàn bằng 0 nếu ô đang trống để tính toán
+            const pct = downPaymentPercent || 0; 
             downPaymentAmount = (productPrice * pct) / 100;
             displayDownPaymentAmount = downPaymentAmount > 0 ? formatFull(Math.round(downPaymentAmount / 1000)) : "";
         } else {
@@ -80,13 +115,14 @@
         }
     }
 
-    // --- LOGIC TÍNH TOÁN ---
+    // --- LOGIC TÍNH TOÁN KẾT HỢP DỮ LIỆU ĐỘNG ---
     $: showOriginalPrice = selectedBh11Group !== 'none' || bhmrCategory !== 'none';
     $: if (!showOriginalPrice) { originalBasePrice = 0; displayBasePrice = ""; }
     $: if (!bhmrIsDMX && bhmrYears === 3) bhmrYears = 2; // Khóa 3 năm nếu ko phải ĐMX
 
-    $: bh11Fee = calculateBH11(selectedBh11Group, originalBasePrice);
-    $: bhmrFee = calculateBHMR(bhmrCategory, bhmrIsDMX, bhmrYears, originalBasePrice);
+    // Đẩy ratesData vào hàm tính toán
+    $: bh11Fee = includeBh11 ? calculateBH11(selectedBh11Group, originalBasePrice, insuranceRatesData) : 0;
+    $: bhmrFee = includeBhmr ? calculateBHMR(bhmrCategory, bhmrIsDMX, bhmrYears, originalBasePrice, insuranceRatesData) : 0;
     
     $: loanAmount = Math.max(0, productPrice - downPaymentAmount);
     $: bhkvBase = (loanAmount > 0 && loanAmount <= 5000000) ? 5000000 : loanAmount;
@@ -96,7 +132,7 @@
     $: monthlyPayment = monthlyBase + 12000; // Thu hộ
     
     $: totalInstallmentAmount = monthlyPayment * termMonths;
-    // TỔNG TIỀN (Chỉ cộng vào Tổng nếu các công tắc được BẬT)
+    // TỔNG TIỀN
     $: finalTotalPrice = downPaymentAmount + (includeBhkvInPrepaid ? bhkvValue : 0) + (includeBh11 ? bh11Fee : 0) + (includeBhmr ? bhmrFee : 0) + totalInstallmentAmount;
     $: totalPrepaid = downPaymentAmount + (includeBhkvInPrepaid ? bhkvValue : 0) + (includeBh11 ? bh11Fee : 0) + (includeBhmr ? bhmrFee : 0);
     $: diffPrice = finalTotalPrice - productPrice;
@@ -165,31 +201,46 @@
             <div class="flex items-center gap-2">
                 <span class="text-[10px] font-bold text-slate-600 w-16 shrink-0 uppercase">BH 1 Đổi 1</span>
                 <select bind:value={selectedBh11Group} class="flex-1 bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded p-1.5 outline-none focus:border-indigo-400">
-                    <option value="none">Không mua</option>
-                    <option value="phone">Điện thoại (4.62%)</option>
-                    <option value="laptop_tablet">Laptop - Tablet (6%)</option>
-                    <option value="fridge_freezer">Tủ lạnh - Đông - Mát (6%)</option>
-                    <option value="washer_dryer">Máy giặt - Sấy - Rửa chén (6%)</option>
-                    <option value="ac">Máy lạnh (6%)</option>
-                    <option value="water_purifier">Máy lọc nước (6%)</option>
-                    <option value="home_appliances">Gia dụng, Gia dụng lắp đặt (6%)</option>
-                    <option value="speaker">Loa karaoke, loa thanh (6%)</option>
-                    <option value="tv">Tivi (7%)</option>
+                    <option value="none">-- Không mua --</option>
+                    <option value="apple">Sản phẩm Apple</option>
+                    <option value="dienthoai">Điện thoại</option>
+                    <option value="tablet">Máy tính bảng (Tablet)</option>
+                    <option value="laptop">Laptop / Máy tính xách tay</option>
+                    <option value="tivi">Tivi</option>
+                    <option value="tulanh_tudong_tumat">Tủ lạnh / Tủ đông / Tủ mát</option>
+                    <option value="maygiat_maysay">Máy giặt / Máy sấy</option>
+                    <option value="maylanh">Máy lạnh</option>
+                    <option value="maylanh_maynuocnong">Máy lạnh / Máy nước nóng (Gộp chung)</option>
+                    <option value="maynuocnong">Máy nước nóng</option>
+                    <option value="maylocnuoc">Máy lọc nước</option>
+                    <option value="mayruachen">Máy rửa chén</option>
+                    <option value="quatdieuhoa">Quạt điều hòa</option>
+                    <option value="diengiadung">Điện gia dụng</option>
+                    <option value="Giadunglapdat">Gia dụng lắp đặt</option>
+                    <option value="loakaraoke_loathanh">Loa karaoke / Loa thanh</option>
                 </select>
             </div>
 
             <div class="flex items-center gap-2">
                 <span class="text-[10px] font-bold text-slate-600 w-16 shrink-0 uppercase">BHMR</span>
                 <select bind:value={bhmrCategory} class="flex-1 bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded p-1.5 outline-none focus:border-indigo-400">
-                    <option value="none">Không mua</option>
+                    <option value="none">-- Không mua --</option>
                     <option value="apple">Sản phẩm Apple</option>
-                    <option value="phone">Smartphone khác</option>
-                    <option value="laptop">Laptop / PC</option>
-                    <option value="tablet">Tablet / Đồng hồ</option>
-                    <option value="tivi">Tivi / Loa</option>
-                    <option value="fridge">Tủ lạnh / Tủ đông</option>
-                    <option value="ac">Máy lạnh</option>
-                    <option value="washer">Máy giặt</option>
+                    <option value="dienthoai">Điện thoại</option>
+                    <option value="tablet">Máy tính bảng (Tablet)</option>
+                    <option value="laptop">Laptop / Máy tính xách tay</option>
+                    <option value="tivi">Tivi</option>
+                    <option value="tulanh_tudong_tumat">Tủ lạnh / Tủ đông / Tủ mát</option>
+                    <option value="maygiat_maysay">Máy giặt / Máy sấy</option>
+                    <option value="maylanh">Máy lạnh</option>
+                    <option value="maylanh_maynuocnong">Máy lạnh / Máy nước nóng (Gộp chung)</option>
+                    <option value="maynuocnong">Máy nước nóng</option>
+                    <option value="maylocnuoc">Máy lọc nước</option>
+                    <option value="mayruachen">Máy rửa chén</option>
+                    <option value="quatdieuhoa">Quạt điều hòa</option>
+                    <option value="diengiadung">Điện gia dụng</option>
+                    <option value="Giadunglapdat">Gia dụng lắp đặt</option>
+                    <option value="loakaraoke_loathanh">Loa karaoke / Loa thanh</option>
                 </select>
             </div>
 

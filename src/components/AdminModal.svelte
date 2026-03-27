@@ -1,5 +1,5 @@
 <script>
-  // Version 48.0 - [CodeGenesis] Kích hoạt lại Tab Quản lý Mẫu Công Việc (AdminTemplate)
+  // Version 49.0 - [CodeGenesis] Thêm Tab Khai báo trả góp (Chỉ dành cho Super Admin)
   import { createEventDispatcher } from 'svelte';
   import { currentUser } from '../lib/stores';
   import { db } from '../lib/firebase';
@@ -7,6 +7,8 @@
   import AdminTemplate from './admin/AdminTemplate.svelte';
   import AdminAccounts from './admin/AdminAccounts.svelte';
   import AdminSchedule from './admin/AdminSchedule.svelte';
+  // ĐÃ PHẪU THUẬT: Import Component mới
+  import AdminInstallmentConfig from './admin/AdminInstallmentConfig.svelte';
 
   const dispatch = createEventDispatcher();
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
@@ -37,12 +39,16 @@
                     <span class="material-icons-round absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">expand_more</span>
                 </div>
 
-                <div class="flex bg-slate-100 p-1 rounded-lg ml-2">
+                <div class="flex flex-wrap bg-slate-100 p-1 rounded-lg ml-2 gap-1">
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>Phân Ca</button>
                     
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>Nhân Sự</button>
 
                     <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Mẫu Việc</button>
+
+                    {#if isSuperAdmin}
+                        <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='installment'?'bg-white text-purple-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'installment'}>Khai Báo Trả Góp</button>
+                    {/if}
                 </div>
             </div>
         </div>
@@ -59,6 +65,10 @@
 
         {#if activeSection === 'template'}
             <AdminTemplate {targetStore} />
+        {/if}
+
+        {#if activeSection === 'installment'}
+            <AdminInstallmentConfig />
         {/if}
     </div>
 </div>
