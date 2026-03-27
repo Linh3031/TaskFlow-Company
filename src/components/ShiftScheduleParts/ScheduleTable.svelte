@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from 'svelte';
     const dispatch = createEventDispatcher();
-    
+
     // Dữ liệu từ cha truyền xuống
     export let scheduleData;
     export let showPastDays;
@@ -34,7 +34,7 @@
         
         let valA = a[sortField];
         let valB = b[sortField];
-        
+         
         if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
         if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
         return a.origIdx - b.origIdx; // Bằng nhau thì theo thứ tự gốc
@@ -61,7 +61,7 @@
                         <th class="p-1 border-l border-amber-500/30 min-w-[40px] text-xs font-black cursor-pointer hover:bg-amber-500 transition-colors select-none {['T7','CN'].includes(getWeekday(d)) ? 'bg-amber-300' : ''} {highlightedDay === d ? '!bg-indigo-300 !text-indigo-900 ring-2 ring-indigo-500 z-50 relative' : ''}" title="Click để tô màu cột" on:click={() => dispatch('clickHighlight', d)}>{d}</th>
                     {/if}
                 {/each}
-                 
+                  
                 <th rowspan="2" class="p-2 w-12 bg-amber-100 text-[10px] border-l border-amber-300 font-bold cursor-pointer hover:bg-amber-200 transition-colors" on:click={() => toggleSort('totalHoursNum')} title="Sắp xếp theo Tổng giờ">Giờ {sortField==='totalHoursNum'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th>
                 <th rowspan="2" class="p-2 w-10 bg-blue-100 text-[10px] border-l border-amber-300 font-bold text-blue-800 cursor-pointer hover:bg-blue-200 transition-colors" on:click={() => toggleSort('gh')} title="Sắp xếp theo Giao hàng">GH {sortField==='gh'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th>
                 <th rowspan="2" class="p-2 w-10 bg-purple-100 text-[10px] border-l border-amber-300 font-bold text-purple-800 cursor-pointer hover:bg-purple-200 transition-colors" on:click={() => toggleSort('tn')} title="Sắp xếp theo Thu ngân">TN {sortField==='tn'?(sortDirection==='desc'?'▼':'▲'):'↕'}</th>
@@ -85,10 +85,11 @@
                 {/each}
             </tr>
         </thead>
+ 
         <tbody class="divide-y text-xs">
             {#each displayStats as staff, i}
                 <tr id="staff-row-{staff.id}" class="hover:bg-blue-50 transition-colors">
-                    <td id={i===0 ? 'tour-staff-name' : ''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-20 cursor-pointer hover:text-indigo-600 hover:underline underline-offset-2 shadow pl-3 truncate min-w-[140px] max-w-[140px] {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}" title="Click để xem lịch cá nhân" on:click={() => dispatch('clickStaff', ... { id: staff.id, name: staff.name })}><span class="capitalize">{staff.name}</span></td>
+                    <td id={i===0 ? 'tour-staff-name' : ''} class="p-2 font-bold text-left sticky left-0 bg-white border-r z-20 cursor-pointer hover:text-indigo-600 hover:underline underline-offset-2 shadow pl-3 truncate min-w-[140px] max-w-[140px] {staff.gender==='Nam'?'text-blue-700':'text-pink-600'}" title="Click để xem lịch cá nhân" on:click={() => dispatch('clickStaff', { id: staff.id, name: staff.name })}><span class="capitalize">{staff.name}</span></td>
                     {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
                         {#if showPastDays || !isPastDay(d)}
                             {@const assign = (scheduleData.data[d]||[]).find(x => x.staffId === staff.id)}
