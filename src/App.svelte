@@ -18,7 +18,7 @@
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
 
-  const APP_VERSION = 12; 
+  const APP_VERSION = 13; 
   let showUpdatePrompt = false;
 
   // =========================================================================
@@ -125,7 +125,7 @@
 
   $: if ($currentUser && $activeStoreId) loadDataForUser($activeStoreId, selectedDate);
 
-  $: if ($currentUser && $activeStoreId && selectedDate === getTodayStr() && $taskTemplate && $currentTasks && isTasksLoaded) {
+  $: if ($currentUser && $activeStoreId && selectedDate && $taskTemplate && $currentTasks && isTasksLoaded) {
        if (!hasCheckedInit) {
            initDailyTasksSafe($activeStoreId, selectedDate, $currentTasks, $taskTemplate);
        }
@@ -137,10 +137,15 @@
   }
 
   async function initDailyTasksSafe(storeId, dateStr, currentTasks, template) {
-      if (dateStr !== getTodayStr()) return;
+      // [SURGICAL FIX] Cho phép tạo việc cho hôm nay và tương lai, chặn ngược về quá khứ
+      const today = new Date(getTodayStr());
+      const target = new Date(dateStr);
+      if (target < today) return; 
+
       hasCheckedInit = true;
 
-      const dayOfWeek = new Date().getDay();
+      // Lấy đúng thứ của ngày đang xem để sinh việc chuẩn xác
+      const dayOfWeek = target.getDay(); 
       const batch = writeBatch(db);
       let hasUpdates = false;
       const types = ['warehouse', 'cashier']; 
@@ -182,9 +187,15 @@
 
       if (fetchTimer) clearTimeout(fetchTimer);
       fetchTimer = setTimeout(() => {
-          unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
-              taskTemplate.set(docSnap.exists() ? docSnap.data() : DEFAULT_TEMPLATE);
-          });
+        // [SURGICAL FIX] Tuyệt chủng công việc Demo
+        unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
+            if (docSnap.exists()) {
+                taskTemplate.set(docSnap.data());
+            } else {
+                // Trả về mảng rỗng để kho mới luôn sạch sẽ
+                taskTemplate.set({ warehouse: [], cashier: [], handover: [] });
+            }
+        });
           
           let dailyTasks = [];
           let handoverTasks = [];

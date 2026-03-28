@@ -1,12 +1,9 @@
 <script>
-  // Version 6.2 - [CodeGenesis] Lộ diện "Bóng Ma" Mặc định + Theo dõi Người tạo
-  import { onMount } from 'svelte';
+  // Version 6.3 - [CodeGenesis] Tuyệt chủng công việc Demo - Làm sạch hệ thống
+  import { onMount, onDestroy } from 'svelte';
   import { db } from '../../lib/firebase';
-  import { doc, setDoc, addDoc, collection, serverTimestamp, onSnapshot } from 'firebase/firestore';
-  import { getTodayStr } from '../../lib/utils';
-  // [CodeGenesis] Import thêm DEFAULT_TEMPLATE
-  import { currentUser, DEFAULT_TEMPLATE } from '../../lib/stores'; 
-  import TourGuide from '../TourGuide.svelte';
+  import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+  import { currentUser } from '../../lib/stores'; 
 
   export let targetStore = ''; 
 
@@ -17,190 +14,137 @@
   let selectedDays = [0, 1, 2, 3, 4, 5, 6];
   let editingTemplateIndex = -1;
   
-  let localTemplateData = {};
+  let localTemplateData = { warehouse: [], cashier: [], handover: [] };
   let unsub = () => {};
 
-  let showTour = false;
-  const tourSteps = [
-      { target: '#dept-select-container', title: '1. Chọn Bộ Phận', content: 'Chọn tab mà công việc này sẽ xuất hiện (Kho, Thu Ngân hay Bàn Giao).' },
-      { target: '#time-input', title: '2. Chọn Giờ', content: 'Công việc sẽ được sắp xếp theo thời gian này trong ngày.' },
-      { target: '#weekdays-container', title: '3. Chọn Ngày Lặp', content: 'Chọn các thứ trong tuần mà công việc này cần làm (Màu xanh là được chọn).' },
-      { target: '#btn-save-template', title: '4. Thêm/Lưu', content: 'Bấm vào đây để lưu mẫu. Nếu ngày lặp trùng hôm nay, công việc sẽ tự động hiện ra ngoài trang chủ.' }
-  ];
-
   const weekDays = [
-      { val: 1, label: 'T2' }, { val: 2, label: 'T3' }, { val: 3, label: 'T4' },
-      { val: 4, label: 'T5' }, { val: 5, label: 'T6' }, { val: 6, label: 'T7' }, { val: 0, label: 'CN' }
+      { label: 'T2', val: 1 }, { label: 'T3', val: 2 }, { label: 'T4', val: 3 },
+      { label: 'T5', val: 4 }, { label: 'T6', val: 5 }, { label: 'T7', val: 6 }, { label: 'CN', val: 0 }
   ];
 
-  $: if (targetStore) loadTemplateForStore(targetStore);
-
-  function loadTemplateForStore(sid) {
+  $: if (targetStore) {
       if (unsub) unsub();
-      localTemplateData = {};
-      unsub = onSnapshot(doc(db, 'settings', `template_${sid}`), (docSnap) => {
+      unsub = onSnapshot(doc(db, 'settings', `template_${targetStore}`), (docSnap) => {
           if (docSnap.exists()) {
               localTemplateData = docSnap.data();
           } else {
-              // [CodeGenesis] Lộ diện "Bóng ma" bằng cách nạp Mẫu Mặc Định nếu chưa có data
-              localTemplateData = JSON.parse(JSON.stringify(DEFAULT_TEMPLATE));
+              localTemplateData = { warehouse: [], cashier: [], handover: [] };
           }
       });
   }
 
-  function toggleDay(d) {
-      if (selectedDays.includes(d)) {
-          if (selectedDays.length > 1) selectedDays = selectedDays.filter(x => x !== d);
-      } else selectedDays = [...selectedDays, d];
+  onDestroy(() => { if (unsub) unsub(); });
+
+  async function saveTemplate() {
+      if (!newTemplateTitle.trim()) return;
+      
+      const newItem = {
+          title: newTemplateTitle.trim(),
+          time: newTemplateTime,
+          days: [...selectedDays],
+          isImportant: newTemplateImportant,
+          createdBy: $currentUser.name || $currentUser.username,
+          updatedAt: new Date().toISOString()
+      };
+
+      if (editingTemplateIndex > -1) {
+          localTemplateData[activeTemplateType][editingTemplateIndex] = newItem;
+      } else {
+          if (!localTemplateData[activeTemplateType]) localTemplateData[activeTemplateType] = [];
+          localTemplateData[activeTemplateType] = [...localTemplateData[activeTemplateType], newItem];
+      }
+
+      await setDoc(doc(db, 'settings', `template_${targetStore}`), localTemplateData);
+      resetForm();
   }
 
-  function editTemplate(idx, item) {
-      editingTemplateIndex = idx;
+  function resetForm() {
+      newTemplateTitle = '';
+      newTemplateTime = '08:00';
+      newTemplateImportant = false;
+      editingTemplateIndex = -1;
+  }
+
+  function editTemplate(index, item) {
+      editingTemplateIndex = index;
       newTemplateTitle = item.title;
       newTemplateTime = item.time;
       newTemplateImportant = item.isImportant || false;
-      selectedDays = item.days || [0, 1, 2, 3, 4, 5, 6];
+      selectedDays = [...(item.days || [])];
   }
 
-  async function deleteTemplate(idx) {
-      if (!confirm("Xóa mẫu này?")) return;
-      const up = { ...localTemplateData };
-      if (!up[activeTemplateType]) return;
-      up[activeTemplateType].splice(idx, 1);
-      
-      try {
-          await setDoc(doc(db, 'settings', `template_${targetStore}`), up);
-          if (editingTemplateIndex === idx) { 
-              editingTemplateIndex = -1; 
-              newTemplateTitle = '';
-          }
-      } catch (e) { alert(e.message); }
+  async function deleteTemplate(index) {
+      if (!confirm('Xóa mẫu việc này?')) return;
+      localTemplateData[activeTemplateType].splice(index, 1);
+      localTemplateData[activeTemplateType] = [...localTemplateData[activeTemplateType]];
+      await setDoc(doc(db, 'settings', `template_${targetStore}`), localTemplateData);
   }
 
-  async function saveTemplate() {
-      if (!targetStore) return alert("Chưa chọn kho!");
-      if (!newTemplateTitle.trim()) return alert("Nhập tên công việc!");
-      
-      const up = { ...localTemplateData };
-      if (!up[activeTemplateType]) up[activeTemplateType] = [];
-      
-      const creatorName = $currentUser?.name || $currentUser?.username || 'Quản lý'; // [CodeGenesis] Lấy thông tin người tạo
-
-      const newItem = { 
-          title: newTemplateTitle, 
-          time: newTemplateTime, 
-          isImportant: newTemplateImportant, 
-          days: selectedDays,
-          createdBy: creatorName // [CodeGenesis] Lưu dấu vết
-      };
-
-      if (editingTemplateIndex >= 0) up[activeTemplateType][editingTemplateIndex] = newItem;
-      else up[activeTemplateType].push(newItem);
-
-      up[activeTemplateType].sort((a, b) => (a.time || "00:00").localeCompare(b.time || "00:00"));
-      
-      try {
-          await setDoc(doc(db, 'settings', `template_${targetStore}`), up);
-          const today = new Date().getDay();
-          if (selectedDays.includes(today)) {
-              await addDoc(collection(db, 'tasks'), {
-                  type: activeTemplateType,
-                  title: newTemplateTitle,
-                  timeSlot: newTemplateTime,
-                  isImportant: newTemplateImportant,
-                  completed: false, 
-                  completedBy: null, 
-                  time: null, 
-                  note: '',
-                  createdBy: creatorName,
-                  date: getTodayStr(),
-                  storeId: targetStore,
-                  timestamp: serverTimestamp()
-              });
-          }
-
-          newTemplateTitle = ''; 
-          newTemplateImportant = false; 
-          editingTemplateIndex = -1;
-          selectedDays = [0, 1, 2, 3, 4, 5, 6];
-          
-      } catch (e) { alert(e.message); }
+  function toggleDay(val) {
+      if (selectedDays.includes(val)) {
+          selectedDays = selectedDays.filter(d => d !== val);
+      } else {
+          selectedDays = [...selectedDays, val];
+      }
   }
 </script>
 
-<div class="flex flex-col lg:flex-row gap-6 h-full animate-fadeIn">
-  <div class="w-full lg:w-[35%] bg-white p-5 rounded-2xl shadow-sm border border-slate-200 h-fit">
-      <div class="flex justify-between items-center mb-4 border-b pb-2">
-          <h4 class="font-bold text-slate-700 flex items-center gap-2 text-lg">
-              <span class="material-icons-round text-orange-500 bg-orange-50 p-1 rounded-lg">edit_note</span>
-              {editingTemplateIndex >= 0 ? 'Chỉnh Sửa' : 'Thêm Mới'}
-          </h4>
-          <button class="text-gray-400 hover:text-indigo-600" on:click={() => showTour = true} title="Hướng dẫn"><span class="material-icons-round">help_outline</span></button>
+<div class="flex flex-col h-full animate-fadeIn">
+  <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-4">
+      <div id="dept-select-container" class="flex bg-slate-100 p-1 rounded-lg mb-4">
+          <button class="flex-1 py-2 text-xs font-bold rounded-md transition-all {activeTemplateType==='warehouse'?'bg-white text-indigo-700 shadow-sm':'text-slate-500'}" on:click={() => {activeTemplateType='warehouse'; resetForm();}}>KHO</button>
+          <button class="flex-1 py-2 text-xs font-bold rounded-md transition-all {activeTemplateType==='cashier'?'bg-white text-indigo-700 shadow-sm':'text-slate-500'}" on:click={() => {activeTemplateType='cashier'; resetForm();}}>THU NGÂN</button>
+          <button class="flex-1 py-2 text-xs font-bold rounded-md transition-all {activeTemplateType==='handover'?'bg-white text-indigo-700 shadow-sm':'text-slate-500'}" on:click={() => {activeTemplateType='handover'; resetForm();}}>BÀN GIAO</button>
       </div>
 
-      <div class="text-xs font-bold text-gray-400 mb-2">Kho: <b class="text-indigo-600 text-sm">{targetStore}</b> | Người tạo: <b class="text-green-600">{$currentUser?.name}</b></div>
-      
-      <div class="space-y-4">
-          <div id="dept-select-container">
-              <label for="dept-select" class="text-xs font-bold text-slate-500 uppercase">Bộ phận</label>
-              <select id="dept-select" bind:value={activeTemplateType} class="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-700 outline-none">
-                  <option value="warehouse">Kho</option>
-                  <option value="cashier">Thu Ngân</option>
-                  <option value="handover">Bàn Giao</option>
-              </select>
-          </div>
-          
-          <div class="flex gap-3">
-              <div class="w-24">
-                  <label for="time-input" class="text-xs font-bold text-slate-500 uppercase">Giờ</label>
-                  <input id="time-input" type="time" bind:value={newTemplateTime} class="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-center font-bold">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="space-y-3">
+              <div>
+                  <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tên công việc</label>
+                  <input type="text" bind:value={newTemplateTitle} placeholder="Nhập tên việc cần làm..." class="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500 transition-all">
               </div>
-              <div class="flex-1">
-                  <label for="title-input" class="text-xs font-bold text-slate-500 uppercase">Tên công việc</label>
-                  <input id="title-input" type="text" bind:value={newTemplateTitle} class="w-full mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none" placeholder="Nhập tên việc...">
+              <div class="flex gap-3">
+                  <div class="flex-1">
+                      <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Thời gian</label>
+                      <input id="time-input" type="time" bind:value={newTemplateTime} class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none">
+                  </div>
+                  <div class="flex-1 flex flex-col justify-end">
+                      <label class="flex items-center gap-2 cursor-pointer p-2 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors">
+                          <input type="checkbox" bind:checked={newTemplateImportant} class="w-4 h-4 accent-red-500">
+                          <span class="text-xs font-bold text-slate-600">Việc quan trọng</span>
+                      </label>
+                  </div>
               </div>
           </div>
 
-          <div id="weekdays-container">
-              <label class="text-xs font-bold text-slate-500 uppercase mb-2 block">Lặp lại</label>
-              <div class="flex gap-1 flex-wrap">
+          <div>
+              <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Các ngày lặp lại</label>
+              <div id="weekdays-container" class="flex flex-wrap gap-1.5">
                   {#each weekDays as d}
-                      <button class="w-8 h-8 rounded-lg text-xs font-bold border transition-all {selectedDays.includes(d.val)?'bg-indigo-600 text-white border-indigo-600 shadow-md':'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}" on:click={() => toggleDay(d.val)}>{d.label}</button>
+                      <button class="flex-1 min-w-[40px] py-2 rounded-lg text-xs font-bold border transition-all {selectedDays.includes(d.val) ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}" on:click={() => toggleDay(d.val)}>{d.label}</button>
                   {/each}
               </div>
-          </div>
-
-          <label class="flex items-center gap-3 p-3 rounded-lg border border-red-100 bg-red-50 cursor-pointer hover:bg-red-100 transition-colors mt-1">
-              <input type="checkbox" bind:checked={newTemplateImportant} class="w-5 h-5 accent-red-600 rounded">
-              <span class="text-sm font-bold text-red-700">Quan Trọng</span>
-          </label>
-
-          <div class="flex gap-2 pt-2 border-t">
-              {#if editingTemplateIndex >= 0}
-                  <button class="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl" on:click={() => { editingTemplateIndex = -1; newTemplateTitle = ''; }}>Hủy</button>
-              {/if}
-              <button id="btn-save-template" class="flex-[2] py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700" on:click={saveTemplate}>
-                  {editingTemplateIndex >= 0 ? 'Lưu & Áp Dụng Ngay' : 'Thêm & Áp Dụng Ngay'}
+              <button class="w-full mt-4 py-3 {editingTemplateIndex > -1 ? 'bg-orange-500' : 'bg-indigo-600'} text-white rounded-xl font-bold text-sm shadow-lg hover:opacity-90 transition-all" on:click={saveTemplate}>
+                  {editingTemplateIndex > -1 ? 'CẬP NHẬT MẪU VIỆC' : 'THÊM VÀO DANH SÁCH MẪU'}
               </button>
           </div>
       </div>
   </div>
 
-  <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden h-full max-h-[600px]">
-      <div class="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-2 shrink-0">
-          <span class="font-bold text-slate-700">Danh sách mẫu kho {targetStore} ({localTemplateData[activeTemplateType]?.length || 0})</span>
-      </div>
-      
-      <div class="flex-1 overflow-y-auto p-3 space-y-2">
+  <div class="flex-1 overflow-y-auto pr-1">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {#each (localTemplateData[activeTemplateType] || []) as item, i}
-              <div class="flex items-start gap-4 p-4 rounded-xl border border-slate-100 bg-white group relative">
-                  <div class="font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg text-sm">{item.time}</div>
-                  <div class="flex-1">
-                      <div class="font-bold text-slate-800 text-base mb-1 {item.isImportant?'text-red-600':''}">{item.isImportant ? '★ ' : ''}{item.title}</div>
+              <div class="group relative bg-white p-3 rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all {item.isImportant ? 'border-l-4 border-l-red-500' : ''}">
+                  <div class="pr-8">
+                      <div class="flex items-center gap-2 mb-1">
+                          <span class="text-[10px] font-black bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{item.time}</span>
+                          {#if item.isImportant}<span class="text-[9px] font-black bg-red-100 text-red-600 px-1.5 py-0.5 rounded">QUAN TRỌNG</span>{/if}
+                      </div>
+                      <h4 class="text-sm font-bold text-slate-700 mb-2 line-clamp-2">{item.title}</h4>
                       
                       <div class="text-[10px] text-indigo-400 font-bold mb-1.5 flex items-center gap-1">
                           <span class="material-icons-round text-[12px]">account_circle</span> 
-                          {item.createdBy || 'Hệ thống (Mặc định)'}
+                          {item.createdBy || 'Hệ thống'}
                       </div>
 
                       <div class="flex gap-1 flex-wrap">
@@ -216,9 +160,12 @@
                       <button class="w-8 h-8 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center" on:click={() => deleteTemplate(i)}><span class="material-icons-round text-sm">delete</span></button>
                   </div>
               </div>
+          {:else}
+              <div class="col-span-full py-12 text-center text-slate-400">
+                  <span class="material-icons-round text-4xl mb-2 opacity-20">assignment_late</span>
+                  <p class="text-sm font-bold italic">Chưa có mẫu việc nào. Hãy thêm công việc đầu tiên!</p>
+              </div>
           {/each}
       </div>
   </div>
 </div>
-
-{#if showTour} <TourGuide steps={tourSteps} on:complete={() => showTour = false} /> {/if}
