@@ -18,7 +18,7 @@
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
 
-  const APP_VERSION = 13; 
+  const APP_VERSION = 14; 
   let showUpdatePrompt = false;
 
   // =========================================================================

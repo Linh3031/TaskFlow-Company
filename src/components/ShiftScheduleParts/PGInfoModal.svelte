@@ -9,12 +9,17 @@
     export let isAdmin = false;
     export let currentUser = null;
 
-    // Phân quyền: Chỉ Admin hoặc chính chủ PG đó mới có quyền sửa
-    $: canEdit = isAdmin || (currentUser && currentUser.username === pg.username);
+    // Phân quyền: Nâng cấp logic kiểm tra chủ sở hữu (so khớp username, id, uid và loại bỏ khoảng trắng)
+    $: isOwner = currentUser && pg && (
+        (currentUser.username && pg.username && String(currentUser.username).trim() === String(pg.username).trim()) || 
+        (currentUser.id && pg.id && currentUser.id === pg.id) ||
+        (currentUser.uid && pg.id && currentUser.uid === pg.id)
+    );
+    $: canEdit = isAdmin || isOwner;
     
     let isEditing = false;
     let isSaving = false;
-    
+
     // Lưu trữ state form
     let form = {
         phone: pg.phone || '',
@@ -30,14 +35,12 @@
         isSaving = true;
         try {
             const ref = doc(db, 'users', pg.id);
-            
             // CodeGenesis: Thêm Audit Trail khi lưu thông tin
             const updatePayload = {
                 ...form,
                 lastModifiedBy: currentUser ? currentUser.username : 'Unknown_PGInfoModal',
                 lastUpdatedAt: serverTimestamp()
             };
-            
             await updateDoc(ref, updatePayload);
             // Cập nhật lại UI lập tức sau khi lưu
             Object.assign(pg, form);
