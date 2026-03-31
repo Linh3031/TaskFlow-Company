@@ -1,7 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { db } from '../lib/firebase';
-  // [NEW] Import thêm các hàm query của Firebase để lấy danh sách User
   import { doc, onSnapshot, updateDoc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
   import { currentUser, activeStoreId } from '../lib/stores';
   import TourGuide from './TourGuide.svelte';
@@ -51,7 +50,7 @@
   }
 
   // ==========================================
-  // [NEW] TÍNH NĂNG THẾ CHỖ NHÂN SỰ TOÀN LỊCH
+  // TÍNH NĂNG THẾ CHỖ NHÂN SỰ TOÀN LỊCH
   // ==========================================
   let allStoreUsers = [];
   $: availableStaffToSwap = allStoreUsers.filter(u => scheduleData && !scheduleData.stats.some(s => s.id === u.id));
@@ -61,7 +60,10 @@
       try {
           const q = query(collection(db, 'users'), where('storeIds', 'array-contains', $activeStoreId));
           const snap = await getDocs(q);
-          allStoreUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          // [PHẪU THUẬT LOGIC]: Lọc trực tiếp bằng JS để chặn PG và Admin, tránh lỗi thiếu Index Firebase
+          allStoreUsers = snap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(u => u.role === 'staff'); // Chỉ lấy user có role là nhân viên cửa hàng
       } catch (error) {
           console.error("Lỗi lấy danh sách user:", error);
       }

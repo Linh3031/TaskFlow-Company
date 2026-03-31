@@ -5,7 +5,6 @@
     export let selectedStaff;
     export let getRoleBadge;
     
-    // [NEW] Nhận props từ cha để xử lý tính năng Thế chỗ
     export let isAdmin = false;
     export let availableStaffToSwap = []; 
 
@@ -18,7 +17,7 @@
         if (!newStaffObj) return;
         
         dispatch('swapStaff', {
-            oldStaffId: selectedStaff.stats.id,
+            oldStaffId: selectedStaff.id || selectedStaff.stats.id,
             newStaff: newStaffObj
         });
     }
@@ -27,14 +26,16 @@
 <div class="fixed inset-0 z-[60] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => dispatch('close')}>
     <div class="bg-white w-full max-w-sm rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" on:click|stopPropagation>
         <div class="p-4 bg-indigo-500 text-white shrink-0 relative">
-            <h3 class="font-bold text-lg pr-8">{selectedStaff.name}</h3>
+            <h3 class="font-bold text-lg pr-24 truncate">{selectedStaff.name}</h3>
+            
             {#if isAdmin}
-                <button class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-white/20 hover:bg-white/40 rounded-full transition-colors" title="Thế chỗ nhân sự khác" on:click={() => showSwapPanel = !showSwapPanel}>
-                    <span class="material-icons-round text-sm">person_swap</span>
+                <button class="absolute top-3 right-3 px-2.5 py-1.5 flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white border border-white/30 rounded-lg shadow-sm transition-all" title="Thế chỗ nhân sự khác" on:click={() => showSwapPanel = !showSwapPanel}>
+                    <span class="material-icons-round text-[16px]">swap_horiz</span>
+                    <span class="text-[11px] font-bold uppercase tracking-wider">Đổi Người</span>
                 </button>
             {/if}
 
-            <div class="flex justify-between mt-2 text-xs font-bold bg-indigo-600/50 p-2 rounded">
+            <div class="flex justify-between mt-3 text-xs font-bold bg-indigo-600/50 p-2 rounded">
                <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
                 <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span>
                 <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span>
@@ -48,7 +49,7 @@
                     <span class="material-icons-round text-[14px]">warning</span> Thay người gánh vác lịch này
                 </label>
                 <div class="flex gap-2">
-                    <select bind:value={selectedNewStaffId} class="flex-1 p-2 text-sm border border-amber-300 rounded outline-none font-bold text-slate-700 bg-white shadow-sm">
+                    <select bind:value={selectedNewStaffId} class="flex-1 p-2 text-sm border border-amber-300 rounded outline-none font-bold text-slate-700 bg-white shadow-sm cursor-pointer">
                         <option value="">-- Chọn nhân viên rảnh --</option>
                         {#each availableStaffToSwap as staff}
                             <option value={staff.id}>{staff.name} ({staff.gender || 'Nữ'})</option>
@@ -80,7 +81,7 @@
                 {/each}
             </div>
         </div>
-        <div class="p-3 border-t bg-white text-center"><button class="w-full py-2 bg-gray-100 rounded text-gray-600 font-bold text-sm hover:bg-gray-200" on:click={() => dispatch('close')}>Đóng</button></div>
+        <div class="p-3 border-t bg-white text-center"><button class="w-full py-2 bg-gray-100 rounded-lg text-gray-600 font-bold text-sm hover:bg-gray-200 transition-colors" on:click={() => dispatch('close')}>Đóng</button></div>
     </div>
 </div>
 

@@ -1,10 +1,25 @@
 // src/lib/smartCover.js
 
 export function buildSmartCover(target, scheduleData) {
-    let dayAssigns = scheduleData.data[target.day].filter(a => a.staffId !== target.staffId && a.shift !== 'OFF');
+    // [NEW] Helper nhận diện ca nghiệp vụ (Hard Role)
+    const isHardRole = (r) => {
+        if (!r) return false;
+        let norm = r.toLowerCase();
+        return norm.includes('gh') || norm.includes('giao') || 
+               norm.includes('tn') || norm.includes('thu') || 
+               norm.includes('k'); // Bao gồm 'kho', 'k'
+    };
+
+    // [PHẪU THUẬT LOGIC]: Loại bỏ nhân viên OFF, nhân viên hiện tại, VÀ nhân viên đang nắm ca Nghiệp Vụ
+    let dayAssigns = scheduleData.data[target.day].filter(a => 
+        a.staffId !== target.staffId && 
+        a.shift !== 'OFF' &&
+        !isHardRole(a.role)
+    );
+    
     let stats = scheduleData.stats;
 
-    // Sắp xếp ưu tiên người đang có tổng giờ công thấp nhất (Đói ca)
+    // Sắp xếp ưu tiên người đang có tổng giờ công thấp nhất (Đói ca) lên đầu
     dayAssigns.sort((a, b) => {
         let hA = stats.find(s => s.id === a.staffId)?.totalHours || 0;
         let hB = stats.find(s => s.id === b.staffId)?.totalHours || 0;
@@ -13,7 +28,6 @@ export function buildSmartCover(target, scheduleData) {
 
     let suggestions = [];
     
-    // [CodeGenesis] Phẫu Thuật Trực Tiếp: 
     // Truy thẳng vào dữ liệu thật của ngày hôm đó để xem ca NGAY TRƯỚC KHI BẤM OFF là gì.
     let realAssignInDB = scheduleData.data[target.day].find(a => a.staffId === target.staffId);
     let offShift = realAssignInDB ? realAssignInDB.shift : target.originalShift;
