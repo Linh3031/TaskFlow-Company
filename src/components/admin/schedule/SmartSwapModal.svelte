@@ -10,22 +10,82 @@
     export let currentStats;
 
     const dispatch = createEventDispatcher();
-    
     let searchA = ''; let searchB = ''; let searchBridge = '';
     let staffAId = ''; let staffBId = '';
     let bridgeIds = []; 
     
     let showDropA = false; let showDropB = false; let showDropBridge = false;
-    let selectedAName = '--- Chọn Nhân Viên A ---';
-    let selectedBName = '--- Chọn Nhân Viên B ---';
+    let selectedAName = '--- Chọn Người Nhả Ca ---';
+    let selectedBName = '--- Chọn Người Nhận Ca ---';
     let targetRole = 'ANY_HARD';
 
-    $: filteredStaffA = staffList.filter(s => s.name.toLowerCase().includes(searchA.toLowerCase()));
-    $: filteredStaffB = staffList.filter(s => s.name.toLowerCase().includes(searchB.toLowerCase()) && s.id !== staffAId);
-    $: filteredBridge = staffList.filter(s => s.name.toLowerCase().includes(searchBridge.toLowerCase()) && s.id !== staffAId && s.id !== staffBId);
+    // Helper: Lấy số lượng ca của nhân viên dựa theo bộ lọc đang chọn
+    function getStaffShiftCount(staffId, roleFilter) {
+        const stats = currentStats.find(s => s.id === staffId);
+        if (!stats) return 0;
+        
+        if (roleFilter === 'ANY_HARD') return (Number(stats.gh)||0) + (Number(stats.tn)||0) + (Number(stats.kho)||0);
+        if (roleFilter === 'GH') return Number(stats.gh)||0;
+        if (roleFilter === 'TN') return Number(stats.tn)||0;
+        if (roleFilter === 'Kho') return Number(stats.kho)||0;
+        if (roleFilter === 'Weekend') return Number(stats.weCount || stats.weekendHardRoles)||0;
+        return 0;
+    }
 
-    function selectStaffA(s) { staffAId = s.id; selectedAName = s.name; showDropA = false; searchA = ''; scanResult = []; bridgeIds = bridgeIds.filter(id => id !== s.id); }
-    function selectStaffB(s) { staffBId = s.id; selectedBName = s.name; showDropB = false; searchB = ''; scanResult = []; bridgeIds = bridgeIds.filter(id => id !== s.id); }
+    // Helper: Lấy nhãn hiển thị đơn vị
+    function getUnitLabel(roleFilter) {
+        return roleFilter === 'Weekend' ? 'Ca' : 'NV';
+    }
+
+    $: filteredStaffA = staffList.filter(s => s.name.toLowerCase().includes(searchA.toLowerCase()));
+    
+    // NÂNG CẤP: Bộ lọc B - Tự động Ẩn Nữ nếu chọn Giao Hàng & Sắp xếp theo số ca
+    $: filteredStaffB = staffList
+        .filter(s => {
+            if (s.id === staffAId) return false;
+            if (!s.name.toLowerCase().includes(searchB.toLowerCase())) return false;
+            // Phẫu thuật logic: Chặn Nữ nếu targetRole là GH
+            if (targetRole === 'GH' && (!s.gender || s.gender.toLowerCase() !== 'nam')) return false;
+            return true;
+        })
+        .map(s => ({
+            ...s,
+            currentCount: getStaffShiftCount(s.id, targetRole)
+        }))
+        .sort((a, b) => a.currentCount - b.currentCount);
+
+    // NÂNG CẤP: Bộ lọc Trung Chuyển - Tự động Ẩn Nữ nếu chọn Giao Hàng & Sắp xếp theo số ca
+    $: filteredBridge = staffList
+        .filter(s => {
+            if (s.id === staffAId || s.id === staffBId) return false;
+            if (!s.name.toLowerCase().includes(searchBridge.toLowerCase())) return false;
+            // Phẫu thuật logic: Chặn Nữ nếu targetRole là GH
+            if (targetRole === 'GH' && (!s.gender || s.gender.toLowerCase() !== 'nam')) return false;
+            return true;
+        })
+        .map(s => ({
+            ...s,
+            currentCount: getStaffShiftCount(s.id, targetRole)
+        }))
+        .sort((a, b) => a.currentCount - b.currentCount);
+
+    function selectStaffA(s) { 
+        staffAId = s.id;
+        selectedAName = s.name; 
+        showDropA = false; 
+        searchA = ''; 
+        scanResult = []; 
+        bridgeIds = bridgeIds.filter(id => id !== s.id);
+    }
+
+    function selectStaffB(s) { 
+        staffBId = s.id; 
+        selectedBName = s.name; 
+        showDropB = false; 
+        searchB = '';
+        scanResult = []; 
+        bridgeIds = bridgeIds.filter(id => id !== s.id);
+    }
     
     function toggleBridge(id) {
         if (bridgeIds.includes(id)) bridgeIds = bridgeIds.filter(x => x !== id);
@@ -43,12 +103,13 @@
         setTimeout(() => {
             scanResult = findSmartSwap(scheduleData, staffList, staffAId, staffBId, bridgeIds, targetRole, genderConfig, month, year, currentStats);
             isScanning = false;
-        }, 400); 
+        }, 400);
     }
 
-    // Hàm đóng tất cả dropdown khi click ra khoảng trắng
     function closeAllDropdowns() {
-        showDropA = false; showDropB = false; showDropBridge = false;
+        showDropA = false;
+        showDropB = false; 
+        showDropBridge = false;
     }
 </script>
 
@@ -60,7 +121,7 @@
                 <h3 class="text-xl font-black text-indigo-900 flex items-center gap-2">
                     <span class="material-icons-round text-indigo-600">psychology</span> AI Đổi Ca Đa Chiều
                 </h3>
-                <p class="text-xs text-slate-600 mt-1">Cân bằng số lượng bằng cách tráo đổi <b>Nghiệp Vụ ⇌ Tư Vấn/Nghỉ</b>.</p>
+                <p class="text-xs text-slate-600 mt-1">Hệ thống tự động đề xuất lộ trình hoán đổi để cân bằng số ca Nghiệp vụ.</p>
             </div>
             <button on:click={() => dispatch('close')} class="w-8 h-8 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center">
                 <span class="material-icons-round">close</span>
@@ -70,17 +131,22 @@
         <div class="p-5 bg-slate-50 border-b shrink-0 flex flex-col gap-5">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="relative" on:click|stopPropagation>
-                    <label class="text-xs font-bold text-slate-600 mb-1 block">Người Dư Ca (A - Trừ đi)</label>
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">Người Nhả Ca (A - Giảm ca xuống)</label>
                     <div class="p-3 border rounded-xl bg-white flex justify-between items-center cursor-pointer shadow-sm hover:border-indigo-400 transition-colors" on:click={() => {showDropA = !showDropA; showDropB=false; showDropBridge=false;}}>
                         <span class="font-bold truncate pr-2 {staffAId?'text-indigo-700':'text-slate-400'}">{selectedAName}</span>
                         <span class="material-icons-round text-sm">expand_more</span>
                     </div>
                     {#if showDropA}
                         <div class="absolute z-50 w-full mt-1 bg-white border rounded-xl shadow-xl overflow-hidden">
-                            <div class="p-2 border-b bg-slate-50"><input type="text" bind:value={searchA} placeholder="Tìm tên..." class="w-full p-2 border rounded bg-white outline-none text-sm focus:ring-2 focus:ring-indigo-200" autofocus></div>
+                            <div class="p-2 border-b bg-slate-50"><input type="text" bind:value={searchA} placeholder="Tìm tên nhân viên..." class="w-full p-2 border rounded bg-white outline-none text-sm focus:ring-2 focus:ring-indigo-200" autofocus></div>
                             <div class="max-h-48 overflow-y-auto">
                                 {#each filteredStaffA as s}
-                                    <div class="p-3 text-sm hover:bg-indigo-50 cursor-pointer border-b last:border-0 font-medium" on:click={() => selectStaffA(s)}>{s.name} <span class="text-[10px] text-slate-400">({s.gender})</span></div>
+                                    <div class="p-3 text-sm hover:bg-indigo-50 cursor-pointer border-b last:border-0 font-medium flex justify-between items-center" on:click={() => selectStaffA(s)}>
+                                        <span>{s.name} <span class="text-[10px] text-slate-400">({s.gender})</span></span>
+                                        <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded font-bold text-slate-500">
+                                            {getStaffShiftCount(s.id, targetRole)} {getUnitLabel(targetRole)}
+                                        </span>
+                                    </div>
                                 {/each}
                             </div>
                         </div>
@@ -88,17 +154,27 @@
                 </div>
 
                 <div class="relative" on:click|stopPropagation>
-                    <label class="text-xs font-bold text-slate-600 mb-1 block">Người Thiếu Ca (B - Cộng vào)</label>
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">Người Nhận Ca (B - Tăng ca lên)</label>
                     <div class="p-3 border rounded-xl bg-white flex justify-between items-center cursor-pointer shadow-sm hover:border-pink-400 transition-colors" on:click={() => {showDropB = !showDropB; showDropA=false; showDropBridge=false;}}>
                         <span class="font-bold truncate pr-2 {staffBId?'text-pink-600':'text-slate-400'}">{selectedBName}</span>
                         <span class="material-icons-round text-sm">expand_more</span>
                     </div>
                     {#if showDropB}
                         <div class="absolute z-50 w-full mt-1 bg-white border rounded-xl shadow-xl overflow-hidden right-0">
-                            <div class="p-2 border-b bg-slate-50"><input type="text" bind:value={searchB} placeholder="Tìm tên..." class="w-full p-2 border rounded bg-white outline-none text-sm focus:ring-2 focus:ring-pink-200" autofocus></div>
+                            <div class="p-2 border-b bg-slate-50"><input type="text" bind:value={searchB} placeholder="Tìm người đang thiếu ca..." class="w-full p-2 border rounded bg-white outline-none text-sm focus:ring-2 focus:ring-pink-200" autofocus></div>
                             <div class="max-h-48 overflow-y-auto">
                                 {#each filteredStaffB as s}
-                                    <div class="p-3 text-sm hover:bg-pink-50 cursor-pointer border-b last:border-0 font-medium" on:click={() => selectStaffB(s)}>{s.name} <span class="text-[10px] text-slate-400">({s.gender})</span></div>
+                                    <div class="p-3 text-sm hover:bg-pink-50 cursor-pointer border-b last:border-0 font-medium flex justify-between items-center" on:click={() => selectStaffB(s)}>
+                                        <span class={s.currentCount === filteredStaffB[0].currentCount ? 'text-green-600 font-black' : ''}>
+                                            {s.name} <span class="text-[10px] text-slate-400">({s.gender})</span>
+                                            {#if s.currentCount === filteredStaffB[0].currentCount}
+                                                <span class="ml-1 text-[9px] bg-green-100 text-green-700 px-1 rounded">Ưu tiên</span>
+                                            {/if}
+                                        </span>
+                                        <span class="text-[10px] {s.currentCount < 5 ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'} px-1.5 py-0.5 rounded font-bold">
+                                            {s.currentCount} {getUnitLabel(targetRole)}
+                                        </span>
+                                    </div>
                                 {/each}
                             </div>
                         </div>
@@ -108,21 +184,21 @@
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div on:click|stopPropagation>
-                    <label class="text-xs font-bold text-slate-600 mb-1 block">Loại ca muốn A chuyển cho B</label>
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">Loại nghiệp vụ ưu tiên chuyển đổi</label>
                     <select bind:value={targetRole} class="w-full p-3 border rounded-xl text-sm font-bold text-purple-700 bg-purple-50 outline-none shadow-sm cursor-pointer" on:change={() => scanResult = []}>
-                        <option value="ANY_HARD">Bất kỳ ca Nghiệp Vụ (Tự động quét)</option>
-                        <option value="GH">Chỉ định: Giao Hàng (GH)</option>
-                        <option value="TN">Chỉ định: Thu Ngân (TN)</option>
-                        <option value="Kho">Chỉ định: Kho (K)</option>
-                        <option value="Weekend">Chỉ định: Ca Cuối Tuần</option>
+                        <option value="ANY_HARD">Tổng hợp: Tất cả Nghiệp vụ</option>
+                        <option value="GH">Chuyên biệt: Giao Hàng</option>
+                        <option value="TN">Chuyên biệt: Thu Ngân</option>
+                        <option value="Kho">Chuyên biệt: Kho</option>
+                        <option value="Weekend">Chuyên biệt: Ca Cuối Tuần (T7/CN)</option>
                     </select>
                 </div>
 
                 <div class="relative bg-amber-50 rounded-xl border border-amber-200 flex flex-col justify-center px-3 py-2" on:click|stopPropagation>
                     <div class="flex justify-between items-center">
-                        <label class="text-xs font-bold text-amber-900 block">Dự phòng: Trạm Trung Chuyển</label>
+                        <label class="text-xs font-bold text-amber-900 block">Trạm Trung Chuyển (Đổi bắc cầu)</label>
                         <button class="px-2 py-1 bg-amber-200 text-amber-900 text-xs font-bold rounded-lg hover:bg-amber-300" on:click={() => {showDropBridge = !showDropBridge; showDropA=false; showDropB=false;}}>
-                            + Chọn người
+                            + Chọn đồng đội
                         </button>
                     </div>
                     
@@ -139,12 +215,17 @@
 
                     {#if showDropBridge}
                         <div class="absolute z-50 w-full mt-2 bg-white border rounded-xl shadow-xl overflow-hidden right-0 top-full">
-                            <div class="p-2 border-b bg-slate-50"><input type="text" bind:value={searchBridge} placeholder="Tìm kiếm đồng đội..." class="w-full p-2 border rounded bg-white outline-none text-sm focus:ring-2 focus:ring-amber-200" autofocus></div>
+                            <div class="p-2 border-b bg-slate-50"><input type="text" bind:value={searchBridge} placeholder="Tìm kiếm người gánh vác..." class="w-full p-2 border rounded bg-white outline-none text-sm focus:ring-2 focus:ring-amber-200" autofocus></div>
                             <div class="max-h-48 overflow-y-auto">
                                 {#each filteredBridge as s}
-                                    <label class="p-3 text-sm hover:bg-amber-50 cursor-pointer border-b last:border-0 font-medium flex items-center gap-3">
-                                        <input type="checkbox" checked={bridgeIds.includes(s.id)} on:change={() => toggleBridge(s.id)} class="w-4 h-4 text-amber-600 rounded">
-                                        <span>{s.name} <span class="text-[10px] text-slate-400">({s.gender})</span></span>
+                                    <label class="p-3 text-sm hover:bg-amber-50 cursor-pointer border-b last:border-0 font-medium flex justify-between items-center">
+                                        <div class="flex items-center gap-3">
+                                            <input type="checkbox" checked={bridgeIds.includes(s.id)} on:change={() => toggleBridge(s.id)} class="w-4 h-4 text-amber-600 rounded">
+                                            <span>{s.name} <span class="text-[10px] text-slate-400">({s.gender})</span></span>
+                                        </div>
+                                        <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded font-bold text-slate-500">
+                                            {s.currentCount} {getUnitLabel(targetRole)}
+                                        </span>
                                     </label>
                                 {/each}
                             </div>
@@ -156,9 +237,9 @@
             <div class="text-center mt-2">
                 <button class="px-8 py-3 bg-slate-800 text-white font-bold rounded-full shadow hover:bg-slate-900 transition-all disabled:opacity-50" disabled={!staffAId || !staffBId || isScanning} on:click={handleScan}>
                     {#if isScanning}
-                        <span class="material-icons-round animate-spin">sync</span> Đang nội suy đường đi...
+                        <span class="material-icons-round animate-spin">sync</span> AI đang tính toán lộ trình...
                     {:else}
-                        <span class="material-icons-round text-sm">auto_awesome</span> TÌM PHƯƠNG ÁN CÂN BẰNG
+                        <span class="material-icons-round text-sm">auto_awesome</span> TÌM PHƯƠNG ÁN TỐI ƯU
                     {/if}
                 </button>
             </div>
@@ -168,11 +249,14 @@
             {#if scanResult.length === 0 && hasScanned && !isScanning}
                 <div class="text-center text-slate-500 py-10 bg-white rounded-xl border border-dashed">
                     <span class="material-icons-round text-4xl mb-2 opacity-50">search_off</span>
-                    <p class="font-bold">Tuyệt vọng! AI không tìm thấy đường đi.</p>
-                    <p class="text-xs mt-2">Hai người này quá kỵ rơ nhau (Giới tính, xoay ca).<br>Gợi ý: Hãy thêm 1-2 người khác vào <b>Trạm Trung Chuyển</b> và quét lại!</p>
+                    <p class="font-bold text-red-500">Không tìm thấy phương án phù hợp!</p>
+                    <p class="text-xs mt-2">Gợi ý: Thêm 1-2 người vào <b>Trạm Trung Chuyển</b> để AI có thêm dữ liệu hoán đổi.</p>
                 </div>
             {:else if scanResult.length > 0}
                 <div class="space-y-4">
+                    <div class="flex justify-between items-center px-2">
+                        <span class="text-xs font-bold text-slate-500">Tìm thấy {scanResult.length} phương án khả thi</span>
+                    </div>
                     {#each scanResult as sol, index}
                         <div class="bg-white border rounded-2xl shadow-sm overflow-hidden flex flex-col hover:border-indigo-400 hover:shadow-md transition-all">
                             
@@ -182,13 +266,13 @@
                                     {sol.type}
                                 </div>
                                 <button class="px-5 py-2 bg-emerald-500 text-white font-black text-xs rounded-lg hover:bg-emerald-600 transition-colors shadow shadow-emerald-200" on:click={() => dispatch('execute', sol.plan)}>
-                                    CHỌN PHƯƠNG ÁN NÀY
+                                    ÁP DỤNG NGAY
                                 </button>
                             </div>
 
                             <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <div class="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider flex items-center gap-1"><span class="material-icons-round text-[14px]">swap_calls</span> Lộ trình đổi ca</div>
+                                    <div class="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider flex items-center gap-1"><span class="material-icons-round text-[14px]">swap_calls</span> Lộ trình thay đổi</div>
                                     <div class="space-y-3">
                                         {#each sol.plan as step}
                                             <div class="text-xs bg-slate-50 p-2.5 rounded-xl border font-medium flex items-center justify-between shadow-sm">
@@ -207,15 +291,15 @@
                                 </div>
 
                                 <div class="md:border-l md:pl-6 border-t md:border-t-0 pt-4 md:pt-0">
-                                    <div class="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider flex items-center gap-1"><span class="material-icons-round text-[14px]">analytics</span> Bức tranh tổng quan (Kết quả)</div>
+                                    <div class="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider flex items-center gap-1"><span class="material-icons-round text-[14px]">analytics</span> Kết quả sau khi đổi</div>
                                     <div class="space-y-2">
                                         {#each sol.impact as imp}
                                             <div class="text-xs bg-white p-2.5 rounded-xl border flex items-center justify-between">
                                                 <div class="font-bold text-slate-700 w-1/3 truncate pr-2" title={imp.name}>{imp.name}</div>
                                                 <div class="flex flex-wrap gap-1.5 justify-end w-2/3">
-                                                    {#if imp.gh !== 0}<span class="px-1.5 py-0.5 rounded-md font-bold {imp.gh>0?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-600 border border-red-100'}">GH {imp.gh>0?'+':''}{imp.gh}</span>{/if}
-                                                    {#if imp.tn !== 0}<span class="px-1.5 py-0.5 rounded-md font-bold {imp.tn>0?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-600 border border-red-100'}">TN {imp.tn>0?'+':''}{imp.tn}</span>{/if}
-                                                    {#if imp.kho !== 0}<span class="px-1.5 py-0.5 rounded-md font-bold {imp.kho>0?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-600 border border-red-100'}">K {imp.kho>0?'+':''}{imp.kho}</span>{/if}
+                                                    {#if imp.gh !== 0}<span class="px-1.5 py-0.5 rounded-md font-bold {imp.gh>0?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-600 border border-red-100'}">Giao hàng {imp.gh>0?'+':''}{imp.gh}</span>{/if}
+                                                    {#if imp.tn !== 0}<span class="px-1.5 py-0.5 rounded-md font-bold {imp.tn>0?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-600 border border-red-100'}">Thu ngân {imp.tn>0?'+':''}{imp.tn}</span>{/if}
+                                                    {#if imp.kho !== 0}<span class="px-1.5 py-0.5 rounded-md font-bold {imp.kho>0?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-600 border border-red-100'}">Kho {imp.kho>0?'+':''}{imp.kho}</span>{/if}
                                                     {#if imp.weekend !== 0}<span class="px-1.5 py-0.5 rounded-md font-bold {imp.weekend>0?'bg-emerald-100 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-600 border border-red-100'}">T7/CN {imp.weekend>0?'+':''}{imp.weekend}</span>{/if}
                                                 </div>
                                             </div>

@@ -17,9 +17,8 @@
   import RoadshowPanel from './ShiftScheduleParts/RoadshowPanel.svelte';
   
   import { buildSmartCover, applySmartCoverActions } from '../lib/smartCover.js';
+  import SmartSwapModal from './admin/schedule/SmartSwapModal.svelte';
   import LegacySyncManager from './ShiftScheduleParts/LegacySyncManager.svelte';
-  
-  // [NEW] Import toàn bộ các Helper Utilities
   import { 
       getShiftColor, getRoleBadge, getWeekday, getWeekendHardRoleCount, 
       preparePersonalSchedule, prepareDayStats, checkShiftQuotaWarning, 
@@ -40,6 +39,7 @@
   let showPastDays = false;
   let highlightedDay = null;
   let tempEditingShift = null;
+  let showSmartSwap = false; 
   
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
@@ -47,6 +47,49 @@
   
   $: if (activeTab === 'schedule' && $activeStoreId && currentMonthStr && currentMode === 'NV') { 
       loadSchedule(currentMonthStr, $activeStoreId);
+  }
+
+  // --- SMART SWAP EXECUTION ---
+  async function executeSmartSwap(plan) {
+      if (!scheduleData || !plan || plan.length === 0) return;
+      if (!confirm(`Xác nhận thực hiện lộ trình đổi ca gồm ${plan.length} bước này?`)) return;
+
+      loading = true;
+      try {
+          let localData = JSON.parse(JSON.stringify(scheduleData.data));
+          let localStats = JSON.parse(JSON.stringify(scheduleData.stats));
+          let updatedDayKeys = new Set();
+
+          plan.forEach(step => {
+              const dayKey = String(step.day);
+              updatedDayKeys.add(dayKey);
+              let dayList = localData[dayKey];
+
+              const idx1 = dayList.findIndex(x => x.staffId === step.staff1.id);
+              const idx2 = dayList.findIndex(x => x.staffId === step.staff2.id);
+
+              if (idx1 > -1 && idx2 > -1) {
+                  dayList[idx1].shift = step.shift2;
+                  dayList[idx1].role = step.role2 || 'TV';
+                  dayList[idx2].shift = step.shift1;
+                  dayList[idx2].role = step.role1 || 'TV';
+              }
+          });
+
+          let updatePayload = {};
+          updatedDayKeys.forEach(key => {
+              updatePayload[`data.${key}`] = localData[key];
+          });
+
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), updatePayload);
+          
+          showSmartSwap = false;
+          alert("✅ Đã thực hiện đổi ca thành công!");
+      } catch (e) {
+          alert("Lỗi thực thi: " + e.message);
+      } finally {
+          loading = false;
+      }
   }
 
   // --- SMART COVER ---
@@ -74,9 +117,9 @@
       return Number(d) < today.getDate();
   }
 
-  // --- FIREBASE ACTIONS ---
   async function loadSchedule(monthStr, storeId) {
-      scheduleData = null; loading = true;
+      scheduleData = null;
+      loading = true;
       if (unsubscribe) unsubscribe();
       try {
           unsubscribe = onSnapshot(doc(db, 'stores', storeId, 'schedules', monthStr), (snap) => {
@@ -106,15 +149,13 @@
       } catch (e) { alert("Lỗi: " + e.message); }
   }
 
-  // --- BINDING HELPERS --- (Gói ViewMonth/Year để ném vào các hàm Utils)
   $: boundGetWeekday = (d) => getWeekday(d, viewMonth, viewYear);
   $: boundGetWeekendCount = (sid) => getWeekendHardRoleCount(sid, scheduleData, viewMonth, viewYear);
 
-  // --- UI ACTIONS ---
   function openEditShift(day, staffId, assign) { 
       if (!isAdmin) return;
       const staffInfo = scheduleData.stats.find(s => s.id === staffId);
-      tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo?.gender || 'Nữ', originalRole: assign.originalRole || assign.role || 'TV', originalShift: assign.originalShift || assign.shift }; 
+      tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo?.gender || 'Nữ', originalRole: assign.originalRole || assign.role || 'TV', originalShift: assign.originalShift || assign.shift };
       editingShift = JSON.parse(JSON.stringify(tempEditingShift));
   }
   
@@ -122,7 +163,6 @@
       if (!editingShift || !scheduleData) return;
       const warning = checkShiftQuotaWarning(editingShift, scheduleData);
       if (warning && !confirm(warning)) return;
-
       const { dayKey, dayList, newStats } = applyShiftChangeLocalData(editingShift, scheduleData);
       try { 
           await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
@@ -149,7 +189,6 @@
   
   let showScheduleTour = false;
   const scheduleSteps = [ { target: '.overflow-x-auto', title: '1. Bảng Lịch Tổng', content: 'Toàn bộ lịch làm việc.' }, { target: '#store-view-selector', title: '2. Chọn Kho Xem', content: 'Chọn kho.' }, { target: '#tour-staff-name', title: '3. Xem Cá Nhân', content: 'Bấm vào Tên.' }, { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng.', action: () => { document.querySelector('.overflow-x-auto').scrollLeft = 9999; } } ];
-
   onDestroy(() => { if (unsubscribe) unsubscribe(); });
 </script>
 
@@ -163,6 +202,7 @@
     on:lockBaseline={handleLockBaseline}
     on:exportExcel={handleExportExcel}
     on:startTour={() => showScheduleTour = true}
+    on:openSmartSwap={() => showSmartSwap = true}
 />
 
 {#if currentMode === 'NV'}
@@ -195,3 +235,16 @@
 {#if editingShift} <EditShiftModal bind:editingShift {tempEditingShift} suggestions={smartCoverSuggestions} on:close={() => editingShift = null} on:save={saveShiftChange} on:applySmartCover={(e) => executeSmartCover(e.detail)} /> {/if}
 {#if selectedDayStats} <DayStatsModal {selectedDayStats} on:close={() => selectedDayStats = null} /> {/if}
 {#if showScheduleTour} <TourGuide steps={scheduleSteps} on:complete={() => showScheduleTour = false} /> {/if}
+
+{#if showSmartSwap && scheduleData}
+    <SmartSwapModal 
+        scheduleData={scheduleData.data} 
+        staffList={scheduleData.stats} 
+        currentStats={scheduleData.stats}
+        genderConfig={{ kho: 'none', tn: 'none' }}
+        month={viewMonth}
+        year={viewYear}
+        on:close={() => showSmartSwap = false}
+        on:execute={(e) => executeSmartSwap(e.detail)}
+    />
+{/if}
