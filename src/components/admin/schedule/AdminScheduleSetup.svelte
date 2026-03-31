@@ -9,8 +9,9 @@
     import ScheduleMatrix from './ScheduleMatrix.svelte';
     import StoreConfig from '../../StoreConfig.svelte';
     import TourGuide from '../../TourGuide.svelte'; 
-    import ManualScheduleUpload from './ManualScheduleUpload.svelte'; // [NEW IMPORT]
+    import ManualScheduleUpload from './ManualScheduleUpload.svelte';
     import { defaultMatrix, tourSteps, shiftCols, roleRows } from './scheduleConstants.js';
+    import RosterManager from './RosterManager.svelte';
 
     const dispatch = createEventDispatcher();
 
@@ -34,6 +35,10 @@
     let shortageCount = 0;
     
     let setupMode = 'auto';
+    let showRosterManager = false;
+
+    // [NEW] Biến lưu toàn bộ user của kho để Modal Đội hình có thể lấy ra "Thêm mới"
+    let masterStoreUsers = [];
     
     $: isDemoMode = targetStore?.includes('DEMO');
     $: activeSuggestedCombos = activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos;
@@ -65,18 +70,21 @@
     async function loadStoreData() { 
         if (!targetStore) return;
         scheduleStaffList = [];
+        masterStoreUsers = []; // Reset master list
         shiftMatrix = JSON.parse(JSON.stringify(defaultMatrix)); 
         weekendMatrix = JSON.parse(JSON.stringify(defaultMatrix));
         suggestedCombos = []; 
         suggestedWeekendCombos = [];
+
         try { 
+            // 1. LẤY TOÀN BỘ USER CỦA KHO NÀY
             const q = query(collection(db, 'users'), where('storeIds', 'array-contains', targetStore));
             const snap = await getDocs(q);
-            let list = [];
+            let fullList = [];
             snap.forEach(d => {
                 const data = d.data();
                 if (data.role === 'staff') {
-                    list.push({
+                    fullList.push({
                         id: data.username_idx,     
                         name: data.name || data.username,   
                         gender: data.gender || 'Nữ',
@@ -85,9 +93,28 @@
                     });
                 }
             });
-            
-            scheduleStaffList = list.sort((a,b) => a.orderIndex - b.orderIndex || a.name.localeCompare(b.name));
+            masterStoreUsers = [...fullList]; // Lưu lại cho Modal Đội Hình dùng
 
+            // 2. LẤY ĐỘI HÌNH ĐÃ CHỐT TỪ CLOUD (ROSTER)
+            const rosterSnap = await getDoc(doc(db, 'stores', targetStore, 'config', 'roster'));
+            
+            if (rosterSnap.exists() && rosterSnap.data().list && rosterSnap.data().list.length > 0) {
+                // Nếu có đội hình, lọc và sắp xếp đúng thứ tự của đội hình
+                let rosterConfig = rosterSnap.data().list;
+                let orderedList = [];
+                
+                rosterConfig.forEach(rItem => {
+                    let foundUser = masterStoreUsers.find(u => u.id === rItem.id);
+                    if (foundUser) orderedList.push(foundUser);
+                });
+                
+                scheduleStaffList = orderedList; // Đây là danh sách chính thức đem đi chạy ca
+            } else {
+                // Nếu chưa từng lưu đội hình, lấy toàn bộ kho làm mặc định
+                scheduleStaffList = fullList.sort((a,b) => a.orderIndex - b.orderIndex || a.name.localeCompare(b.name));
+            }
+
+            // 3. TẢI CÁC CẤU HÌNH KHÁC
             const configSnap = await getDoc(doc(db, 'settings', `shift_matrix_${targetStore}`));
             if (configSnap.exists()) { 
                 const data = configSnap.data();
@@ -105,7 +132,6 @@
         const qtyVal = parseInt(newQty) || 0;
         let currentList = activeMatrixMode === 'weekday' ? [...suggestedCombos] : [...suggestedWeekendCombos]; 
         const targetRoles = [roleLabel];
-        
         if (roleLabel === 'Thu Ngân') targetRoles.push('TN', 'tn');
         if (roleLabel === 'Giao Hàng') targetRoles.push('GH', 'gh');
         if (roleLabel === 'Tư Vấn') targetRoles.push('TV', 'tv');
@@ -114,7 +140,6 @@
             const cRole = c.role || 'TV'; 
             return c.code === comboCode && targetRoles.includes(cRole); 
         });
-
         if (idx >= 0) { 
             currentList[idx].qty = qtyVal;
             currentList[idx].role = roleLabel;
@@ -122,7 +147,7 @@
             currentList.push({ code: comboCode, role: roleLabel, label: `${roleLabel} ${comboCode}`, qty: qtyVal });
         } 
         
-        if (activeMatrixMode === 'weekday') suggestedCombos = currentList; 
+        if (activeMatrixMode === 'weekday') suggestedCombos = currentList;
         else suggestedWeekendCombos = currentList;
     }
 
@@ -156,7 +181,6 @@
             await tick(); 
             showShortageAlert = false; 
             shortageCount = 0;
-
             let tempWeekday = calculateCombosFromMatrix(shiftMatrix); 
             let tempWeekend = calculateCombosFromMatrix(weekendMatrix); 
             const checkShortage = (combos) => { 
@@ -182,9 +206,21 @@
         } catch (e) { alert("Lỗi tính toán: " + e.message);
         } finally { if(save) isLoading = false; } 
     }
+
+    // [NEW] Xử lý khi đóng Modal Đội Hình: Reload lại data ngay lập tức để cập nhật bộ đếm
+    function handleRosterClose() {
+        showRosterManager = false;
+        loadStoreData(); 
+    }
 </script>
 
-<AdminScheduleToolbar {isDemoMode} bind:setupMode on:openConfig={() => showStoreConfig = true} on:openHelp={() => showTour = true} />
+<AdminScheduleToolbar 
+    {isDemoMode} 
+    bind:setupMode 
+    on:openConfig={() => showStoreConfig = true} 
+    on:openHelp={() => showTour = true} 
+    on:openRoster={() => showRosterManager = true} 
+/>
 
 {#if setupMode === 'auto'}
     <div id="matrix-input-area" class="animate-fadeIn mt-2">
@@ -212,3 +248,11 @@
 
 {#if showStoreConfig} <StoreConfig storeId={targetStore} on:close={()=>showStoreConfig=false} /> {/if}
 {#if showTour} <TourGuide steps={tourSteps} on:complete={() => showTour = false} /> {/if}
+
+{#if showRosterManager} 
+    <RosterManager 
+        storeId={targetStore} 
+        masterStaffList={masterStoreUsers}
+        on:close={handleRosterClose} 
+    /> 
+{/if}

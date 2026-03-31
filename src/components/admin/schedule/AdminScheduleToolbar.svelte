@@ -12,6 +12,10 @@
             <button class="bg-gray-100 text-gray-600 hover:bg-gray-200 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-gray-200" on:click={() => dispatch('openConfig')}>
                 <span class="material-icons-round text-sm">settings</span> Khai báo giờ công
             </button>
+            
+            <button class="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-bold py-2 px-3 rounded-lg text-xs transition-colors flex items-center gap-1 border border-indigo-200 shadow-sm" on:click={() => dispatch('openRoster')} title="Sắp xếp danh sách ưu tiên chạy ca">
+                <span class="material-icons-round text-sm">format_list_numbered</span> Đội Hình
+            </button>
         </div>
 
         <div class="w-px h-8 bg-slate-200 mx-1 hidden lg:block"></div>

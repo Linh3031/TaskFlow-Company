@@ -1,7 +1,8 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { db } from '../lib/firebase';
-  import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
+  // [NEW] Import thêm các hàm query của Firebase để lấy danh sách User
+  import { doc, onSnapshot, updateDoc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
   import { currentUser, activeStoreId } from '../lib/stores';
   import TourGuide from './TourGuide.svelte';
   import CumulativeHistoryModal from './CumulativeHistoryModal.svelte';
@@ -49,7 +50,72 @@
       loadSchedule(currentMonthStr, $activeStoreId);
   }
 
-  // --- SMART SWAP EXECUTION ---
+  // ==========================================
+  // [NEW] TÍNH NĂNG THẾ CHỖ NHÂN SỰ TOÀN LỊCH
+  // ==========================================
+  let allStoreUsers = [];
+  $: availableStaffToSwap = allStoreUsers.filter(u => scheduleData && !scheduleData.stats.some(s => s.id === u.id));
+
+  async function fetchAllStoreUsers() {
+      if (!isAdmin || !$activeStoreId) return;
+      try {
+          const q = query(collection(db, 'users'), where('storeIds', 'array-contains', $activeStoreId));
+          const snap = await getDocs(q);
+          allStoreUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (error) {
+          console.error("Lỗi lấy danh sách user:", error);
+      }
+  }
+
+  $: if (activeTab === 'schedule' && $activeStoreId && isAdmin) {
+      fetchAllStoreUsers();
+  }
+
+  async function handleSwapStaffInSchedule(oldStaffId, newStaff) {
+      if (!scheduleData) return;
+      if (!confirm(`Xác nhận rút nhân viên cũ và thế chỗ bằng "${newStaff.name}" cho toàn bộ lịch từ đầu tháng?`)) return;
+      
+      loading = true;
+      try {
+          let localData = JSON.parse(JSON.stringify(scheduleData.data));
+          let localStats = JSON.parse(JSON.stringify(scheduleData.stats));
+
+          // 1. Thay tên trong Data từng ngày
+          Object.keys(localData).forEach(day => {
+              let assign = localData[day].find(a => a.staffId === oldStaffId);
+              if (assign) {
+                  assign.staffId = newStaff.id;
+                  assign.name = newStaff.name;
+                  assign.gender = newStaff.gender || 'Nữ';
+              }
+          });
+
+          // 2. Thay tên trong Stats (Bảo toàn số ca)
+          let statRow = localStats.find(s => s.id === oldStaffId);
+          if (statRow) {
+              statRow.id = newStaff.id;
+              statRow.name = newStaff.name;
+              statRow.gender = newStaff.gender || 'Nữ';
+          }
+
+          // 3. Đẩy lên Firebase
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), {
+              data: localData,
+              stats: localStats
+          });
+          
+          selectedStaff = null; // Đóng modal
+          alert(`✅ Đã thế chỗ thành công! ${newStaff.name} đã tiếp quản toàn bộ lịch.`);
+      } catch (e) {
+          alert("Lỗi thực thi: " + e.message);
+      } finally {
+          loading = false;
+      }
+  }
+
+  // ==========================================
+  // SMART SWAP EXECUTION (AI ĐỔI CA)
+  // ==========================================
   async function executeSmartSwap(plan) {
       if (!scheduleData || !plan || plan.length === 0) return;
       if (!confirm(`Xác nhận thực hiện lộ trình đổi ca gồm ${plan.length} bước này?`)) return;
@@ -57,7 +123,6 @@
       loading = true;
       try {
           let localData = JSON.parse(JSON.stringify(scheduleData.data));
-          let localStats = JSON.parse(JSON.stringify(scheduleData.stats));
           let updatedDayKeys = new Set();
 
           plan.forEach(step => {
@@ -231,7 +296,18 @@
 {/if}
 
 {#if showHistoryModal && scheduleData} <CumulativeHistoryModal storeId={$activeStoreId} currentMonth={viewMonth} currentYear={viewYear} currentStats={scheduleData.stats} on:close={() => showHistoryModal = false} /> {/if}
-{#if selectedStaff} <PersonalScheduleModal {selectedStaff} {getRoleBadge} on:close={() => selectedStaff = null} /> {/if}
+
+{#if selectedStaff} 
+    <PersonalScheduleModal 
+        {selectedStaff} 
+        {getRoleBadge} 
+        {isAdmin}
+        {availableStaffToSwap}
+        on:swapStaff={(e) => handleSwapStaffInSchedule(e.detail.oldStaffId, e.detail.newStaff)}
+        on:close={() => selectedStaff = null} 
+    /> 
+{/if}
+
 {#if editingShift} <EditShiftModal bind:editingShift {tempEditingShift} suggestions={smartCoverSuggestions} on:close={() => editingShift = null} on:save={saveShiftChange} on:applySmartCover={(e) => executeSmartCover(e.detail)} /> {/if}
 {#if selectedDayStats} <DayStatsModal {selectedDayStats} on:close={() => selectedDayStats = null} /> {/if}
 {#if showScheduleTour} <TourGuide steps={scheduleSteps} on:complete={() => showScheduleTour = false} /> {/if}
