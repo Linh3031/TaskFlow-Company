@@ -1,9 +1,11 @@
 <script>
   import { db } from '../../../lib/firebase';
-  import { doc, writeBatch, serverTimestamp, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
-  import { safeString } from '../../../lib/utils';
+  // [CodeGenesis] Phẫu thuật: Bổ sung getDoc để kéo dữ liệu Lịch và 8NTTT về
+  import { doc, writeBatch, serverTimestamp, updateDoc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
+  // [CodeGenesis] Phẫu thuật: Bổ sung getTodayStr để quét dữ liệu ngày hôm nay
+  import { safeString, getTodayStr } from '../../../lib/utils';
   import { createEventDispatcher } from 'svelte';
-  import { currentUser } from '../../../lib/stores'; 
+  import { currentUser } from '../../../lib/stores';
 
   export let show = false;
   export let isSuperAdmin = false;
@@ -21,7 +23,6 @@
   
   let singleBrand = '';
   let singleCategory = '';
-  
   let selectedStoreIdsForAdmin = [];
 
   const dispatch = createEventDispatcher();
@@ -32,7 +33,6 @@
           singleRole = editUser.role || 'staff';
           singlePass = ''; 
           
-          // [SURGICAL FIX] Tên có sao hiện vậy, không đắp Username vào nữa!
           singleName = editUser.name || '';
           singleGender = editUser.gender || 'Nữ';
           
@@ -52,7 +52,6 @@
           singleGender = 'Nữ';
           singleBrand = '';
           singleCategory = '';
-
           if (!isSuperAdmin) { selectedStoreIdsForAdmin = [selectedStoreId]; }
       }
   }
@@ -74,14 +73,13 @@
       const newUid = safeString(exactUsername).toLowerCase();
       
       isLoading = true;
-
       try {
           if (editUser) {
               const oldUid = safeString(editUser.username).toLowerCase();
-
               if (newUid !== oldUid) {
                   if (!confirm(`⚠️ BẠN ĐANG ĐỔI TÊN ĐĂNG NHẬP!\n\nHệ thống sẽ chuyển từ [${editUser.username}] sang [${exactUsername}]. Bạn có chắc chắn?`)) {
-                      isLoading = false; return;
+                      isLoading = false;
+                      return;
                   }
               }
 
@@ -106,6 +104,91 @@
                   batch.delete(doc(db, 'users', oldUid));
                   if (isSuperAdmin) { finalStoreIds.forEach(s => { batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}` }, { merge: true }); }); }
                   await batch.commit();
+
+                  // =========================================================================
+                  // [CodeGenesis] "LIÊN LẠC VIÊN": CẬP NHẬT DÂY CHUYỀN (CASCADE UPDATE)
+                  // =========================================================================
+                  try {
+                      const today = new Date();
+                      const currentMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+                      const todayStr = getTodayStr();
+
+                      for (const sid of finalStoreIds) {
+                          // 1. Chạy sang Bảng Lịch Tháng để đổi tên
+                          const scheduleRef = doc(db, 'stores', sid, 'schedules', currentMonthStr);
+                          const scheduleSnap = await getDoc(scheduleRef);
+                          if (scheduleSnap.exists()) {
+                              let schedData = scheduleSnap.data();
+                              let isSchedChanged = false;
+                              
+                              if (schedData.stats) {
+                                  schedData.stats = schedData.stats.map(s => {
+                                      if (s.id === oldUid) { isSchedChanged = true; return { ...s, name: exactUsername }; }
+                                      return s;
+                                  });
+                              }
+                              if (schedData.data) {
+                                  Object.keys(schedData.data).forEach(dayKey => {
+                                      schedData.data[dayKey] = schedData.data[dayKey].map(shift => {
+                                          if (shift.staffId === oldUid) { isSchedChanged = true; return { ...shift, name: exactUsername }; }
+                                          return shift;
+                                      });
+                                  });
+                              }
+                              if (isSchedChanged) await updateDoc(scheduleRef, { stats: schedData.stats, data: schedData.data });
+                          }
+
+                          // 2. Chạy sang Template 8 NTTT để đổi tên người phụ trách
+                          const templateRef = doc(db, 'stores', sid, '8nttt_template', 'config');
+                          const templateSnap = await getDoc(templateRef);
+                          if (templateSnap.exists()) {
+                              let tplItems = templateSnap.data().items || [];
+                              let isTplChanged = false;
+                              tplItems = tplItems.map(item => {
+                                  if (item.assignees && item.assignees.some(a => a.id === oldUid)) {
+                                      isTplChanged = true;
+                                      return { ...item, assignees: item.assignees.map(a => a.id === oldUid ? { ...a, username: exactUsername } : a) };
+                                  }
+                                  return item;
+                              });
+                              if (isTplChanged) await updateDoc(templateRef, { items: tplItems });
+                          }
+
+                          // 3. Chạy sang Sổ 8 NTTT Hôm Nay đổi tên (nếu họ vừa up ảnh xong rồi mới đổi tên)
+                          const dailyRef = doc(db, '8nttt_daily_records', `${sid}_${todayStr}`);
+                          const dailySnap = await getDoc(dailyRef);
+                          if (dailySnap.exists()) {
+                              let dailyItems = dailySnap.data().items || [];
+                              let isDailyChanged = false;
+                              dailyItems = dailyItems.map(item => {
+                                  let newItem = { ...item };
+                                  let changed = false;
+                                  // Đổi tên phân công
+                                  if (newItem.assignees && newItem.assignees.some(a => a.id === oldUid)) {
+                                      changed = true;
+                                      newItem.assignees = newItem.assignees.map(a => a.id === oldUid ? { ...a, username: exactUsername } : a);
+                                  }
+                                  // Đổi tên trong lịch sử người chụp ảnh
+                                  if (newItem.uploaders && newItem.uploaders.includes(editUser.username)) { 
+                                      changed = true;
+                                      newItem.uploaders = newItem.uploaders.map(u => u === editUser.username ? exactUsername : u);
+                                  }
+                                  // Đổi tên người chốt hạ khu vực
+                                  if (newItem.completedBy === editUser.username) {
+                                      changed = true;
+                                      newItem.completedBy = exactUsername;
+                                  }
+                                  if (changed) isDailyChanged = true;
+                                  return newItem;
+                              });
+                              if (isDailyChanged) await updateDoc(dailyRef, { items: dailyItems });
+                          }
+                      }
+                  } catch (syncErr) {
+                      console.error("Lỗi liên lạc viên:", syncErr);
+                  }
+                  // =========================================================================
+
               } else {
                   await updateDoc(doc(db, 'users', oldUid), updateData);
                   if (isSuperAdmin) {
@@ -130,7 +213,6 @@
                   role: singleRole,
                   storeId: finalStoreIds[0],
                   storeIds: finalStoreIds,
-                  // [NEW] Default index cho người tạo lẻ (đẩy xuống cuối)
                   orderIndex: 9999, 
                   createdAt: serverTimestamp()
               };
@@ -140,10 +222,12 @@
               batch.set(doc(db, 'users', newUid), payload);
               if (isSuperAdmin) { finalStoreIds.forEach(s => { batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}`, createdAt: serverTimestamp() }, { merge: true }); }); }
               await batch.commit();
+
               alert(`✅ Đã thêm [${exactUsername}] vào ${finalStoreIds.join(', ')}!`);
               dispatch('success', finalStoreIds[0]);
           }
-      } catch (e) { alert(e.message); } finally { isLoading = false; }
+      } catch (e) { alert(e.message);
+      } finally { isLoading = false; }
   }
 </script>
 
@@ -168,7 +252,7 @@
                           </label>
                       {/each}
                   </div>
-              </div>
+               </div>
           {/if}
           
           <div class="space-y-3">
@@ -179,7 +263,7 @@
                       <option value="admin">Quản lý</option>
                       <option value="pg">PG</option>
                   </select>
-              </div>
+               </div>
               
               <div class="grid grid-cols-2 gap-3">
                   <div class="col-span-2">
