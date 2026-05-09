@@ -354,6 +354,11 @@ export function optimizeSchedule(scheduleData, staffList) {
     const month = today.getMonth() + 1;
     const year = today.getFullYear();
 
+    // [PHẪU THUẬT LOGIC]: TẮT HOÀN TOÀN AUTO FIX HẬU KỲ
+    // Vì Generator đã được lập trình Cấm trùng nhịp và Cân bằng 100% Cuối tuần.
+    // Nếu để Optimize chạy, nó có thể Swap ca và làm gãy nhịp liên tiếp.
+    
+    /*
     const fixRot = autoFixRotation(schedule, month, year);
     if (fixRot.success) {
         schedule = fixRot.schedule;
@@ -365,6 +370,7 @@ export function optimizeSchedule(scheduleData, staffList) {
         schedule = fixWeek.schedule;
         allLogs = [...allLogs, ...fixWeek.logs];
     }
+    */
 
     const finalStats = staffList.map(s => {
         let roles = { tn: 0, tv: 0, kho: 0, gh: 0 };
@@ -411,13 +417,11 @@ export function autoFixFatigue(scheduleData, month, year) {
         });
 
         for (let violator of violators) {
-            // Kiểm tra xem ca nghiệp vụ của người vi phạm có phải là Giao Hàng không
             const isGH = (violator.role === 'GH' || violator.role === 'Giao Hàng');
 
             let candidate = todayAssigns.find(c => {
                 if (c.staffId === violator.staffId) return false;
                 
-                // [NEW FIX] Nếu ca bị trùng là Giao Hàng, thế thân BẮT BUỘC phải là Nam
                 if (isGH && c.gender !== 'Nam') return false;
 
                 if (c.shift !== 'OFF' && isHardRole(c.role)) return false;

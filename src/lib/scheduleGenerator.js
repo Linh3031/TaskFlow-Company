@@ -72,6 +72,7 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
             isMale: (s.gender || '').trim().toLowerCase() === 'nam',
             lastShiftCode: 'OFF', lastRole: 'tv', lastHardRoleDay: -10,
             weekendHardRoleCount: 0,
+            hardRolesThisWeek: 0, 
             stats: { hours: 0, roles: { tn: 0, tv: 0, kho: 0, gh: 0 } },
             baseStats: { roles: { tn: 0, kho: 0, gh: 0 }, weekendHardRoleCount: 0 }
         };
@@ -154,7 +155,6 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
     const weekdayDemands = getDemands(weekdayCombos);
     const weekendDemands = getDemands(weekendCombos);
 
-    // [THÊM MỚI] Tính toán độ lệch trượt (Offset) dựa trên Tháng và Năm liên tục
     const monthOffset = staffList.length > 0 ? (year * 12 + month) % staffList.length : 0;
 
     let schedule = {};
@@ -163,11 +163,14 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
         const dayOfWeek = dateObj.getDay(); 
         const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
 
+        if (dayOfWeek === 1 || d === 1) {
+            staffList.forEach(s => s.hardRolesThisWeek = 0);
+        }
+
         const currentPool = isWeekend ? weekendPool : weekdayPool;
         const currentDemands = JSON.parse(JSON.stringify(isWeekend ? weekendDemands : weekdayDemands));
 
         let currentDayAssignments = staffList.map((staff, index) => {
-            // [PHẪU THUẬT LOGIC] Trượt index ảo dựa theo tháng trước khi bốc ca từ Pool
             let virtualIndex = (index + monthOffset) % staffList.length;
             let poolIndex = (virtualIndex + d) % staffList.length;
             
@@ -195,19 +198,38 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 const staff = staffList.find(s => s.id === cand.staffId);
                 let score = 0;
                 
-                if (targetRole === 'gh' && !cand.isMale) { cand.score = -99999999; return; }
+                if (targetRole === 'gh' && !cand.isMale) { cand.score = -999999999; return; }
                 
                 const gap = d - staff.lastHardRoleDay;
                 
-                if (gap <= 1) score -= 300000; 
-                else score += gap * 10; 
+                // Luật Thép 1: Cấm làm 2 ngày liên tiếp
+                if (gap <= 1) {
+                    cand.score = -999999999; 
+                    return; 
+                } else {
+                    score += gap * 10; 
+                }
+
+                // Luật Thép 2: Giãn ca theo tuần
+                if (staff.hardRolesThisWeek >= 3) {
+                    score -= 20000000;
+                }
                 
-                const totalRoleCount = staff.baseStats.roles[targetRole] + staff.stats.roles[targetRole];
-                score -= totalRoleCount * 1000000;
+                // [TINH CHỈNH MỚI] Luật Thép 3: Cân bằng CHUYÊN SÂU từng loại nghiệp vụ (Trị bệnh dồn Giao Hàng)
+                const specificRoleCount = staff.baseStats.roles[targetRole] + staff.stats.roles[targetRole];
+                score -= specificRoleCount * 10000000; // Phạt 10 Triệu điểm cho mỗi ca cùng loại
+
+                // Cân bằng TỔNG nghiệp vụ (Đã làm nhiều thì nhường)
+                const totalHardRoles = 
+                    (staff.baseStats.roles.gh + staff.stats.roles.gh) +
+                    (staff.baseStats.roles.tn + staff.stats.roles.tn) +
+                    (staff.baseStats.roles.kho + staff.stats.roles.kho);
+                score -= totalHardRoles * 2000000; // Phạt 2 Triệu điểm cho mỗi ca tổng
                 
+                // [TINH CHỈNH MỚI] Luật Thép 4: Phạt cực nặng nếu lệch cuối tuần
                 if (isWeekend) {
                     const totalWeekendCount = staff.baseStats.weekendHardRoleCount + staff.weekendHardRoleCount;
-                    score -= totalWeekendCount * 500000;
+                    score -= totalWeekendCount * 15000000; // Phạt 15 Triệu điểm cho 1 cái cuối tuần
                 }
 
                 const candInfo = getDynamicShiftInfo(cand.shift);
@@ -215,6 +237,9 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 if (candInfo.group !== 'OFF' && candInfo.group === lastInfo.group) {
                     score -= 50000;
                 }
+
+                const virtualWeight = (cand.originalIndex + d) % staffList.length;
+                score += virtualWeight * 10;
                 
                 if (!isWeekend) { 
                     if (targetRole === 'kho' && genderConfig.kho === 'mixed') {
@@ -293,6 +318,7 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                     
                     const staffCand = staffList.find(s => s.id === cand.staffId);
                     
+                    if (d - staffCand.lastHardRoleDay <= 1) continue;
                     if (isShiftConflict(staffCand.lastShiftCode, targetShiftCode)) continue;
 
                     let potentialSeatHolders = currentDayAssignments.filter(a => a.shift === targetShiftCode && !a.fixed);
@@ -340,14 +366,13 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 if (HARD_ROLES.includes(a.role)) {
                     staff.stats.roles[a.role]++;
                     staff.lastHardRoleDay = d;
+                    staff.hardRolesThisWeek++; 
                     if (isWeekend) staff.weekendHardRoleCount++;
                 } else {
                     staff.stats.roles.tv++;
                 }
             }
             
-            // [KHÔI PHỤC] Trả lại DISPLAY_ROLE_MAP để UI Table có màu như cũ
-            // [THÊM MỚI] Gài thêm rawRole để Modal Sửa ca có cái dùng sau này
             return {
                 staffId: a.staffId, name: a.name, gender: staff.gender,
                 shift: a.shift, 
