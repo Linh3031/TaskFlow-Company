@@ -37,14 +37,25 @@
         return roleFilter === 'Weekend' ? 'Ca' : 'NV';
     }
 
-    $: filteredStaffA = staffList.filter(s => s.name.toLowerCase().includes(searchA.toLowerCase()));
-    
-    // NÂNG CẤP: Bộ lọc B - Tự động Ẩn Nữ nếu chọn Giao Hàng & Sắp xếp theo số ca
+    // [PHẪU THUẬT LOGIC]: NÂNG CẤP BỘ LỌC A 
+    // Tự động Ẩn Nữ nếu chọn Giao Hàng & Sắp xếp theo số ca từ CAO xuống THẤP (b - a)
+    $: filteredStaffA = staffList
+        .filter(s => {
+            if (!s.name.toLowerCase().includes(searchA.toLowerCase())) return false;
+            if (targetRole === 'GH' && (!s.gender || s.gender.toLowerCase() !== 'nam')) return false;
+            return true;
+        })
+        .map(s => ({
+            ...s,
+            currentCount: getStaffShiftCount(s.id, targetRole)
+        }))
+        .sort((a, b) => b.currentCount - a.currentCount);
+
+    // NÂNG CẤP: Bộ lọc B - Tự động Ẩn Nữ nếu chọn Giao Hàng & Sắp xếp theo số ca từ THẤP lên CAO (a - b)
     $: filteredStaffB = staffList
         .filter(s => {
             if (s.id === staffAId) return false;
             if (!s.name.toLowerCase().includes(searchB.toLowerCase())) return false;
-            // Phẫu thuật logic: Chặn Nữ nếu targetRole là GH
             if (targetRole === 'GH' && (!s.gender || s.gender.toLowerCase() !== 'nam')) return false;
             return true;
         })
@@ -59,7 +70,6 @@
         .filter(s => {
             if (s.id === staffAId || s.id === staffBId) return false;
             if (!s.name.toLowerCase().includes(searchBridge.toLowerCase())) return false;
-            // Phẫu thuật logic: Chặn Nữ nếu targetRole là GH
             if (targetRole === 'GH' && (!s.gender || s.gender.toLowerCase() !== 'nam')) return false;
             return true;
         })
@@ -72,14 +82,14 @@
     function selectStaffA(s) { 
         staffAId = s.id;
         selectedAName = s.name; 
-        showDropA = false; 
+        showDropA = false;
         searchA = ''; 
         scanResult = []; 
         bridgeIds = bridgeIds.filter(id => id !== s.id);
     }
 
     function selectStaffB(s) { 
-        staffBId = s.id; 
+        staffBId = s.id;
         selectedBName = s.name; 
         showDropB = false; 
         searchB = '';
@@ -108,7 +118,7 @@
 
     function closeAllDropdowns() {
         showDropA = false;
-        showDropB = false; 
+        showDropB = false;
         showDropBridge = false;
     }
 </script>
@@ -142,9 +152,14 @@
                             <div class="max-h-48 overflow-y-auto">
                                 {#each filteredStaffA as s}
                                     <div class="p-3 text-sm hover:bg-indigo-50 cursor-pointer border-b last:border-0 font-medium flex justify-between items-center" on:click={() => selectStaffA(s)}>
-                                        <span>{s.name} <span class="text-[10px] text-slate-400">({s.gender})</span></span>
+                                        <span>
+                                            {s.name} <span class="text-[10px] text-slate-400">({s.gender})</span>
+                                            {#if s.currentCount === filteredStaffA[0].currentCount}
+                                                <span class="ml-1 text-[9px] bg-red-100 text-red-700 px-1 rounded">Ưu tiên xả</span>
+                                            {/if}
+                                        </span>
                                         <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded font-bold text-slate-500">
-                                            {getStaffShiftCount(s.id, targetRole)} {getUnitLabel(targetRole)}
+                                            {s.currentCount} {getUnitLabel(targetRole)}
                                         </span>
                                     </div>
                                 {/each}
@@ -168,7 +183,7 @@
                                         <span class={s.currentCount === filteredStaffB[0].currentCount ? 'text-green-600 font-black' : ''}>
                                             {s.name} <span class="text-[10px] text-slate-400">({s.gender})</span>
                                             {#if s.currentCount === filteredStaffB[0].currentCount}
-                                                <span class="ml-1 text-[9px] bg-green-100 text-green-700 px-1 rounded">Ưu tiên</span>
+                                                <span class="ml-1 text-[9px] bg-green-100 text-green-700 px-1 rounded">Ưu tiên nhận</span>
                                             {/if}
                                         </span>
                                         <span class="text-[10px] {s.currentCount < 5 ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'} px-1.5 py-0.5 rounded font-bold">

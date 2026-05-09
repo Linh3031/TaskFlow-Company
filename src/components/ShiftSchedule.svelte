@@ -44,7 +44,7 @@
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
   let unsubscribe = () => {};
-  
+
   $: if (activeTab === 'schedule' && $activeStoreId && currentMonthStr && currentMode === 'NV') { 
       loadSchedule(currentMonthStr, $activeStoreId);
   }
@@ -60,10 +60,10 @@
       try {
           const q = query(collection(db, 'users'), where('storeIds', 'array-contains', $activeStoreId));
           const snap = await getDocs(q);
-          // [PHẪU THUẬT LOGIC]: Lọc trực tiếp bằng JS để chặn PG và Admin, tránh lỗi thiếu Index Firebase
+          // Lọc trực tiếp bằng JS để chặn PG và Admin
           allStoreUsers = snap.docs
               .map(d => ({ id: d.id, ...d.data() }))
-              .filter(u => u.role === 'staff'); // Chỉ lấy user có role là nhân viên cửa hàng
+              .filter(u => u.role === 'staff');
       } catch (error) {
           console.error("Lỗi lấy danh sách user:", error);
       }
@@ -76,7 +76,6 @@
   async function handleSwapStaffInSchedule(oldStaffId, newStaff) {
       if (!scheduleData) return;
       if (!confirm(`Xác nhận rút nhân viên cũ và thế chỗ bằng "${newStaff.name}" cho toàn bộ lịch từ đầu tháng?`)) return;
-      
       loading = true;
       try {
           let localData = JSON.parse(JSON.stringify(scheduleData.data));
@@ -105,7 +104,6 @@
               data: localData,
               stats: localStats
           });
-          
           selectedStaff = null; // Đóng modal
           alert(`✅ Đã thế chỗ thành công! ${newStaff.name} đã tiếp quản toàn bộ lịch.`);
       } catch (e) {
@@ -125,8 +123,9 @@
       loading = true;
       try {
           let localData = JSON.parse(JSON.stringify(scheduleData.data));
+          let localStats = JSON.parse(JSON.stringify(scheduleData.stats)); // [PHẪU THUẬT LOGIC]: Tải Stats để cập nhật đồng bộ
           let updatedDayKeys = new Set();
-
+          
           plan.forEach(step => {
               const dayKey = String(step.day);
               updatedDayKeys.add(dayKey);
@@ -136,18 +135,53 @@
               const idx2 = dayList.findIndex(x => x.staffId === step.staff2.id);
 
               if (idx1 > -1 && idx2 > -1) {
+                  const oldRole1 = dayList[idx1].role;
+                  const oldRole2 = dayList[idx2].role;
+                  const newRole1 = step.role2 || 'TV';
+                  const newRole2 = step.role1 || 'TV';
+
+                  // Đổi ca trên Data
                   dayList[idx1].shift = step.shift2;
-                  dayList[idx1].role = step.role2 || 'TV';
+                  dayList[idx1].role = newRole1;
                   dayList[idx2].shift = step.shift1;
-                  dayList[idx2].role = step.role1 || 'TV';
+                  dayList[idx2].role = newRole2;
+
+                  // [PHẪU THUẬT LOGIC]: Dịch vụ phân loại Role để chấm điểm
+                  const getRoleKey = (r) => {
+                      if (!r) return null;
+                      let norm = r.toLowerCase();
+                      if (norm.includes('gh') || norm.includes('giao')) return 'gh';
+                      if (norm.includes('tn') || norm.includes('thu')) return 'tn';
+                      if (norm.includes('k')) return 'kho';
+                      return null;
+                  };
+
+                  // Trừ điểm cũ, Cộng điểm mới cho Staff 1
+                  let rOld1 = getRoleKey(oldRole1);
+                  let rNew1 = getRoleKey(newRole1);
+                  let sIdx1 = localStats.findIndex(s => s.id === step.staff1.id);
+                  if (sIdx1 > -1) {
+                      if (rOld1 && rOld1 !== rNew1) localStats[sIdx1][rOld1] = Math.max(0, (localStats[sIdx1][rOld1]||0) - 1);
+                      if (rNew1 && rOld1 !== rNew1) localStats[sIdx1][rNew1] = (localStats[sIdx1][rNew1]||0) + 1;
+                  }
+
+                  // Trừ điểm cũ, Cộng điểm mới cho Staff 2
+                  let rOld2 = getRoleKey(oldRole2);
+                  let rNew2 = getRoleKey(newRole2);
+                  let sIdx2 = localStats.findIndex(s => s.id === step.staff2.id);
+                  if (sIdx2 > -1) {
+                      if (rOld2 && rOld2 !== rNew2) localStats[sIdx2][rOld2] = Math.max(0, (localStats[sIdx2][rOld2]||0) - 1);
+                      if (rNew2 && rOld2 !== rNew2) localStats[sIdx2][rNew2] = (localStats[sIdx2][rNew2]||0) + 1;
+                  }
               }
           });
 
-          let updatePayload = {};
+          // [PHẪU THUẬT LOGIC]: Đóng gói Payload chứa cả Data và Stats đã được cập nhật
+          let updatePayload = { stats: localStats };
           updatedDayKeys.forEach(key => {
               updatePayload[`data.${key}`] = localData[key];
           });
-
+          
           await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), updatePayload);
           
           showSmartSwap = false;
