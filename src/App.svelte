@@ -5,7 +5,6 @@
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
   import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList, activeStoreId } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
-  
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
   import TaskList from './components/TaskList.svelte';
@@ -143,12 +142,11 @@
       if (target < today) return; 
 
       hasCheckedInit = true;
-
       // Lấy đúng thứ của ngày đang xem để sinh việc chuẩn xác
-      const dayOfWeek = target.getDay(); 
+      const dayOfWeek = target.getDay();
       const batch = writeBatch(db);
       let hasUpdates = false;
-      const types = ['warehouse', 'cashier']; 
+      const types = ['warehouse', 'cashier'];
 
       types.forEach(type => {
           const templateItems = template[type] || [];
@@ -164,7 +162,8 @@
                       const docRef = doc(db, 'tasks', fixedID);
                       batch.set(docRef, {
                           title: tpl.title.trim(), timeSlot: tpl.time, isImportant: tpl.isImportant || false,
-                          type: type, storeId: storeId, date: dateStr, completed: false, createdBy: 'System',
+                          type: type, storeId: storeId, 
+                          date: dateStr, completed: false, createdBy: 'System',
                           timestamp: serverTimestamp()
                       });
                       hasUpdates = true;
@@ -186,6 +185,7 @@
       if(unsubHandover) unsubHandover();
 
       if (fetchTimer) clearTimeout(fetchTimer);
+
       fetchTimer = setTimeout(() => {
         // [SURGICAL FIX] Tuyệt chủng công việc Demo
         unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
@@ -207,14 +207,14 @@
               currentTasks.set(Array.from(uniqueMap.values()));
               isTasksLoaded = true; 
           };
-          
+        
           const qDaily = query(collection(db, 'tasks'), where('date', '==', dateStr), where('storeId', '==', storeId));
           unsubTasks = onSnapshot(qDaily, (snapshot) => {
               dailyTasks = [];
               snapshot.forEach(doc => { const data = doc.data(); if (data.type) dailyTasks.push({ id: doc.id, ...data }); });
               updateStore();
           });
-          
+
           const qHandover = query(collection(db, 'tasks'), where('storeId', '==', storeId), where('type', '==', 'handover'), where('completed', '==', false));
           unsubHandover = onSnapshot(qHandover, (snapshot) => {
               handoverTasks = [];
@@ -254,7 +254,6 @@
       imageLinks: imageLinks || [],
       history: arrayUnion({ action: status === 'completed' ? 'done' : 'failed', user, time, fullTime: new Date().toISOString() })
     });
-    
     showTaskModal = false; selectedTask = null;
   }
 
@@ -321,7 +320,7 @@
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                     {#if activeTab==='handover'}🤝 Bàn Giao{/if}
                  {/if}
-               </h3>
+              </h3>
                {#if activeTab === 'warehouse' || activeTab === 'cashier' || activeTab === 'handover'}
                 <span class="task-count ml-2">{$currentTasks.filter(t => t.type === activeTab && !t.completed).length} chưa xong</span>
                {/if}
@@ -377,8 +376,7 @@
   </div>
   {/if}
 
-  <Chatbot />
-</main>
+  </main>
 
 <style>
   main { width: 100%; height: 100%; }
