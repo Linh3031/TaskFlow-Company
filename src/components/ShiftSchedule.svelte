@@ -19,10 +19,12 @@
   import { buildSmartCover, applySmartCoverActions } from '../lib/smartCover.js';
   import SmartSwapModal from './admin/schedule/SmartSwapModal.svelte';
   import LegacySyncManager from './ShiftScheduleParts/LegacySyncManager.svelte';
+  
+  // [PHẪU THUẬT LOGIC]: Gọi thêm hàm healScheduleStats
   import { 
       getShiftColor, getRoleBadge, getWeekday, getWeekendHardRoleCount, 
       preparePersonalSchedule, prepareDayStats, checkShiftQuotaWarning, 
-      applyShiftChangeLocalData, findMyStatRowId 
+      applyShiftChangeLocalData, findMyStatRowId, healScheduleStats
   } from '../lib/shiftUtils.js';
 
   export let activeTab;
@@ -40,7 +42,6 @@
   let tempEditingShift = null;
   let showSmartSwap = false; 
 
-  // [PHẪU THUẬT LOGIC]: Tách trạng thái để Lịch Cá Nhân phản ứng (Reactive) với Firebase
   let modalStaffId = null;
   let modalStaffName = '';
   $: selectedStaff = (modalStaffId && scheduleData) 
@@ -55,9 +56,6 @@
       loadSchedule(currentMonthStr, $activeStoreId);
   }
 
-  // ==========================================
-  // TÍNH NĂNG THẾ CHỖ NHÂN SỰ TOÀN LỊCH
-  // ==========================================
   let allStoreUsers = [];
   $: availableStaffToSwap = allStoreUsers.filter(u => scheduleData && !scheduleData.stats.some(s => s.id === u.id));
 
@@ -107,7 +105,7 @@
               stats: localStats
           });
           
-          modalStaffId = null; // Đóng modal
+          modalStaffId = null; 
           alert(`✅ Đã thế chỗ thành công! ${newStaff.name} đã tiếp quản toàn bộ lịch.`);
       } catch (e) {
           alert("Lỗi thực thi: " + e.message);
@@ -126,7 +124,6 @@
       loading = true;
       try {
           let localData = JSON.parse(JSON.stringify(scheduleData.data));
-          let localStats = JSON.parse(JSON.stringify(scheduleData.stats)); 
           let updatedDayKeys = new Set();
           
           plan.forEach(step => {
@@ -138,44 +135,18 @@
               const idx2 = dayList.findIndex(x => x.staffId === step.staff2.id);
 
               if (idx1 > -1 && idx2 > -1) {
-                  const oldRole1 = dayList[idx1].role;
-                  const oldRole2 = dayList[idx2].role;
-                  const newRole1 = step.role2 || 'TV';
-                  const newRole2 = step.role1 || 'TV';
-
                   dayList[idx1].shift = step.shift2;
-                  dayList[idx1].role = newRole1;
+                  dayList[idx1].role = step.role2 || 'TV';
                   dayList[idx2].shift = step.shift1;
-                  dayList[idx2].role = newRole2;
-
-                  const getRoleKey = (r) => {
-                      if (!r) return null;
-                      let norm = r.toLowerCase();
-                      if (norm.includes('gh') || norm.includes('giao')) return 'gh';
-                      if (norm.includes('tn') || norm.includes('thu')) return 'tn';
-                      if (norm.includes('k')) return 'kho';
-                      return null;
-                  };
-
-                  let rOld1 = getRoleKey(oldRole1);
-                  let rNew1 = getRoleKey(newRole1);
-                  let sIdx1 = localStats.findIndex(s => s.id === step.staff1.id);
-                  if (sIdx1 > -1) {
-                      if (rOld1 && rOld1 !== rNew1) localStats[sIdx1][rOld1] = Math.max(0, (localStats[sIdx1][rOld1]||0) - 1);
-                      if (rNew1 && rOld1 !== rNew1) localStats[sIdx1][rNew1] = (localStats[sIdx1][rNew1]||0) + 1;
-                  }
-
-                  let rOld2 = getRoleKey(oldRole2);
-                  let rNew2 = getRoleKey(newRole2);
-                  let sIdx2 = localStats.findIndex(s => s.id === step.staff2.id);
-                  if (sIdx2 > -1) {
-                      if (rOld2 && rOld2 !== rNew2) localStats[sIdx2][rOld2] = Math.max(0, (localStats[sIdx2][rOld2]||0) - 1);
-                      if (rNew2 && rOld2 !== rNew2) localStats[sIdx2][rNew2] = (localStats[sIdx2][rNew2]||0) + 1;
-                  }
+                  dayList[idx2].role = step.role1 || 'TV';
               }
           });
 
-          let updatePayload = { stats: localStats };
+          // [PHẪU THUẬT LOGIC]: Cắt bỏ đếm tay. Dùng Auto-Heal quét qua bảng Data để sinh lại Stats mới nhất
+          let tempScheduleData = { ...scheduleData, data: localData };
+          let healedStats = healScheduleStats(tempScheduleData);
+
+          let updatePayload = { stats: healedStats };
           updatedDayKeys.forEach(key => {
               updatePayload[`data.${key}`] = localData[key];
           });
@@ -199,10 +170,16 @@
   async function executeSmartCover(actions) {
       if (!editingShift || !scheduleData) return;
       if (!confirm("Xác nhận ÁP DỤNG phương án Trám Ca Thông Minh này?")) return;
-      const { dayKey, dayList, newStats } = applySmartCoverActions(actions, scheduleData, editingShift);
+      
+      const { dayKey, dayList } = applySmartCoverActions(actions, scheduleData, editingShift);
       try {
-          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
-          editingShift = null; alert("✅ Đã Trám ca tự động và lưu lịch thành công!");
+          // [PHẪU THUẬT LOGIC]: Dùng Auto-Heal thay thế cơ chế cộng trừ trong smartCover
+          let tempScheduleData = { ...scheduleData, data: { ...scheduleData.data, [dayKey]: dayList } };
+          let healedStats = healScheduleStats(tempScheduleData);
+
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: healedStats });
+          editingShift = null; 
+          alert("✅ Đã Trám ca tự động và lưu lịch thành công!");
       } catch (e) { alert("Lỗi: " + e.message); }
   }
 
@@ -221,7 +198,15 @@
       if (unsubscribe) unsubscribe();
       try {
           unsubscribe = onSnapshot(doc(db, 'stores', storeId, 'schedules', monthStr), (snap) => {
-              loading = false; scheduleData = snap.exists() ? snap.data() : null;
+              loading = false; 
+              if (snap.exists()) {
+                  let rawData = snap.data();
+                  // [PHẪU THUẬT LOGIC]: Tự động quét và phục hồi rác dữ liệu ở dạng lõi mỗi khi load lên từ Firebase
+                  rawData.stats = healScheduleStats(rawData);
+                  scheduleData = rawData;
+              } else {
+                  scheduleData = null;
+              }
           });
       } catch (e) { loading = false; }
   }
@@ -261,6 +246,7 @@
       if (!editingShift || !scheduleData) return;
       const warning = checkShiftQuotaWarning(editingShift, scheduleData);
       if (warning && !confirm(warning)) return;
+      
       const { dayKey, dayList, newStats } = applyShiftChangeLocalData(editingShift, scheduleData);
       try { 
           await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });

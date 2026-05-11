@@ -38,12 +38,7 @@ export function preparePersonalSchedule(staffId, staffName, scheduleData, viewMo
     let days = []; 
     Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)).forEach(d => { 
         const assign = scheduleData.data[d].find(x => x.staffId === staffId); 
-        // [PHẪU THUẬT LOGIC]: Fallback an toàn, nếu mất assign thì mặc định gán là OFF để UI vẫn render đủ ngày
-        if(assign) {
-            days.push({ day: d, weekday: getWeekday(d, viewMonth, viewYear), ...assign }); 
-        } else {
-            days.push({ day: d, weekday: getWeekday(d, viewMonth, viewYear), shift: 'OFF', role: 'TV' });
-        }
+        if(assign) days.push({ day: d, weekday: getWeekday(d, viewMonth, viewYear), ...assign }); 
     });
     const firstDayDate = new Date(viewYear, viewMonth - 1, 1); 
     let startDayIdx = firstDayDate.getDay(); 
@@ -136,27 +131,62 @@ export function checkShiftQuotaWarning(editingShift, scheduleData) {
     return null;
 }
 
+// [PHẪU THUẬT LOGIC]: Thuật toán chữa bệnh Dual-State (Quét và Đếm lại 100% Data)
+export function healScheduleStats(scheduleData) {
+    if (!scheduleData || !scheduleData.data || !scheduleData.stats) return scheduleData?.stats || [];
+    
+    // Khởi tạo bảng đếm sạch
+    const newCounts = {};
+    scheduleData.stats.forEach(s => {
+        newCounts[s.id] = { gh: 0, tn: 0, kho: 0 };
+    });
+    
+    // Quét trực tiếp ma trận DATA thật
+    Object.values(scheduleData.data).forEach(dayList => {
+        dayList.forEach(a => {
+            if (a.shift === 'OFF') return;
+            let r = (a.role || '').toLowerCase().trim();
+            let key = '';
+            
+            // Xử lý bắt mọi loại cú pháp lỗi của String
+            if (r === 'gh' || r === 'giao hàng' || r.includes('giao')) key = 'gh';
+            else if (r === 'tn' || r === 'thu ngân' || r.includes('thu')) key = 'tn';
+            else if (r === 'kho' || r === 'k') key = 'kho';
+            
+            if (key && newCounts[a.staffId]) {
+                newCounts[a.staffId][key]++;
+            }
+        });
+    });
+    
+    // Cập nhật lại vào bộ đếm Stats
+    let statsCopy = JSON.parse(JSON.stringify(scheduleData.stats));
+    statsCopy.forEach(s => {
+        if (newCounts[s.id]) {
+            s.gh = newCounts[s.id].gh;
+            s.tn = newCounts[s.id].tn;
+            s.kho = newCounts[s.id].kho;
+        }
+    });
+    
+    return statsCopy;
+}
+
 export function applyShiftChangeLocalData(editingShift, scheduleData) {
     const dayKey = String(editingShift.day);
     const dayList = [...scheduleData.data[dayKey]];
     const idx = dayList.findIndex(x => x.staffId === editingShift.staffId);
-    let newStats = [...scheduleData.stats]; 
 
     if (idx !== -1) { 
-        const oldRole = dayList[idx].role || 'TV';
         const newRole = editingShift.isOFF ? '' : (editingShift.role === 'TV' ? '' : editingShift.role);
         const updatedAssignment = { ...dayList[idx], shift: editingShift.isOFF ? 'OFF' : editingShift.shift, role: newRole }; 
         dayList[idx] = updatedAssignment;
-        const statIdx = newStats.findIndex(s => s.id === editingShift.staffId);
-        if (statIdx !== -1) { 
-            const s = newStats[statIdx];
-            let rOld = (oldRole === 'Giao Hàng' || oldRole === 'GH') ? 'gh' : ((oldRole === 'Thu Ngân' || oldRole === 'TN') ? 'tn' : ((oldRole === 'Kho' || oldRole === 'K') ? 'kho' : ''));
-            if(rOld) s[rOld] = Math.max(0, (s[rOld]||0) - 1); 
-            
-            let rNew = (newRole === 'Giao Hàng' || newRole === 'GH') ? 'gh' : ((newRole === 'Thu Ngân' || newRole === 'TN') ? 'tn' : ((newRole === 'Kho' || newRole === 'K') ? 'kho' : ''));
-            if(rNew) s[rNew] = (s[rNew]||0) + 1; 
-        } 
     }
+    
+    // [PHẪU THUẬT LOGIC]: Tái cấu trúc - Bỏ cộng trừ tay, gọi Auto Heal quét lại nguyên tháng
+    let tempScheduleData = { ...scheduleData, data: { ...scheduleData.data, [dayKey]: dayList } };
+    let newStats = healScheduleStats(tempScheduleData);
+    
     return { dayKey, dayList, newStats };
 }
 
