@@ -3,7 +3,6 @@
   import { db } from '../lib/firebase';
   import { doc, onSnapshot, updateDoc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
   import { currentUser, activeStoreId } from '../lib/stores';
-  import TourGuide from './TourGuide.svelte';
   import CumulativeHistoryModal from './CumulativeHistoryModal.svelte';
   
   import ScheduleControls from './ShiftScheduleParts/ScheduleControls.svelte';
@@ -19,8 +18,8 @@
   import { buildSmartCover, applySmartCoverActions } from '../lib/smartCover.js';
   import SmartSwapModal from './admin/schedule/SmartSwapModal.svelte';
   import LegacySyncManager from './ShiftScheduleParts/LegacySyncManager.svelte';
-  
-  // [PHẪU THUẬT LOGIC]: Gọi thêm hàm healScheduleStats
+  import StaffReorderModal from './admin/schedule/StaffReorderModal.svelte'; // [NEW] Import Modal Sắp xếp
+
   import { 
       getShiftColor, getRoleBadge, getWeekday, getWeekendHardRoleCount, 
       preparePersonalSchedule, prepareDayStats, checkShiftQuotaWarning, 
@@ -41,6 +40,7 @@
   let highlightedDay = null;
   let tempEditingShift = null;
   let showSmartSwap = false; 
+  let showReorderModal = false; // [NEW] Biến hiển thị Modal Sắp xếp
 
   let modalStaffId = null;
   let modalStaffName = '';
@@ -74,6 +74,42 @@
 
   $: if (activeTab === 'schedule' && $activeStoreId && isAdmin) {
       fetchAllStoreUsers();
+  }
+
+  // ==========================================
+  // [NEW] LƯU THỨ TỰ NHÂN SỰ SAU KHI SẮP XẾP
+  // ==========================================
+  async function handleSaveStaffOrder(newStatsOrder) {
+      if (!scheduleData || !newStatsOrder) return;
+      loading = true;
+      try {
+          let localData = JSON.parse(JSON.stringify(scheduleData.data));
+
+          // [QUAN TRỌNG]: Sắp xếp lại Mảng ca làm việc trong Từng Ngày (Data Layer)
+          // Để đảm bảo "Ca làm việc đi theo Người" tuyệt đối 100%
+          Object.keys(localData).forEach(day => {
+              localData[day].sort((a, b) => {
+                  let idxA = newStatsOrder.findIndex(s => s.id === a.staffId);
+                  let idxB = newStatsOrder.findIndex(s => s.id === b.staffId);
+                  // Đẩy những người không có trong list xuống cuối
+                  if(idxA === -1) return 1;
+                  if(idxB === -1) return -1;
+                  return idxA - idxB;
+              });
+          });
+
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), {
+              stats: newStatsOrder,
+              data: localData
+          });
+          
+          showReorderModal = false;
+          alert("✅ Đã cập nhật cấu trúc danh sách thành công!");
+      } catch (e) {
+          alert("Lỗi thực thi: " + e.message);
+      } finally {
+          loading = false;
+      }
   }
 
   async function handleSwapStaffInSchedule(oldStaffId, newStaff) {
@@ -114,9 +150,6 @@
       }
   }
 
-  // ==========================================
-  // SMART SWAP EXECUTION (AI ĐỔI CA)
-  // ==========================================
   async function executeSmartSwap(plan) {
       if (!scheduleData || !plan || plan.length === 0) return;
       if (!confirm(`Xác nhận thực hiện lộ trình đổi ca gồm ${plan.length} bước này?`)) return;
@@ -142,7 +175,6 @@
               }
           });
 
-          // [PHẪU THUẬT LOGIC]: Cắt bỏ đếm tay. Dùng Auto-Heal quét qua bảng Data để sinh lại Stats mới nhất
           let tempScheduleData = { ...scheduleData, data: localData };
           let healedStats = healScheduleStats(tempScheduleData);
 
@@ -173,7 +205,6 @@
       
       const { dayKey, dayList } = applySmartCoverActions(actions, scheduleData, editingShift);
       try {
-          // [PHẪU THUẬT LOGIC]: Dùng Auto-Heal thay thế cơ chế cộng trừ trong smartCover
           let tempScheduleData = { ...scheduleData, data: { ...scheduleData.data, [dayKey]: dayList } };
           let healedStats = healScheduleStats(tempScheduleData);
 
@@ -201,7 +232,6 @@
               loading = false; 
               if (snap.exists()) {
                   let rawData = snap.data();
-                  // [PHẪU THUẬT LOGIC]: Tự động quét và phục hồi rác dữ liệu ở dạng lõi mỗi khi load lên từ Firebase
                   rawData.stats = healScheduleStats(rawData);
                   scheduleData = rawData;
               } else {
@@ -271,8 +301,6 @@
       } else alert(`Không tìm thấy "${$currentUser.name}" trong lịch tháng này!`);
   }
   
-  let showScheduleTour = false;
-  const scheduleSteps = [ { target: '.overflow-x-auto', title: '1. Bảng Lịch Tổng', content: 'Toàn bộ lịch làm việc.' }, { target: '#store-view-selector', title: '2. Chọn Kho Xem', content: 'Chọn kho.' }, { target: '#tour-staff-name', title: '3. Xem Cá Nhân', content: 'Bấm vào Tên.' }, { target: '#tour-total-col', title: '4. Cột Tổng Kết', content: 'Kéo về cuối bảng.', action: () => { document.querySelector('.overflow-x-auto').scrollLeft = 9999; } } ];
   onDestroy(() => { if (unsubscribe) unsubscribe(); });
 </script>
 
@@ -285,7 +313,6 @@
     on:restoreBackup={handleRestoreBackup}
     on:lockBaseline={handleLockBaseline}
     on:exportExcel={handleExportExcel}
-    on:startTour={() => showScheduleTour = true}
     on:openSmartSwap={() => showSmartSwap = true}
 />
 
@@ -305,6 +332,7 @@
             on:clickDayStats={(e) => selectedDayStats = prepareDayStats(e.detail, scheduleData, viewMonth, viewYear)}
             on:clickStaff={(e) => { modalStaffId = e.detail.id; modalStaffName = e.detail.name; }}
             on:clickCell={(e) => openEditShift(e.detail.day, e.detail.staffId, e.detail.assign)}
+            on:openReorder={() => showReorderModal = true}
         />
     {/if}
 
@@ -329,7 +357,6 @@
 
 {#if editingShift} <EditShiftModal bind:editingShift {tempEditingShift} suggestions={smartCoverSuggestions} on:close={() => editingShift = null} on:save={saveShiftChange} on:applySmartCover={(e) => executeSmartCover(e.detail)} /> {/if}
 {#if selectedDayStats} <DayStatsModal {selectedDayStats} on:close={() => selectedDayStats = null} /> {/if}
-{#if showScheduleTour} <TourGuide steps={scheduleSteps} on:complete={() => showScheduleTour = false} /> {/if}
 
 {#if showSmartSwap && scheduleData}
     <SmartSwapModal 
@@ -341,5 +368,13 @@
         year={viewYear}
         on:close={() => showSmartSwap = false}
         on:execute={(e) => executeSmartSwap(e.detail)}
+    />
+{/if}
+
+{#if showReorderModal && scheduleData}
+    <StaffReorderModal 
+        staffList={scheduleData.stats} 
+        on:close={() => showReorderModal = false} 
+        on:save={(e) => handleSaveStaffOrder(e.detail)} 
     />
 {/if}

@@ -88,10 +88,8 @@
             <button class="flex items-center gap-1 bg-green-600 text-white px-2 py-1 rounded-lg font-bold text-xs shadow hover:bg-green-700 transition-all shrink-0" on:click={() => dispatch('exportExcel')}>
                 <span class="material-icons-round text-[14px]">download</span> <span class="hidden sm:inline">Xuất Excel</span>
             </button>
-            <button class="flex items-center justify-center bg-purple-500 text-white w-6 h-6 rounded shadow hover:bg-purple-600 transition-all shrink-0" on:click={() => dispatch('startTour')} title="Hướng dẫn xem lịch">
-                <span class="material-icons-round text-[14px]">help_outline</span>
-            </button>
-        {/if}
+            
+            {/if}
 
     </div>
 </div>

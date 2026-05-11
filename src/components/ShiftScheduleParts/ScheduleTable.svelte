@@ -2,20 +2,17 @@
     import { createEventDispatcher } from 'svelte';
     const dispatch = createEventDispatcher();
 
-    // Dữ liệu từ cha truyền xuống
     export let scheduleData;
     export let showPastDays;
     export let highlightedDay;
     export let isAdmin;
 
-    // Các hàm tính toán từ cha truyền xuống để dùng chung, không code lặp lại
     export let isPastDay;
     export let getWeekday;
     export let getShiftColor;
     export let getRoleBadge;
     export let getWeekendHardRoleCount;
 
-    // [NEW] Logic Local Sort (Chỉ thay đổi UI, không mutate database)
     let sortField = null;
     let sortDirection = 'desc';
 
@@ -27,17 +24,17 @@
             weCount, 
             nvCount, 
             totalHoursNum: Number(staff.totalHours) || 0,
-            origIdx // Giữ lại vị trí gốc để trả về default
+            origIdx
         };
     }).sort((a, b) => {
-        if (!sortField) return a.origIdx - b.origIdx; // Trả về thứ tự gốc nếu không sort
+        if (!sortField) return a.origIdx - b.origIdx; 
         
         let valA = a[sortField];
         let valB = b[sortField];
          
         if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
         if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-        return a.origIdx - b.origIdx; // Bằng nhau thì theo thứ tự gốc
+        return a.origIdx - b.origIdx; 
     }) : [];
 
     function toggleSort(field) {
@@ -45,7 +42,7 @@
             sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
         } else {
             sortField = field;
-            sortDirection = 'desc'; // Số luôn ưu tiên xếp giảm dần (người cao nhất lên đầu) trước
+            sortDirection = 'desc'; 
         }
     }
 </script>
@@ -54,7 +51,14 @@
     <table class="w-full min-w-max text-sm text-center border-collapse">
         <thead class="bg-amber-400 text-slate-900 sticky top-0 z-30 shadow-md">
             <tr>
-                <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-[60] min-w-[140px] max-w-[140px] text-left pl-3 shadow">NHÂN SỰ</th>
+                <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-[60] min-w-[140px] max-w-[140px] text-left pl-3 shadow {isAdmin ? 'cursor-pointer hover:bg-amber-50 group transition-colors' : ''}" title={isAdmin ? 'Sắp xếp lại nhân sự' : ''} on:click={() => { if(isAdmin) dispatch('openReorder') }}>
+                    <div class="flex items-center justify-between">
+                        <span>NHÂN SỰ</span>
+                        {#if isAdmin}
+                            <span class="material-icons-round text-[14px] text-amber-500 opacity-30 group-hover:opacity-100 transition-opacity">sort</span>
+                        {/if}
+                    </div>
+                </th>
                 
                 {#each Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)) as d}
                     {#if showPastDays || !isPastDay(d)}
