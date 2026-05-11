@@ -11,6 +11,12 @@
     let showSwapPanel = false;
     let selectedNewStaffId = '';
 
+    // [PHẪU THUẬT LOGIC]: Chuyển tính toán Tổng NV lên Script bằng Reactive Statement ($:)
+    // Tính toán lại tự động khi selectedStaff thay đổi
+    $: tongNV = selectedStaff && selectedStaff.stats 
+        ? (Number(selectedStaff.stats.gh)||0) + (Number(selectedStaff.stats.tn)||0) + (Number(selectedStaff.stats.kho)||0) 
+        : 0;
+
     function confirmSwap() {
         if (!selectedNewStaffId) return alert("Vui lòng chọn nhân viên mới!");
         const newStaffObj = availableStaffToSwap.find(s => s.id === selectedNewStaffId);
@@ -35,11 +41,17 @@
                 </button>
             {/if}
 
-            <div class="flex justify-between mt-3 text-xs font-bold bg-indigo-600/50 p-2 rounded">
-               <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
-                <span class="text-blue-100">GH: {selectedStaff.stats.gh || 0}</span>
-                <span class="text-purple-100">TN: {selectedStaff.stats.tn || 0}</span>
-                <span class="text-orange-100">K: {selectedStaff.stats.kho || 0}</span>
+            <div class="flex justify-between items-center mt-3 text-xs font-bold bg-indigo-600/50 p-2 rounded">
+                <div class="flex items-center gap-2">
+                    <span>{Math.round(selectedStaff.stats.totalHours) || 0} Giờ</span>
+                    <div class="w-px h-3 bg-indigo-400/50"></div>
+                    <span class="text-blue-100">GH:{selectedStaff.stats.gh || 0}</span>
+                    <span class="text-purple-100">TN:{selectedStaff.stats.tn || 0}</span>
+                    <span class="text-orange-100">K:{selectedStaff.stats.kho || 0}</span>
+                </div>
+                <div class="bg-indigo-800 text-indigo-50 px-2 py-1 rounded shadow-inner text-[10px] uppercase tracking-wider flex items-center gap-1">
+                    Tổng NV: <span class="text-white text-xs">{tongNV}</span>
+                </div>
             </div>
         </div>
 

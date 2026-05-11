@@ -38,7 +38,12 @@ export function preparePersonalSchedule(staffId, staffName, scheduleData, viewMo
     let days = []; 
     Object.keys(scheduleData.data).sort((a,b)=>Number(a)-Number(b)).forEach(d => { 
         const assign = scheduleData.data[d].find(x => x.staffId === staffId); 
-        if(assign) days.push({ day: d, weekday: getWeekday(d, viewMonth, viewYear), ...assign }); 
+        // [PHẪU THUẬT LOGIC]: Fallback an toàn, nếu mất assign thì mặc định gán là OFF để UI vẫn render đủ ngày
+        if(assign) {
+            days.push({ day: d, weekday: getWeekday(d, viewMonth, viewYear), ...assign }); 
+        } else {
+            days.push({ day: d, weekday: getWeekday(d, viewMonth, viewYear), shift: 'OFF', role: 'TV' });
+        }
     });
     const firstDayDate = new Date(viewYear, viewMonth - 1, 1); 
     let startDayIdx = firstDayDate.getDay(); 

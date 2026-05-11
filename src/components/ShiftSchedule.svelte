@@ -32,7 +32,6 @@
   $: currentMonthStr = `${viewYear}-${String(viewMonth).padStart(2,'0')}`;
   
   let currentMode = 'NV';
-  let selectedStaff = null;
   let editingShift = null;
   let selectedDayStats = null;
   let showHistoryModal = false; 
@@ -40,6 +39,13 @@
   let highlightedDay = null;
   let tempEditingShift = null;
   let showSmartSwap = false; 
+
+  // [PHẪU THUẬT LOGIC]: Tách trạng thái để Lịch Cá Nhân phản ứng (Reactive) với Firebase
+  let modalStaffId = null;
+  let modalStaffName = '';
+  $: selectedStaff = (modalStaffId && scheduleData) 
+      ? preparePersonalSchedule(modalStaffId, modalStaffName, scheduleData, viewMonth, viewYear) 
+      : null;
   
   $: myStores = $currentUser?.storeIds || [];
   $: isAdmin = $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin';
@@ -60,7 +66,6 @@
       try {
           const q = query(collection(db, 'users'), where('storeIds', 'array-contains', $activeStoreId));
           const snap = await getDocs(q);
-          // Lọc trực tiếp bằng JS để chặn PG và Admin
           allStoreUsers = snap.docs
               .map(d => ({ id: d.id, ...d.data() }))
               .filter(u => u.role === 'staff');
@@ -81,7 +86,6 @@
           let localData = JSON.parse(JSON.stringify(scheduleData.data));
           let localStats = JSON.parse(JSON.stringify(scheduleData.stats));
 
-          // 1. Thay tên trong Data từng ngày
           Object.keys(localData).forEach(day => {
               let assign = localData[day].find(a => a.staffId === oldStaffId);
               if (assign) {
@@ -91,7 +95,6 @@
               }
           });
 
-          // 2. Thay tên trong Stats (Bảo toàn số ca)
           let statRow = localStats.find(s => s.id === oldStaffId);
           if (statRow) {
               statRow.id = newStaff.id;
@@ -99,12 +102,12 @@
               statRow.gender = newStaff.gender || 'Nữ';
           }
 
-          // 3. Đẩy lên Firebase
           await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), {
               data: localData,
               stats: localStats
           });
-          selectedStaff = null; // Đóng modal
+          
+          modalStaffId = null; // Đóng modal
           alert(`✅ Đã thế chỗ thành công! ${newStaff.name} đã tiếp quản toàn bộ lịch.`);
       } catch (e) {
           alert("Lỗi thực thi: " + e.message);
@@ -123,7 +126,7 @@
       loading = true;
       try {
           let localData = JSON.parse(JSON.stringify(scheduleData.data));
-          let localStats = JSON.parse(JSON.stringify(scheduleData.stats)); // [PHẪU THUẬT LOGIC]: Tải Stats để cập nhật đồng bộ
+          let localStats = JSON.parse(JSON.stringify(scheduleData.stats)); 
           let updatedDayKeys = new Set();
           
           plan.forEach(step => {
@@ -140,13 +143,11 @@
                   const newRole1 = step.role2 || 'TV';
                   const newRole2 = step.role1 || 'TV';
 
-                  // Đổi ca trên Data
                   dayList[idx1].shift = step.shift2;
                   dayList[idx1].role = newRole1;
                   dayList[idx2].shift = step.shift1;
                   dayList[idx2].role = newRole2;
 
-                  // [PHẪU THUẬT LOGIC]: Dịch vụ phân loại Role để chấm điểm
                   const getRoleKey = (r) => {
                       if (!r) return null;
                       let norm = r.toLowerCase();
@@ -156,7 +157,6 @@
                       return null;
                   };
 
-                  // Trừ điểm cũ, Cộng điểm mới cho Staff 1
                   let rOld1 = getRoleKey(oldRole1);
                   let rNew1 = getRoleKey(newRole1);
                   let sIdx1 = localStats.findIndex(s => s.id === step.staff1.id);
@@ -165,7 +165,6 @@
                       if (rNew1 && rOld1 !== rNew1) localStats[sIdx1][rNew1] = (localStats[sIdx1][rNew1]||0) + 1;
                   }
 
-                  // Trừ điểm cũ, Cộng điểm mới cho Staff 2
                   let rOld2 = getRoleKey(oldRole2);
                   let rNew2 = getRoleKey(newRole2);
                   let sIdx2 = localStats.findIndex(s => s.id === step.staff2.id);
@@ -176,7 +175,6 @@
               }
           });
 
-          // [PHẪU THUẬT LOGIC]: Đóng gói Payload chứa cả Data và Stats đã được cập nhật
           let updatePayload = { stats: localStats };
           updatedDayKeys.forEach(key => {
               updatePayload[`data.${key}`] = localData[key];
@@ -193,7 +191,6 @@
       }
   }
 
-  // --- SMART COVER ---
   let smartCoverSuggestions = [];
   $: if (editingShift && editingShift.isOFF && scheduleData && isAdmin) {
       smartCoverSuggestions = buildSmartCover(editingShift, scheduleData);
@@ -320,7 +317,7 @@
             getWeekday={boundGetWeekday} {getRoleBadge} {getShiftColor} getWeekendHardRoleCount={boundGetWeekendCount}
             on:clickHighlight={(e) => highlightedDay = highlightedDay === e.detail ? null : e.detail}
             on:clickDayStats={(e) => selectedDayStats = prepareDayStats(e.detail, scheduleData, viewMonth, viewYear)}
-            on:clickStaff={(e) => selectedStaff = preparePersonalSchedule(e.detail.id, e.detail.name, scheduleData, viewMonth, viewYear)}
+            on:clickStaff={(e) => { modalStaffId = e.detail.id; modalStaffName = e.detail.name; }}
             on:clickCell={(e) => openEditShift(e.detail.day, e.detail.staffId, e.detail.assign)}
         />
     {/if}
@@ -340,7 +337,7 @@
         {isAdmin}
         {availableStaffToSwap}
         on:swapStaff={(e) => handleSwapStaffInSchedule(e.detail.oldStaffId, e.detail.newStaff)}
-        on:close={() => selectedStaff = null} 
+        on:close={() => { modalStaffId = null; }} 
     /> 
 {/if}
 
