@@ -1,7 +1,7 @@
 // src/lib/smartCover.js
 
 export function buildSmartCover(target, scheduleData) {
-    // [NEW] Helper nhận diện ca nghiệp vụ (Hard Role)
+    // Helper nhận diện ca nghiệp vụ (Hard Role)
     const isHardRole = (r) => {
         if (!r) return false;
         let norm = r.toLowerCase();
@@ -10,7 +10,12 @@ export function buildSmartCover(target, scheduleData) {
                norm.includes('k'); // Bao gồm 'kho', 'k'
     };
 
-    // [PHẪU THUẬT LOGIC]: Loại bỏ nhân viên OFF, nhân viên hiện tại, VÀ nhân viên đang nắm ca Nghiệp Vụ
+    // [YÊU CẦU 1] Chặn tự động nếu nhân viên OFF đang nắm ca Nghiệp vụ (để Admin tự làm tay)
+    if (isHardRole(target.originalRole)) {
+        return []; 
+    }
+
+    // Loại bỏ nhân viên OFF, nhân viên hiện tại, VÀ nhân viên đang nắm ca Nghiệp Vụ trong ngày đó
     let dayAssigns = scheduleData.data[target.day].filter(a => 
         a.staffId !== target.staffId && 
         a.shift !== 'OFF' &&
@@ -19,7 +24,7 @@ export function buildSmartCover(target, scheduleData) {
     
     let stats = scheduleData.stats;
 
-    // Sắp xếp ưu tiên người đang có tổng giờ công thấp nhất (Đói ca) lên đầu
+    // [YÊU CẦU 4] Ưu tiên người đang có tổng giờ công thấp nhất lên đầu
     dayAssigns.sort((a, b) => {
         let hA = stats.find(s => s.id === a.staffId)?.totalHours || 0;
         let hB = stats.find(s => s.id === b.staffId)?.totalHours || 0;
@@ -28,7 +33,7 @@ export function buildSmartCover(target, scheduleData) {
 
     let suggestions = [];
     
-    // Truy thẳng vào dữ liệu thật của ngày hôm đó để xem ca NGAY TRƯỚC KHI BẤM OFF là gì.
+    // Truy thẳng vào dữ liệu thật của ngày hôm đó để xem ca NGAY TRƯỚC KHI BẤM OFF là gì
     let realAssignInDB = scheduleData.data[target.day].find(a => a.staffId === target.staffId);
     let offShift = realAssignInDB ? realAssignInDB.shift : target.originalShift;
 
@@ -36,54 +41,56 @@ export function buildSmartCover(target, scheduleData) {
 
     const addSugg = (type, title, acts) => suggestions.push({ type, title, actions: acts });
 
+    // [YÊU CẦU 2 & 3] Bẻ ca 123
     if (offShift === '123') {
-        let bList = dayAssigns.filter(a => a.shift === '23');
-        let cList = dayAssigns.filter(a => ['45', '456'].includes(a.shift));
-        bList.forEach(b => {
-            cList.forEach(c => {
-                if (b.staffId !== c.staffId) {
-                    addSugg('chain', `Đẩy ca 1 cho ${b.name}, ghép ${c.shift} cho ${c.name}`, [
-                        { staffId: b.staffId, name: b.name, oldShift: b.shift, newShift: '123', role: target.originalRole },
-                        { staffId: c.staffId, name: c.name, oldShift: c.shift, newShift: c.shift === '45' ? '2345' : '23456', role: b.role }
+        // Tìm người đang làm 23 để nhận cục 1 (Thành 123)
+        let takeOneList = dayAssigns.filter(a => a.shift === '23'); 
+        // Tìm người đang làm 45 để nhận cục 23 (Thành 2345)
+        let takeTwentyThreeList = dayAssigns.filter(a => a.shift === '45'); 
+
+        takeOneList.forEach(taker1 => {
+            takeTwentyThreeList.forEach(taker23 => {
+                if (taker1.staffId !== taker23.staffId) {
+                    addSugg('chain', `Ghép ca 1 cho ${taker1.name}, ghép ca 23 cho ${taker23.name}`, [
+                        { staffId: taker1.staffId, name: taker1.name, oldShift: taker1.shift, newShift: '123', role: taker1.role },
+                        { staffId: taker23.staffId, name: taker23.name, oldShift: taker23.shift, newShift: '2345', role: target.originalRole }
                     ]);
                 }
             });
         });
-        let dList = dayAssigns.filter(a => ['45', '456'].includes(a.shift));
-        dList.forEach(d => {
-            addSugg('direct', `Ghép thẳng 123 cho ${d.name}`, [
-                { staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '45' ? '12345' : '123456', role: target.originalRole }
-            ]);
-        });
     }
+    // [YÊU CẦU 2 & 3] Bẻ ca 456
     else if (offShift === '456') {
-        let bList = dayAssigns.filter(a => a.shift === '45');
-        let cList = dayAssigns.filter(a => ['23', '123'].includes(a.shift));
-        bList.forEach(b => {
-            cList.forEach(c => {
-                if (b.staffId !== c.staffId) {
-                    addSugg('chain', `Đẩy ca 6 cho ${b.name}, ghép ${c.shift} cho ${c.name}`, [
-                        { staffId: b.staffId, name: b.name, oldShift: b.shift, newShift: '456', role: target.originalRole },
-                        { staffId: c.staffId, name: c.name, oldShift: c.shift, newShift: c.shift === '23' ? '2345' : '12345', role: b.role }
+        // Tìm người đang làm 45 để nhận cục 6 (Thành 456)
+        let takeSixList = dayAssigns.filter(a => a.shift === '45');
+        // Tìm người đang làm 23 để nhận cục 45 (Thành 2345)
+        let takeFortyFiveList = dayAssigns.filter(a => a.shift === '23'); 
+        
+        takeSixList.forEach(taker6 => {
+            takeFortyFiveList.forEach(taker45 => {
+                if (taker6.staffId !== taker45.staffId) {
+                    addSugg('chain', `Ghép ca 6 cho ${taker6.name}, ghép ca 45 cho ${taker45.name}`, [
+                        { staffId: taker6.staffId, name: taker6.name, oldShift: taker6.shift, newShift: '456', role: taker6.role },
+                        { staffId: taker45.staffId, name: taker45.name, oldShift: taker45.shift, newShift: '2345', role: target.originalRole }
                     ]);
                 }
             });
         });
-        let dList = dayAssigns.filter(a => ['23', '123'].includes(a.shift));
-        dList.forEach(d => {
-            addSugg('direct', `Ghép thẳng 456 cho ${d.name}`, [
-                { staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '23' ? '23456' : '123456', role: target.originalRole }
-            ]);
-        });
     }
+    // Logic ghép thẳng khi OFF ca ngắn (23 hoặc 45) -> Ghép thành 2345 (Không tạo 12345 hay 23456)
     else if (offShift === '23') {
-        let dList = dayAssigns.filter(a => ['45', '456'].includes(a.shift));
-        dList.forEach(d => addSugg('direct', `Ghép ca 23 cho ${d.name}`, [{ staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '45' ? '2345' : '23456', role: target.originalRole }]));
+        let takers = dayAssigns.filter(a => a.shift === '45');
+        takers.forEach(taker => addSugg('direct', `Ghép ca 23 cho ${taker.name}`, [
+            { staffId: taker.staffId, name: taker.name, oldShift: taker.shift, newShift: '2345', role: target.originalRole }
+        ]));
     }
     else if (offShift === '45') {
-        let dList = dayAssigns.filter(a => ['23', '123'].includes(a.shift));
-        dList.forEach(d => addSugg('direct', `Ghép ca 45 cho ${d.name}`, [{ staffId: d.staffId, name: d.name, oldShift: d.shift, newShift: d.shift === '23' ? '2345' : '12345', role: target.originalRole }]));
+        let takers = dayAssigns.filter(a => a.shift === '23');
+        takers.forEach(taker => addSugg('direct', `Ghép ca 45 cho ${taker.name}`, [
+            { staffId: taker.staffId, name: taker.name, oldShift: taker.shift, newShift: '2345', role: target.originalRole }
+        ]));
     }
+    
     return suggestions.slice(0, 5);
 }
 

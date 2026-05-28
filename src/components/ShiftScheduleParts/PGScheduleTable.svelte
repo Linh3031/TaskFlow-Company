@@ -30,6 +30,10 @@
     $: realCurrentWeekId = getWeekId(realCurrentDate);
     $: isFutureWeek = weekId > realCurrentWeekId; 
 
+    // Bộ nhớ tạm lưu trữ lịch trước khi xóa phòng trường hợp ấn nhầm
+    let lastDeletedData = null;
+    $: if (weekId) lastDeletedData = null; // Tự động hủy cache nếu đổi tuần để tránh khôi phục sai lệch tuần
+
     const SHIFT_COLORS = {
         '': 'bg-slate-50 text-slate-400 border-dashed border-slate-200',
         'OFF': 'bg-red-100 text-red-600 border-red-200 font-bold',
@@ -99,13 +103,16 @@
             return;
         }
 
-        const isConfirmed = confirm(`BẠN CÓ CHẮC CHẮN muốn xóa TOÀN BỘ lịch đã xếp của tất cả PG trong tuần [${weekLabel}] không?\nHành động này không thể hoàn tác, nhân viên sẽ phải đăng ký lại từ đầu!`);
+        const isConfirmed = confirm(`BẠN CÓ CHẮC CHẮN muốn xóa TOÀN BỘ lịch đã xếp của tất cả PG trong tuần [${weekLabel}] không?\nHệ thống sẽ lưu bản sao lưu tạm thời để bạn khôi phục nếu lỡ tay bấm nhầm.`);
         if (!isConfirmed) return;
 
         try {
             isSaving = true;
             const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
             
+            // Sao lưu dữ liệu lịch hiện tại trước khi thực hiện xóa sạch
+            lastDeletedData = JSON.parse(JSON.stringify(pgScheduleData));
+
             // Xây dựng tập dữ liệu trống cho tất cả PG đang có mặt trong kho
             const resetData = {};
             pgList.forEach(pg => {
@@ -118,6 +125,29 @@
         } catch (e) {
             console.error("Lỗi khi xóa lịch PG:", e);
             alert("Lỗi hệ thống khi xóa lịch: " + e.message);
+        } finally {
+            isSaving = false;
+        }
+    }
+
+    // [CodeGenesis] HÀM KHÔI PHỤC LỊCH CHO ADMIN
+    async function restoreSchedules() {
+        if (!isAdmin || !lastDeletedData) return;
+
+        const isConfirmed = confirm("Bạn có chắc chắn muốn KHÔI PHỤC lại toàn bộ dữ liệu lịch vừa xóa trước đó không?");
+        if (!isConfirmed) return;
+
+        try {
+            isSaving = true;
+            const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
+            
+            // Đẩy lại bản sao lưu tạm thời lên Firestore
+            await setDoc(ref, { data: lastDeletedData }, { merge: true });
+            lastDeletedData = null; // Khôi phục thành công -> Giải phóng bộ nhớ tạm
+            alert("Đã khôi phục dữ liệu lịch PG thành công!");
+        } catch (e) {
+            console.error("Lỗi khi khôi phục lịch PG:", e);
+            alert("Lỗi hệ thống khi khôi phục lịch: " + e.message);
         } finally {
             isSaving = false;
         }
@@ -219,48 +249,50 @@
 
 <div class="w-full bg-white rounded-xl shadow-sm border border-pink-200 overflow-hidden flex flex-col h-full animate-fadeIn">
     
-    <div class="p-2 sm:p-3 bg-pink-50 border-b border-pink-100 flex flex-row justify-between items-center gap-2 shrink-0">
-        
-        <div class="hidden sm:flex items-center gap-2 text-pink-700 shrink-0">
-            <span class="material-icons-round text-xl">face_retouching_natural</span>
-            <div>
-                <h3 class="font-bold text-sm">Lịch Làm Việc PG (Tổng: {pgList.length} PG)</h3>
-                <p class="text-[10px] opacity-80">
-                    {#if !isAdmin && !isFutureWeek}
-                        <span class="text-red-500 font-bold flex items-center gap-1">
-                            <span class="material-icons-round text-[10px]">lock</span> Tuần này đã khóa, không thể sửa lịch!
-                        </span>
-                    {:else}
-                        Chọn ca từ danh sách xổ xuống
-                    {/if}
-                </p>
-            </div>
-        </div>
-
-        <div class="flex items-center justify-between sm:justify-center w-full sm:w-auto gap-2 bg-white px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg border border-pink-200 shadow-sm shrink-0">
+    <div class="p-2 bg-pink-50 border-b border-pink-100 flex flex-col gap-1.5 shrink-0">
+        <div class="flex justify-between items-center gap-2 w-full">
             
-            {#if !isAdmin}
-                <button class="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-indigo-100 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 shrink-0 shadow-sm transition-colors" on:click={scrollToMyRow} title="Đến lịch của tôi">
-                     <span class="material-icons-round text-[18px]">my_location</span>
-                </button>
-            {:else}
-                <button class="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-red-100 bg-red-50 text-red-600 rounded border border-red-200 shrink-0 shadow-sm transition-colors" on:click={clearAllSchedules} title="Xóa toàn bộ lịch tuần này">
-                     <span class="material-icons-round text-[18px]">delete_sweep</span>
-                </button>
-            {/if}
-
-            <button class="w-7 h-7 flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded" on:click={() => changeWeek(-1)}>
-                <span class="material-icons-round text-base">chevron_left</span>
-            </button>
-    
-            <div class="text-center flex-1 sm:min-w-[120px]">
-                <div class="font-black text-pink-700 text-sm tracking-tight">{weekLabel}</div>
-                <div class="hidden sm:block text-[9px] text-pink-400 font-bold uppercase mt-0.5">Tuần: {weekId}</div>
+            <div class="flex items-center gap-2 shrink-0">
+                <h3 class="font-bold text-xs sm:text-sm text-pink-700 whitespace-nowrap">Lịch PG ({pgList.length})</h3>
+                
+                <div class="flex items-center bg-white rounded border border-pink-200 shadow-sm shrink-0 h-7">
+                    <button class="w-6 h-full flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded-l" on:click={() => changeWeek(-1)}>
+                        <span class="material-icons-round text-[14px]">chevron_left</span>
+                    </button>
+                    <div class="px-1.5 sm:px-2 text-[10px] sm:text-xs font-black text-pink-700 tracking-tight select-none flex items-center h-full">
+                        {weekLabel} <span class="hidden sm:inline font-normal text-pink-400 ml-1">({weekId})</span>
+                    </div>
+                    <button class="w-6 h-full flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded-r" on:click={() => changeWeek(1)}>
+                        <span class="material-icons-round text-[14px]">chevron_right</span>
+                    </button>
+                </div>
             </div>
-            <button class="w-7 h-7 flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded" on:click={() => changeWeek(1)}>
-                <span class="material-icons-round text-base">chevron_right</span>
-            </button>
+
+            <div class="flex items-center gap-1.5 shrink-0">
+                {#if !isAdmin}
+                    <button class="w-7 h-7 flex items-center justify-center hover:bg-indigo-100 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 shadow-sm transition-colors" on:click={scrollToMyRow} title="Đến lịch của tôi">
+                         <span class="material-icons-round text-[16px]">my_location</span>
+                    </button>
+                {:else}
+                    {#if lastDeletedData}
+                        <button class="h-7 px-1.5 sm:px-2 flex items-center justify-center gap-1 bg-green-50 hover:bg-green-100 text-green-600 border border-green-100 rounded text-[11px] font-bold shadow-sm animate-pulse transition-colors" on:click={restoreSchedules} title="Khôi phục dữ liệu vừa xóa nhầm">
+                             <span class="material-icons-round text-[16px]">restore</span> 
+                             <span class="hidden sm:inline">Khôi Phục</span>
+                        </button>
+                    {/if}
+                    <button class="h-7 px-1.5 sm:px-2 flex items-center justify-center gap-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 rounded text-[11px] font-bold shadow-sm transition-colors" on:click={clearAllSchedules} title="Xóa toàn bộ lịch tuần này">
+                         <span class="material-icons-round text-[16px]">delete_sweep</span> 
+                         <span class="hidden sm:inline">Xóa Lịch</span>
+                    </button>
+                {/if}
+            </div>
         </div>
+
+        {#if !isAdmin && !isFutureWeek}
+            <div class="text-[9px] text-red-500 font-bold flex items-center gap-1">
+                <span class="material-icons-round text-[10px]">lock</span> Tuần này đã khóa, không thể sửa lịch!
+            </div>
+        {/if}
     </div>
 
     <div class="flex-1 overflow-auto relative p-1.5 sm:p-4 bg-slate-50">
