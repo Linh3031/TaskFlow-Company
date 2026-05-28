@@ -2,10 +2,8 @@
     import { onMount, onDestroy } from 'svelte';
     import { db } from '../../lib/firebase';
     import { collection, query, where, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
-    
     // Lấy thông tin User đang đăng nhập để phân quyền xếp ca
-    import { currentUser } from '../../lib/stores'; 
-    
+    import { currentUser } from '../../lib/stores';
     import PGInfoModal from './PGInfoModal.svelte';
     import PGDayStatsModal from './PGDayStatsModal.svelte';
 
@@ -23,12 +21,10 @@
 
     let selectedPGForModal = null;
     let selectedDayForStats = null;
-
     // Quản lý Tuần
     let currentDate = new Date();
     $: weekId = getWeekId(currentDate);
     $: weekLabel = getWeekLabel(currentDate);
-
     // [CodeGenesis v2] LOGIC KHÓA THỜI GIAN
     let realCurrentDate = new Date();
     $: realCurrentWeekId = getWeekId(realCurrentDate);
@@ -42,7 +38,6 @@
         'Gãy': 'bg-purple-100 text-purple-700 border-purple-200 font-bold',
         'Full': 'bg-teal-100 text-teal-700 border-teal-200 font-bold'
     };
-
     const CATEGORY_COLORS = [
         'bg-blue-100 text-blue-800 border-blue-200',
         'bg-green-100 text-green-800 border-green-200',
@@ -51,9 +46,8 @@
         'bg-teal-100 text-teal-800 border-teal-200',
         'bg-rose-100 text-rose-800 border-rose-200'
     ];
-
     const DAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
-
+    
     function getWeekId(d) {
         const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
         const dayNum = date.getUTCDay() || 7;
@@ -86,7 +80,6 @@
         if (row) {
             // Cuộn trượt mượt mà tới dòng của PG
             row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
             // Nháy sáng ô Tên để gây chú ý
             const td = row.querySelector('td');
             if (td) {
@@ -98,9 +91,41 @@
         }
     }
 
+    // [CodeGenesis] HÀM XÓA TOÀN BỘ LỊCH CHO ADMIN
+    async function clearAllSchedules() {
+        if (!isAdmin) return;
+        if (pgList.length === 0) {
+            alert("Không có nhân sự PG nào trong kho hiện tại để xóa lịch!");
+            return;
+        }
+
+        const isConfirmed = confirm(`BẠN CÓ CHẮC CHẮN muốn xóa TOÀN BỘ lịch đã xếp của tất cả PG trong tuần [${weekLabel}] không?\nHành động này không thể hoàn tác, nhân viên sẽ phải đăng ký lại từ đầu!`);
+        if (!isConfirmed) return;
+
+        try {
+            isSaving = true;
+            const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
+            
+            // Xây dựng tập dữ liệu trống cho tất cả PG đang có mặt trong kho
+            const resetData = {};
+            pgList.forEach(pg => {
+                resetData[pg.id] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
+            });
+
+            // Ghi đè cập nhật lên Firestore
+            await setDoc(ref, { data: resetData }, { merge: true });
+            alert("Đã xóa sạch toàn bộ lịch PG của tuần này thành công!");
+        } catch (e) {
+            console.error("Lỗi khi xóa lịch PG:", e);
+            alert("Lỗi hệ thống khi xóa lịch: " + e.message);
+        } finally {
+            isSaving = false;
+        }
+    }
+
     $: if (selectedViewStore) loadPGs();
     $: if (selectedViewStore && weekId) loadScheduleForWeek();
-
+    
     async function loadPGs() {
         try {
             loading = true;
@@ -133,10 +158,37 @@
         const isOwner = $currentUser?.username === pgUsername;
         
         if (!isAdmin) {
-            if (!isOwner) return;
+            if (!isOwner) {
+                pgScheduleData = { ...pgScheduleData }; // Force UI Sync
+                return;
+            }
             if (!isFutureWeek) {
                 alert("Bạn chỉ có thể đăng ký/chỉnh sửa lịch cho các tuần tiếp theo!");
+                pgScheduleData = { ...pgScheduleData }; // Force UI Sync
                 return;
+            }
+
+            // [CodeGenesis] LOGIC GIỚI HẠN OFF 50%
+            if (value === 'OFF') {
+                const currentPG = pgList.find(p => p.id === pgId);
+                const pgCategory = currentPG?.category || 'Khác';
+                const groupPGs = pgList.filter(p => (p.category || 'Khác') === pgCategory);
+                
+                // Làm tròn xuống theo yêu cầu
+                const maxOffs = Math.floor(groupPGs.length / 2);
+                
+                // Đếm số lượng PG trong NHÓM NÀY đã OFF ngày này (bỏ qua bản thân người đang sửa)
+                const currentOffCount = groupPGs.filter(p => 
+                    p.id !== pgId && 
+                    pgScheduleData[p.id] && 
+                    pgScheduleData[p.id][day] === 'OFF'
+                ).length;
+
+                if (currentOffCount >= maxOffs) {
+                    alert("Đã hết lượt off của ngày này, vui lòng chọn ngày khác hoặc liên hệ QL");
+                    pgScheduleData = { ...pgScheduleData }; // Ép Svelte render lại thẻ select về giá trị cũ
+                    return;
+                }
             }
         }
 
@@ -154,7 +206,8 @@
                 const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
                 await setDoc(ref, { data: pgScheduleData }, { merge: true });
                 isSaving = false;
-            } catch (e) { console.error("Lỗi lưu lịch PG:", e); isSaving = false; }
+            } 
+            catch (e) { console.error("Lỗi lưu lịch PG:", e); isSaving = false; }
         }, 800);
     }
 
@@ -188,13 +241,18 @@
             
             {#if !isAdmin}
                 <button class="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-indigo-100 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 shrink-0 shadow-sm transition-colors" on:click={scrollToMyRow} title="Đến lịch của tôi">
-                    <span class="material-icons-round text-[18px]">my_location</span>
+                     <span class="material-icons-round text-[18px]">my_location</span>
+                </button>
+            {:else}
+                <button class="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-red-100 bg-red-50 text-red-600 rounded border border-red-200 shrink-0 shadow-sm transition-colors" on:click={clearAllSchedules} title="Xóa toàn bộ lịch tuần này">
+                     <span class="material-icons-round text-[18px]">delete_sweep</span>
                 </button>
             {/if}
 
             <button class="w-7 h-7 flex items-center justify-center hover:bg-pink-100 text-pink-600 rounded" on:click={() => changeWeek(-1)}>
                 <span class="material-icons-round text-base">chevron_left</span>
             </button>
+    
             <div class="text-center flex-1 sm:min-w-[120px]">
                 <div class="font-black text-pink-700 text-sm tracking-tight">{weekLabel}</div>
                 <div class="hidden sm:block text-[9px] text-pink-400 font-bold uppercase mt-0.5">Tuần: {weekId}</div>
@@ -223,7 +281,7 @@
                             <span>NHÓM: {category.toUpperCase()}</span>
                             <span class="text-[9px] sm:text-[10px] bg-white/70 px-2 py-0.5 rounded-full border border-white/50">{pgs.length} NV</span>
                         </div>
-                        
+  
                         <div class="overflow-x-auto relative scroll-smooth pb-1.5 sm:pb-2">
                             <table class="w-full text-center text-xs border-collapse">
                                 <thead class="bg-slate-50 text-slate-500">
