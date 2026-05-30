@@ -16,8 +16,9 @@
   import DailyChecklist from './components/DailyChecklist.svelte'; 
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
+  import SknvDashboard from './components/SknvDashboard.svelte';
 
-  const APP_VERSION = 20; 
+  const APP_VERSION = 21; 
   let showUpdatePrompt = false;
 
   // =========================================================================
@@ -295,7 +296,7 @@
      <nav id="tab-nav-container" class="tab-nav">
         {#each [
             {id:'8nttt', icon:'fact_check', label:'8NTTT', color:'#00bcd4'},
-            {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7'}, 
+            {id:'sknv', icon:'health_and_safety', label:'SKNV', color:'#10b981'},
             {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'},
             {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'}, 
             {id:'handover', icon:'assignment_ind', label:'Bàn Giao', color:'#9c27b0'}
@@ -315,8 +316,8 @@
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
+                    {#if activeTab==='sknv'}⚕️ Sức Khỏe Nhân Viên{/if}
                     {#if activeTab==='8nttt'}📋 Kiểm tra 8NTTT{/if}
-                    {#if activeTab==='installment'}🧮 Tính Trả Góp{/if} 
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                     {#if activeTab==='handover'}🤝 Bàn Giao{/if}
                  {/if}
@@ -345,6 +346,7 @@
 
         {#if activeTab === 'installment'} <InstallmentCalc /> 
         {:else if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> 
+        {:else if activeTab === 'sknv'} <SknvDashboard />
         {:else if activeTab === '8nttt'} <DailyChecklist activeStoreId={$activeStoreId} dateStr={selectedDate} />
         {:else} 
             {#if activeTab === 'handover'} <HandoverInput /> {/if}
