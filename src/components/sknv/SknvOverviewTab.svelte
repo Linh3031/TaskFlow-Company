@@ -11,9 +11,9 @@
     <div class="bg-amber-50 p-3 sm:p-4 rounded-2xl shadow-sm border border-amber-100 flex flex-col justify-between relative">
         <span class="text-[10px] text-amber-700 font-bold uppercase tracking-wide">Doanh thu Thực</span>
         <div class="text-base sm:text-lg font-black text-amber-900 mt-2">{fmtRevK(data.doanhThu)}</div>
-        {#if data.rankDtThuc && data.totalEmployees}
+        {#if (data.rankDtThuc != null || data.rankDt != null || data.rankDoanhThu != null) && data.totalEmployees}
             <div class="absolute top-2 right-2 bg-amber-200 text-amber-800 text-[9px] px-1.5 py-0.5 rounded font-black shadow-sm">
-                #{data.rankDtThuc}/{data.totalEmployees}
+                #{data.rankDtThuc ?? data.rankDt ?? data.rankDoanhThu}/{data.totalEmployees}
             </div>
         {/if}
     </div>
@@ -52,7 +52,7 @@
         <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Dự kiến so Tháng trước</span>
         <div class="mt-1">
             <div class="text-lg font-black text-white flex items-center gap-1">
-                {fmtRevK(Math.abs(data.duKienSoCK || 0))}
+                {#if (data.duKienSoCK || 0) < 0}-{/if}{fmtRevK(Math.abs(data.duKienSoCK || 0))}
                 {#if (data.duKienSoCK || 0) >= 0}
                     <i class="material-icons-round text-sm text-emerald-400">arrow_upward</i>
                 {:else}

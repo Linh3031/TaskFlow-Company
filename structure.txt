@@ -30,6 +30,7 @@ src/components/admin/AdminInstallmentConfig.svelte
 src/components/admin/schedule
 src/components/admin/schedule/AdminScheduleToolbar.svelte
 src/components/admin/schedule/ScheduleMatrix.svelte
+src/components/admin/schedule/StaffReorderModal.svelte
 src/components/admin/schedule/ManualScheduleUpload.svelte
 src/components/admin/schedule/AdminEditShiftModal.svelte
 src/components/admin/schedule/AdminDayStatsModal.svelte
@@ -68,6 +69,11 @@ src/components/DailyChecklistParts/ChecklistImageGrid.svelte
 src/components/DailyChecklistParts/AreaAdminModal.svelte
 src/components/DailyChecklistParts/ChecklistHeader.svelte
 src/components/TourGuide.svelte
+src/components/sknv
+src/components/sknv/SknvOverviewTab.svelte
+src/components/sknv/SknvCompetitionTab.svelte
+src/components/sknv/SknvCategoryTab.svelte
+src/components/SknvDashboard.svelte
 src/lib
 src/lib/scheduleGenerator.js
 src/lib/stores.js

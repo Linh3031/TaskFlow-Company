@@ -38,8 +38,8 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <tr class="bg-blue-50/50 border-b border-blue-100 text-blue-900">
-                        <td class="p-3 text-[12px] font-black uppercase sticky left-0 bg-blue-50/50 z-10 border-r border-blue-100">TỔNG CỘNG</td>
+                    <tr class="bg-blue-50 border-b border-blue-100 text-blue-900">
+                        <td class="p-3 text-[12px] font-black uppercase sticky left-0 bg-blue-50 z-10 border-r border-blue-100">TỔNG CỘNG</td>
                         <td class="p-3 text-right font-black text-blue-900">{fmtNum(total.sl)}</td>
                         <td class="p-3 text-right font-black text-blue-700">{fmtK(total.dt)}</td>
                         <td class="p-3 text-right font-bold text-orange-700">{fmtPrice(total.dt, total.sl)}</td>
@@ -60,8 +60,8 @@
 
                         {#if expanded[nganh.name]}
                             {#each nganh.children as nhom}
-                                <tr class="bg-gray-50/70 border-b border-white hover:bg-gray-100 transition-colors">
-                                    <td class="p-2.5 pl-8 text-[11px] font-semibold text-gray-600 flex items-center gap-1.5 sticky left-0 bg-gray-50/70 z-10 border-r border-white">
+                                <tr class="bg-gray-50 border-b border-white hover:bg-gray-100 transition-colors">
+                                    <td class="p-2.5 pl-8 text-[11px] font-semibold text-gray-600 flex items-center gap-1.5 sticky left-0 bg-gray-50 z-10 border-r border-white">
                                         <div class="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
                                         <span class="truncate max-w-[160px]" title={nhom.name}>{nhom.name}</span>
                                     </td>

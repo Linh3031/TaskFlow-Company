@@ -5,7 +5,6 @@
     $: listDat = thiDuaList.filter(i => (i.hoanThanhValue || 0) >= 100).sort((a, b) => b.hoanThanhValue - a.hoanThanhValue);
     $: listSapDat = thiDuaList.filter(i => (i.hoanThanhValue || 0) >= 80 && (i.hoanThanhValue || 0) < 100).sort((a, b) => b.hoanThanhValue - a.hoanThanhValue);
     $: listCoGang = thiDuaList.filter(i => (i.hoanThanhValue || 0) < 80).sort((a, b) => b.hoanThanhValue - a.hoanThanhValue);
-
     const fmtNum = (val) => new Intl.NumberFormat('vi-VN').format(val || 0);
     const fmtPct = (val) => ((val || 0)).toFixed(0) + '%';
 </script>
@@ -23,9 +22,11 @@
                     <h3 class="text-xs font-black uppercase tracking-wider mb-2 {colorClass} flex items-center gap-1">
                         <div class="w-2 h-2 rounded-full {barColor}"></div> {title} ({list.length})
                     </h3>
+    
                     <div class="grid grid-cols-2 gap-2">
                         {#each list as item}
                             <div class="bg-white border border-gray-100 rounded-xl p-2.5 shadow-sm flex flex-col justify-between">
+                 
                                 <h4 class="font-bold text-gray-700 text-[11px] leading-tight mb-2 line-clamp-2 min-h-[30px]" title={item.name}>{item.name}</h4>
                                 
                                 <div class="w-full bg-gray-100 rounded-full h-2 mb-2 relative overflow-hidden">
@@ -46,8 +47,8 @@
             {/if}
         {/snippet}
 
-        {@render renderGroup('Hoàn Thành Tốt', listDat, 'text-emerald-600', 'bg-emerald-500')}
-        {@render renderGroup('Sắp Đạt Kế Hoạch', listSapDat, 'text-blue-600', 'bg-blue-500')}
+        {@render renderGroup('Hoàn Thành Tốt', listDat, 'text-blue-600', 'bg-blue-500')}
+        {@render renderGroup('Sắp Đạt Kế Hoạch', listSapDat, 'text-emerald-600', 'bg-emerald-500')}
         {@render renderGroup('Cần Nỗ Lực Hơn', listCoGang, 'text-orange-500', 'bg-orange-400')}
     {/if}
 </div>
