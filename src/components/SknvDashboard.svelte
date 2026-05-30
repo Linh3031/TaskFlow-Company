@@ -6,7 +6,7 @@
 
     import SknvOverviewTab from './sknv/SknvOverviewTab.svelte';
     import SknvCompetitionTab from './sknv/SknvCompetitionTab.svelte';
-    import SknvCategoryTab from './sknv/SknvCategoryTab.svelte'; // [MỚI] Import Tab 3
+    import SknvCategoryTab from './sknv/SknvCategoryTab.svelte';
 
     let loading = true;
     let errorMsg = '';
@@ -17,7 +17,11 @@
     let selectedEmpId = '';
 
     $: role = ($currentUser?.role || $currentUser?.chucDanh || '').toUpperCase();
-    $: isUserAdmin = role.includes('ADMIN') || role.includes('QUAN LY') || role.includes('QUẢN LÝ') || role.includes('AM');
+    
+    // Phân cấp quyền cụ thể
+    $: isSuperAdmin = role.includes('ADMIN') || role.includes('AM');
+    $: isStoreAdmin = role.includes('QUAN LY') || role.includes('QUẢN LÝ');
+    $: isUserAdmin = isSuperAdmin || isStoreAdmin;
 
     onMount(async () => {
         if (role.includes('PG')) {
@@ -28,16 +32,37 @@
 
         const rawUsername = String($currentUser?.username || '');
         const myEmpId = rawUsername.match(/\d+/)?.[0] || rawUsername;
+        const myWarehouse = String($currentUser?.maKho || $currentUser?.ma_kho || '').trim();
 
         try {
             if (isUserAdmin) {
                 const snap = await getDocs(collection(dbDoanhThu, 'sknv_final_data'));
                 if (!snap.empty) {
-                    allEmployeesData = snap.docs.map(d => d.data());
-                    const me = allEmployeesData.find(e => e.maNV === myEmpId);
-                    sknvData = me || allEmployeesData[0];
-                    selectedEmpId = sknvData.maNV;
-                } else { errorMsg = "Chưa có dữ liệu trên Cloud."; }
+                    let rawList = snap.docs.map(d => d.data());
+                    
+                    // RÀNG BUỘC THEO MÃ KHO: Nếu chỉ là Quản lý kho, lọc nghiêm ngặt theo mã kho của user đó
+                    if (isStoreAdmin && !isSuperAdmin) {
+                        if (!myWarehouse) {
+                            errorMsg = "Tài khoản quản lý của bạn chưa cấu hình Mã Kho.";
+                            loading = false;
+                            return;
+                        }
+                        allEmployeesData = rawList.filter(emp => String(emp.maKho).trim() === myWarehouse);
+                    } else {
+                        // Super Admin hoặc AM được xem toàn bộ
+                        allEmployeesData = rawList;
+                    }
+
+                    if (allEmployeesData.length > 0) {
+                        const me = allEmployeesData.find(e => e.maNV === myEmpId);
+                        sknvData = me || allEmployeesData[0];
+                        selectedEmpId = sknvData.maNV;
+                    } else {
+                        errorMsg = `Kho ${myWarehouse} của bạn hiện chưa có dữ liệu đồng bộ.`;
+                    }
+                } else { 
+                    errorMsg = "Chưa có dữ liệu trên Cloud."; 
+                }
             } else {
                 if (!myEmpId) { errorMsg = "Không tìm thấy mã số nhân viên."; loading = false; return; }
                 const docRef = doc(dbDoanhThu, 'sknv_final_data', myEmpId);
