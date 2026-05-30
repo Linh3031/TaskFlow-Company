@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
     import { dbDoanhThu } from '../lib/firebase';
-    import { currentUser } from '../lib/stores.js'; 
+    import { currentUser, activeStoreId } from '../lib/stores.js'; // [ĐÃ SỬA] Import thêm activeStoreId
 
     import SknvOverviewTab from './sknv/SknvOverviewTab.svelte';
     import SknvCompetitionTab from './sknv/SknvCompetitionTab.svelte';
@@ -17,22 +17,27 @@
     let selectedEmpId = '';
 
     $: role = ($currentUser?.role || $currentUser?.chucDanh || '').toUpperCase();
-    
-    // Phân cấp quyền cụ thể
     $: isSuperAdmin = role.includes('ADMIN') || role.includes('AM');
     $: isStoreAdmin = role.includes('QUAN LY') || role.includes('QUẢN LÝ');
     $: isUserAdmin = isSuperAdmin || isStoreAdmin;
 
-    onMount(async () => {
-        if (role.includes('PG')) {
-            errorMsg = "Tính năng này không dành cho cấp bậc PG.";
-            loading = false;
-            return;
-        }
+    // [ĐÃ SỬA] CHUYỂN LOGIC TẢI DỮ LIỆU THÀNH REACTIVE STATEMENT ĐỂ LẮNG NGHE BỘ LỌC KHO
+    $: if (!role.includes('PG')) {
+        fetchDataByStore($activeStoreId);
+    } else {
+        errorMsg = "Tính năng này không dành cho cấp bậc PG.";
+        loading = false;
+    }
 
+    async function fetchDataByStore(currentStoreFilter) {
+        loading = true;
+        errorMsg = '';
+        
         const rawUsername = String($currentUser?.username || '');
         const myEmpId = rawUsername.match(/\d+/)?.[0] || rawUsername;
-        const myWarehouse = String($currentUser?.maKho || $currentUser?.ma_kho || '').trim();
+        
+        // Xác định mã kho cần lọc: Ưu tiên bộ lọc toàn cục, nếu trống thì dùng mã kho của cơ sở user
+        const targetWarehouse = String(currentStoreFilter || $currentUser?.maKho || $currentUser?.ma_kho || '').trim();
 
         try {
             if (isUserAdmin) {
@@ -40,40 +45,47 @@
                 if (!snap.empty) {
                     let rawList = snap.docs.map(d => d.data());
                     
-                    // RÀNG BUỘC THEO MÃ KHO: Nếu chỉ là Quản lý kho, lọc nghiêm ngặt theo mã kho của user đó
+                    // Nếu là Quản lý kho thông thường, bắt buộc lọc theo mã kho của họ
                     if (isStoreAdmin && !isSuperAdmin) {
-                        if (!myWarehouse) {
-                            errorMsg = "Tài khoản quản lý của bạn chưa cấu hình Mã Kho.";
-                            loading = false;
-                            return;
-                        }
-                        allEmployeesData = rawList.filter(emp => String(emp.maKho).trim() === myWarehouse);
+                        const myPersonalWarehouse = String($currentUser?.maKho || $currentUser?.ma_kho || '').trim();
+                        allEmployeesData = rawList.filter(emp => String(emp.maKho).trim() === myPersonalWarehouse);
                     } else {
-                        // Super Admin hoặc AM được xem toàn bộ
-                        allEmployeesData = rawList;
+                        // Nếu là Super Admin/AM: Lọc nghiêm ngặt theo Mã kho đang được chọn trên Header
+                        if (targetWarehouse && targetWarehouse !== 'ALL') {
+                            allEmployeesData = rawList.filter(emp => String(emp.maKho).trim() === targetWarehouse);
+                        } else {
+                            allEmployeesData = rawList; // Hiện tất cả nếu chọn ALL hoặc không có bộ lọc
+                        }
                     }
 
                     if (allEmployeesData.length > 0) {
+                        // Ưu tiên chọn chính mình nếu có trong danh sách kho đang lọc, nếu không thì chọn người đầu tiên
                         const me = allEmployeesData.find(e => e.maNV === myEmpId);
                         sknvData = me || allEmployeesData[0];
                         selectedEmpId = sknvData.maNV;
                     } else {
-                        errorMsg = `Kho ${myWarehouse} của bạn hiện chưa có dữ liệu đồng bộ.`;
+                        sknvData = null;
+                        allEmployeesData = [];
+                        errorMsg = `Kho ${targetWarehouse || 'được chọn'} hiện chưa có dữ liệu đồng bộ sức khỏe.`;
                     }
                 } else { 
                     errorMsg = "Chưa có dữ liệu trên Cloud."; 
                 }
             } else {
+                // Tài khoản nhân viên thông thường chỉ lấy duy nhất hồ sơ của chính mình
                 if (!myEmpId) { errorMsg = "Không tìm thấy mã số nhân viên."; loading = false; return; }
                 const docRef = doc(dbDoanhThu, 'sknv_final_data', myEmpId);
                 const snap = await getDoc(docRef);
-                if (snap.exists()) { sknvData = snap.data(); } 
-                else { errorMsg = `Chưa có dữ liệu đồng bộ cho mã NV ${myEmpId}.`; }
+                if (snap.exists()) { 
+                    sknvData = snap.data(); 
+                } else { 
+                    errorMsg = `Chưa có dữ liệu đồng bộ cho mã NV ${myEmpId}.`; 
+                }
             }
         } catch (e) {
             errorMsg = "Không thể kết nối đến máy chủ dữ liệu.";
         } finally { loading = false; }
-    });
+    }
 
     function handleAdminSelect(e) { sknvData = allEmployeesData.find(emp => emp.maNV === e.target.value); }
 </script>
