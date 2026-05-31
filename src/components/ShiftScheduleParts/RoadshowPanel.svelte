@@ -8,40 +8,44 @@
 
     // --- LOGIC TÍNH NGÀY MẶC ĐỊNH ---
     function initDates() {
-        const today = new Date();
-        const start = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-        const threeDaysLater = new Date(today);
-        threeDaysLater.setDate(today.getDate() + 2);
-        // Chọn khoảng 3 ngày
-        const end = `${threeDaysLater.getFullYear()}-${String(threeDaysLater.getMonth()+1).padStart(2,'0')}-${String(threeDaysLater.getDate()).padStart(2,'0')}`;
-        return { start, end };
+        return { start: '', end: '' }; 
     }
 
     let startDate = initDates().start;
     let endDate = initDates().end;
-    let roadshowDays = [];
+    let roadshowDays = []; // Mảng ngày do Admin chọn từ Date Picker
     
     // Data lưu trữ dưới dạng: { '2026-03-04': { morning: [], afternoon: [] }, ... }
     let roadshowData = {};
     let allStaff = []; 
     let loading = false;
     let isSaving = false;
-    let unsubscribe = null;
     
+    let unsubscribe = null;
+    let unsubscribeStaff = null; 
+
     // State cho Modal Search
     let showSearchModal = false;
     let targetDate = '';
     let targetSlot = ''; // 'morning' | 'afternoon'
     let searchQuery = '';
 
-    // Lắng nghe sự thay đổi của khoảng ngày để tạo mảng các ngày
+    // Lắng nghe sự thay đổi của khoảng ngày để Admin thao tác
     $: {
-        if (startDate && endDate && startDate <= endDate) {
+        if (isAdmin && startDate && endDate && startDate <= endDate) {
             roadshowDays = getDatesInRange(startDate, endDate);
         } else {
             roadshowDays = [];
         }
     }
+
+    // [CodeGenesis Fix]: Hợp nhất danh sách ngày hiển thị (Các ngày đã có lịch + Các ngày Admin đang chọn)
+    $: displayDays = Array.from(new Set([
+        ...roadshowDays,
+        ...Object.keys(roadshowData).filter(d => 
+            (roadshowData[d]?.morning?.length || 0) > 0 || (roadshowData[d]?.afternoon?.length || 0) > 0
+        )
+    ])).sort();
 
     // --- UTILS ---
     function getDatesInRange(startStr, endStr) {
@@ -74,36 +78,43 @@
         return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
     }
 
-    // --- LOAD DỮ LIỆU ---
-    onMount(async () => {
-        if (selectedViewStore) {
-            const q = query(collection(db, 'users'), where('storeIds', 'array-contains', selectedViewStore));
-            const snap = await getDocs(q);
+    // --- LẮNG NGHE NHÂN SỰ THỜI GIAN THỰC ---
+    $: if (selectedViewStore) {
+        if (unsubscribeStaff) unsubscribeStaff();
+        const q = query(collection(db, 'users'), where('storeIds', 'array-contains', selectedViewStore));
+        unsubscribeStaff = onSnapshot(q, (snap) => {
             allStaff = snap.docs.map(d => ({ 
                 id: d.id, 
                 name: d.data().name, 
                 username: d.data().username,
                 role: d.data().role,
-                type: d.data().role === 'pg' ? 'pg' : 'nv'
+                type: d.data().role === 'pg' ? 'pg' : 'nv',
+                roadshowMode: d.data().roadshowMode // Đồng bộ cấu hình cùng ca/khác ca
             }));
-        }
-    });
+        }, (err) => {
+            console.error("Lỗi đồng bộ danh sách nhân sự:", err);
+        });
+    }
 
-    $: if (selectedViewStore && roadshowDays.length > 0) {
+    $: if (selectedViewStore) {
         loadRoadshowRange();
     }
 
     function loadRoadshowRange() {
         if (unsubscribe) unsubscribe();
-        const q = query(collection(db, 'stores', selectedViewStore, 'roadshows'), 
-                        where('date', '>=', startDate), 
-                        where('date', '<=', endDate));
         
+        // Quét mọi lịch từ đầu tháng hiện tại hất về tương lai (bao gồm cả tháng sau, tháng tới...)
+        const today = new Date();
+        const firstDayOfMonth = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
+        const queryStart = (isAdmin && startDate && startDate < firstDayOfMonth) ? startDate : firstDayOfMonth;
+
+        const q = query(collection(db, 'stores', selectedViewStore, 'roadshows'), 
+                        where('date', '>=', queryStart));
+                        
         unsubscribe = onSnapshot(q, (snap) => {
             let newData = {};
-            // Khởi tạo khung rỗng cho tất cả các ngày trong mảng
             roadshowDays.forEach(d => newData[d] = { morning: [], afternoon: [] });
-            // Ghi đè dữ liệu từ Cloud vào
+            
             snap.forEach(doc => {
                 newData[doc.id] = doc.data().data || { morning: [], afternoon: [] };
             });
@@ -111,15 +122,23 @@
         });
     }
 
-    // --- THUẬT TOÁN XÓA TOÀN BỘ LỊCH (NEW) ---
+    // --- THUẬT TOÁN XÓA TOÀN BỘ LỊCH ---
     async function clearSchedule() {
         if (!isAdmin) return;
-        if (!confirm('⚠️ CẢNH BÁO: Hệ thống sẽ XÓA TRẮNG toàn bộ nhân sự trong các ngày bạn đang chọn. Bạn chắc chắn chứ?')) return;
         
+        // Chế độ xóa: Nếu Admin có chọn ngày thì chỉ xóa các ngày đó. Nếu không chọn thì xóa sạch lịch đang hiển thị.
+        const targets = roadshowDays.length > 0 ? roadshowDays : displayDays;
+        
+        if (targets.length === 0) {
+            alert("Không tìm thấy dữ liệu lịch nào đang hiển thị để thực hiện xóa!");
+            return;
+        }
+
+        if (!confirm(`⚠️ CẢNH BÁO: Hệ thống sẽ XÓA TRẮNG toàn bộ nhân sự trong ${targets.length} ngày đang được chọn/hiển thị. Bạn chắc chắn chứ?`)) return;
         loading = true;
         try {
             const batch = writeBatch(db);
-            for (let dStr of roadshowDays) {
+            for (let dStr of targets) {
                 const ref = doc(db, 'stores', selectedViewStore, 'roadshows', dStr);
                 batch.set(ref, {
                     date: dStr,
@@ -128,6 +147,14 @@
                 }, { merge: true });
             }
             await batch.commit();
+            
+            if (roadshowDays.length === 0) {
+                targets.forEach(d => {
+                    if (roadshowData[d]) roadshowData[d] = { morning: [], afternoon: [] };
+                });
+                roadshowData = { ...roadshowData };
+            }
+            alert("Đã xóa dữ liệu lịch roadshow thành công!");
         } catch (e) {
             alert("Lỗi xóa danh sách: " + e.message);
         } finally {
@@ -135,21 +162,22 @@
         }
     }
 
-    // --- THUẬT TOÁN AUTO-GEN (TỰ ĐỘNG BỐC NGƯỜI CHO NHIỀU NGÀY) ---
+    // --- THUẬT TOÁN AUTO-GEN (TỰ ĐỘNG BỐC NGƯỜI) ---
     async function autoGenerate() {
         if (!isAdmin) return;
+        if (roadshowDays.length === 0) {
+            alert("Vui lòng chọn khoảng ngày (Từ ngày - Đến ngày) hợp lệ trước khi bấm Tạo Lịch!");
+            return;
+        }
         if (!confirm('Hệ thống sẽ XÓA và TỰ ĐỘNG XẾP LẠI toàn bộ các ngày bạn đang chọn. Bạn chắc chắn chứ?')) return;
-        
         loading = true;
         
         try {
-            // Chuẩn bị các Tháng và Tuần cần fetch data (để không đọc database nhiều lần)
             const monthsToFetch = [...new Set(roadshowDays.map(d => d.substring(0, 7)))];
             const weeksToFetch = [...new Set(roadshowDays.map(d => getWeekId(new Date(d))))];
 
             const nvSchedules = {};
             const pgSchedules = {};
-
             for (let m of monthsToFetch) {
                 const snap = await getDoc(doc(db, 'stores', selectedViewStore, 'schedules', m));
                 if (snap.exists()) nvSchedules[m] = snap.data().data || {};
@@ -160,8 +188,6 @@
             }
 
             let newRoadshowData = {};
-
-            // Xử lý mix data cho từng ngày
             for (let dStr of roadshowDays) {
                 let dayObj = { morning: [], afternoon: [] };
                 const d = new Date(dStr);
@@ -170,7 +196,7 @@
                 const weekId = getWeekId(d);
                 const weekdayStr = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()];
 
-                // Bóc tách Nhân Viên
+                // Bóc tách Nhân Viên nội bộ
                 const dayDataNV = nvSchedules[monthStr]?.[dayNumStr] || [];
                 dayDataNV.forEach(assign => {
                     const shift = assign.shift;
@@ -182,21 +208,27 @@
                     }
                 });
 
-                // Bóc tách PG
+                // Bóc tách PG theo thời gian thực đã cấu hình
                 const weekDataPG = pgSchedules[weekId] || {};
                 Object.keys(weekDataPG).forEach(pgId => {
                     const shift = weekDataPG[pgId][weekdayStr];
                     const pgInfo = allStaff.find(s => s.id === pgId);
+                    
                     if (pgInfo) {
-                        if (shift === 'Sáng') dayObj.afternoon.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
-                        if (shift === 'Chiều') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
+                        const rMode = pgInfo.roadshowMode || 'different'; // Fallback
+                        
+                        if (rMode === 'same') {
+                            if (shift === 'Sáng') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
+                            if (shift === 'Chiều') dayObj.afternoon.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
+                        } else {
+                            if (shift === 'Sáng') dayObj.afternoon.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
+                            if (shift === 'Chiều') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
+                        }
                     }
                 });
-                
                 newRoadshowData[dStr] = dayObj;
             }
 
-            // Ghi hàng loạt (Batch Write) lên Firebase
             const batch = writeBatch(db);
             for (let dStr of roadshowDays) {
                 const ref = doc(db, 'stores', selectedViewStore, 'roadshows', dStr);
@@ -207,7 +239,7 @@
                 }, { merge: true });
             }
             await batch.commit();
-
+            alert("Tạo lịch tự động thành công!");
         } catch (e) {
             alert("Lỗi tạo danh sách: " + e.message);
         } finally {
@@ -231,7 +263,6 @@
     }
 
     function addUser(user) {
-        // Kiểm tra xem đã có chưa
         if (roadshowData[targetDate][targetSlot].some(u => u.id === user.id)) {
             alert("Nhân sự này đã có trong danh sách!");
             return;
@@ -242,8 +273,7 @@
             displayName: user.type === 'pg' ? user.username : user.name, 
             type: user.type 
         });
-        
-        roadshowData = { ...roadshowData }; // Trigger Svelte Reactivity
+        roadshowData = { ...roadshowData }; 
         triggerAutoSave(targetDate);
         showSearchModal = false;
     }
@@ -266,15 +296,15 @@
 
     onDestroy(() => {
         if (unsubscribe) unsubscribe();
+        if (unsubscribeStaff) unsubscribeStaff();
         Object.values(saveTimeout).forEach(t => clearTimeout(t));
     });
 
-    // --- RENDER HELPERS ---
     $: searchResults = allStaff.filter(s => {
-        if (!searchQuery.trim()) return true; // TRẢ VỀ TOÀN BỘ NẾU KHÔNG GÕ GÌ
+        if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
         return s.name.toLowerCase().includes(q) || (s.username && s.username.toLowerCase().includes(q));
-    }).slice(0, 40); // Lấy 40 người để list không quá dài
+    }).slice(0, 40);
 </script>
 
 <div class="w-full bg-slate-50 rounded-xl shadow-sm border border-amber-200 overflow-hidden flex flex-col h-full animate-fadeIn">
@@ -290,22 +320,21 @@
         </div>
 
         <div class="flex items-center justify-between w-full sm:w-auto gap-2">
-            
-            <div class="bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-100 flex items-center gap-1.5 shadow-sm shrink-0">
-                <div class="flex items-center gap-1">
-                    <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Từ:</span>
-                    <input type="date" bind:value={startDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
-                </div>
-                <div class="text-amber-300 font-bold">-</div>
-                <div class="flex items-center gap-1">
-                    <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Đến:</span>
-                    <input type="date" bind:value={endDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
-                </div>
-            </div>
-            
             {#if isAdmin}
+                <div class="bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-100 flex items-center gap-1.5 shadow-sm shrink-0">
+                    <div class="flex items-center gap-1">
+                        <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Từ:</span>
+                        <input type="date" bind:value={startDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                    </div>
+                    <div class="text-amber-300 font-bold">-</div>
+                    <div class="flex items-center gap-1">
+                        <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Đến:</span>
+                        <input type="date" bind:value={endDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                    </div>
+                </div>
+            
                 <div class="flex items-center gap-1.5 shrink-0">
-                    <button class="bg-red-500 hover:bg-red-600 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-red-200 transition-colors flex items-center gap-1" on:click={clearSchedule} disabled={loading || roadshowDays.length === 0} title="Xóa toàn bộ nhân sự trong khoảng ngày này">
+                    <button class="bg-red-500 hover:bg-red-600 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-red-200 transition-colors flex items-center gap-1" on:click={clearSchedule} disabled={loading || (roadshowDays.length === 0 && displayDays.length === 0)} title="Xóa toàn bộ lịch đang hiển thị">
                         {#if loading} 
                             <span class="material-icons-round text-[14px] animate-spin">sync</span>
                         {:else} 
@@ -328,15 +357,17 @@
     </div>
 
     <div class="flex-1 overflow-x-auto overflow-y-hidden bg-slate-100/60 p-2 sm:p-4">
-        {#if roadshowDays.length === 0}
+        {#if displayDays.length === 0}
             <div class="h-full w-full flex flex-col items-center justify-center opacity-60">
                 <span class="material-icons-round text-5xl text-amber-300 mb-2">date_range</span>
-                <p class="text-slate-500 font-bold">Khoảng ngày không hợp lệ.</p>
-                <p class="text-[10px] sm:text-xs text-amber-600 mt-1">Vui lòng chọn ngày Bắt đầu &lt;= ngày Kết thúc.</p>
+                <p class="text-slate-500 font-bold">Chưa có lịch Roadshow.</p>
+                {#if isAdmin}
+                    <p class="text-[10px] sm:text-xs text-amber-600 mt-1">Vui lòng chọn Từ ngày - Đến ngày và bấm Tạo Lịch để bắt đầu.</p>
+                {/if}
             </div>
         {:else}
             <div class="flex gap-2.5 sm:gap-4 h-full min-w-max items-start">
-                {#each roadshowDays as d}
+                {#each displayDays as d}
                     <div class="w-[280px] sm:w-[320px] flex flex-col bg-white rounded-xl shadow-sm border border-slate-200 h-full max-h-full overflow-hidden shrink-0">
                         
                         <div class="p-2 sm:p-2.5 bg-amber-50/80 border-b border-amber-100 flex justify-between items-center shrink-0">

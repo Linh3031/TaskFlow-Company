@@ -20,7 +20,7 @@
     let isEditing = false;
     let isSaving = false;
 
-    // Lưu trữ state form
+    // Lưu trữ state form (Thêm roadshowMode mặc định là different)
     let form = {
         phone: pg.phone || '',
         phoneLeader: pg.phoneLeader || '',
@@ -28,7 +28,8 @@
         shiftAfternoon: pg.shiftAfternoon || '',
         shiftSplit: pg.shiftSplit || '',
         shiftOff: pg.shiftOff || '',
-        note: pg.note || ''
+        note: pg.note || '',
+        roadshowMode: pg.roadshowMode || 'different'
     };
 
     async function handleSave() {
@@ -61,7 +62,8 @@
             shiftAfternoon: pg.shiftAfternoon || '',
             shiftSplit: pg.shiftSplit || '',
             shiftOff: pg.shiftOff || '',
-            note: pg.note || ''
+            note: pg.note || '',
+            roadshowMode: pg.roadshowMode || 'different'
         };
         isEditing = false;
     }
@@ -148,6 +150,31 @@
                 </div>
             </div>
 
+            <div class="bg-white p-3 rounded-xl border border-pink-100 shadow-sm">
+                <h4 class="text-[10px] font-bold text-pink-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <span class="material-icons-round text-[12px]">directions_run</span> Thiết lập Roadshow
+                </h4>
+                <div>
+                    <label class="text-[9px] text-slate-400 font-semibold mb-1 block">CHẾ ĐỘ XẾP CA (TỰ ĐỘNG)</label>
+                    {#if isEditing}
+                        <div class="flex flex-col gap-2 mt-2">
+                            <label class="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                                <input type="radio" bind:group={form.roadshowMode} value="different" class="accent-pink-500 w-3.5 h-3.5">
+                                Khác ca làm việc (Mặc định: Sáng xếp vào Chiều)
+                            </label>
+                            <label class="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                                <input type="radio" bind:group={form.roadshowMode} value="same" class="accent-pink-500 w-3.5 h-3.5">
+                                Cùng ca làm việc (Sáng xếp vào Sáng)
+                            </label>
+                        </div>
+                    {:else}
+                        <div class="text-[11px] font-bold text-pink-700 bg-pink-50 inline-block px-2 py-1 rounded border border-pink-100">
+                            {pg.roadshowMode === 'same' ? '🏃‍♂️ Chạy cùng ca làm việc' : '🔄 Chạy khác ca làm việc (Mặc định)'}
+                        </div>
+                    {/if}
+                </div>
+            </div>
+
             <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                 <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1 block">
                     <span class="material-icons-round text-[12px]">edit_note</span> Ghi chú thêm
@@ -167,7 +194,7 @@
                     {#if isSaving} 
                         <span class="material-icons-round text-[14px] animate-spin mr-1">sync</span> Đang lưu... 
                     {:else} 
-                        Lưu Thông Hệ Tin 
+                        Lưu Thông Tin 
                     {/if}
                 </button>
             {:else}
