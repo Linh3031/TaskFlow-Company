@@ -13,7 +13,7 @@
 
     let startDate = initDates().start;
     let endDate = initDates().end;
-    let roadshowDays = []; // Mảng ngày do Admin chọn từ Date Picker
+    let roadshowDays = []; 
     
     // Data lưu trữ dưới dạng: { '2026-03-04': { morning: [], afternoon: [] }, ... }
     let roadshowData = {};
@@ -39,7 +39,6 @@
         }
     }
 
-    // [CodeGenesis Fix]: Hợp nhất danh sách ngày hiển thị (Các ngày đã có lịch + Các ngày Admin đang chọn)
     $: displayDays = Array.from(new Set([
         ...roadshowDays,
         ...Object.keys(roadshowData).filter(d => 
@@ -89,7 +88,7 @@
                 username: d.data().username,
                 role: d.data().role,
                 type: d.data().role === 'pg' ? 'pg' : 'nv',
-                roadshowMode: d.data().roadshowMode // Đồng bộ cấu hình cùng ca/khác ca
+                roadshowMode: d.data().roadshowMode // Lưu trữ Object cấu hình 7 ngày
             }));
         }, (err) => {
             console.error("Lỗi đồng bộ danh sách nhân sự:", err);
@@ -103,7 +102,6 @@
     function loadRoadshowRange() {
         if (unsubscribe) unsubscribe();
         
-        // Quét mọi lịch từ đầu tháng hiện tại hất về tương lai (bao gồm cả tháng sau, tháng tới...)
         const today = new Date();
         const firstDayOfMonth = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-01`;
         const queryStart = (isAdmin && startDate && startDate < firstDayOfMonth) ? startDate : firstDayOfMonth;
@@ -126,7 +124,6 @@
     async function clearSchedule() {
         if (!isAdmin) return;
         
-        // Chế độ xóa: Nếu Admin có chọn ngày thì chỉ xóa các ngày đó. Nếu không chọn thì xóa sạch lịch đang hiển thị.
         const targets = roadshowDays.length > 0 ? roadshowDays : displayDays;
         
         if (targets.length === 0) {
@@ -162,7 +159,7 @@
         }
     }
 
-    // --- THUẬT TOÁN AUTO-GEN (TỰ ĐỘNG BỐC NGƯỜI) ---
+    // --- THUẬT TOÁN AUTO-GEN TÍCH HỢP TÙY CHỈNH THEO NGÀY ---
     async function autoGenerate() {
         if (!isAdmin) return;
         if (roadshowDays.length === 0) {
@@ -194,7 +191,7 @@
                 const monthStr = dStr.substring(0, 7);
                 const dayNumStr = String(d.getDate());
                 const weekId = getWeekId(d);
-                const weekdayStr = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()];
+                const weekdayStr = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()]; // Thứ của ngày đang duyệt
 
                 // Bóc tách Nhân Viên nội bộ
                 const dayDataNV = nvSchedules[monthStr]?.[dayNumStr] || [];
@@ -208,19 +205,27 @@
                     }
                 });
 
-                // Bóc tách PG theo thời gian thực đã cấu hình
+                // Bóc tách PG theo thuật toán tùy chỉnh
                 const weekDataPG = pgSchedules[weekId] || {};
                 Object.keys(weekDataPG).forEach(pgId => {
                     const shift = weekDataPG[pgId][weekdayStr];
                     const pgInfo = allStaff.find(s => s.id === pgId);
                     
                     if (pgInfo) {
-                        const rMode = pgInfo.roadshowMode || 'different'; // Fallback
+                        const rawMode = pgInfo.roadshowMode;
+                        let dMode = 'different'; // Giá trị rớt đài (fallback)
                         
-                        if (rMode === 'same') {
+                        // [CodeGenesis] Phân rã dữ liệu Mode theo ngày
+                        if (typeof rawMode === 'string') {
+                            dMode = rawMode; // Đọc data cũ
+                        } else if (typeof rawMode === 'object' && rawMode !== null) {
+                            dMode = rawMode[weekdayStr] || 'different'; // Đọc mode của chính xác thứ đó
+                        }
+                        
+                        if (dMode === 'same') {
                             if (shift === 'Sáng') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
                             if (shift === 'Chiều') dayObj.afternoon.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
-                        } else {
+                        } else { // 'different'
                             if (shift === 'Sáng') dayObj.afternoon.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
                             if (shift === 'Chiều') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
                         }

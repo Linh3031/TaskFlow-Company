@@ -9,7 +9,6 @@
     export let isAdmin = false;
     export let currentUser = null;
 
-    // Phân quyền: Nâng cấp logic kiểm tra chủ sở hữu (so khớp username, id, uid và loại bỏ khoảng trắng)
     $: isOwner = currentUser && pg && (
         (currentUser.username && pg.username && String(currentUser.username).trim() === String(pg.username).trim()) || 
         (currentUser.id && pg.id && currentUser.id === pg.id) ||
@@ -20,7 +19,19 @@
     let isEditing = false;
     let isSaving = false;
 
-    // Lưu trữ state form (Thêm roadshowMode mặc định là different)
+    const DAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+
+    function initRoadshowMode(raw) {
+        let res = {};
+        DAYS.forEach(d => res[d] = 'different'); 
+        if (typeof raw === 'string') {
+            DAYS.forEach(d => res[d] = raw);
+        } else if (typeof raw === 'object' && raw !== null) {
+            DAYS.forEach(d => res[d] = raw[d] || 'different');
+        }
+        return res;
+    }
+
     let form = {
         phone: pg.phone || '',
         phoneLeader: pg.phoneLeader || '',
@@ -29,21 +40,29 @@
         shiftSplit: pg.shiftSplit || '',
         shiftOff: pg.shiftOff || '',
         note: pg.note || '',
-        roadshowMode: pg.roadshowMode || 'different'
+        roadshowMode: initRoadshowMode(pg.roadshowMode)
     };
+
+    function toggleDayMode(d) {
+        form.roadshowMode[d] = form.roadshowMode[d] === 'same' ? 'different' : 'same';
+        form.roadshowMode = { ...form.roadshowMode }; 
+    }
+
+    function syncAllMode(mode) {
+        DAYS.forEach(d => form.roadshowMode[d] = mode);
+        form.roadshowMode = { ...form.roadshowMode };
+    }
 
     async function handleSave() {
         isSaving = true;
         try {
             const ref = doc(db, 'users', pg.id);
-            // CodeGenesis: Thêm Audit Trail khi lưu thông tin
             const updatePayload = {
                 ...form,
                 lastModifiedBy: currentUser ? currentUser.username : 'Unknown_PGInfoModal',
                 lastUpdatedAt: serverTimestamp()
             };
             await updateDoc(ref, updatePayload);
-            // Cập nhật lại UI lập tức sau khi lưu
             Object.assign(pg, form);
             isEditing = false;
         } catch (error) {
@@ -54,7 +73,6 @@
     }
     
     function cancelEdit() {
-        // Hoàn tác lại dữ liệu gốc nếu bấm Hủy
         form = {
             phone: pg.phone || '',
             phoneLeader: pg.phoneLeader || '',
@@ -63,7 +81,7 @@
             shiftSplit: pg.shiftSplit || '',
             shiftOff: pg.shiftOff || '',
             note: pg.note || '',
-            roadshowMode: pg.roadshowMode || 'different'
+            roadshowMode: initRoadshowMode(pg.roadshowMode)
         };
         isEditing = false;
     }
@@ -154,25 +172,44 @@
                 <h4 class="text-[10px] font-bold text-pink-500 uppercase tracking-wider mb-2 flex items-center gap-1">
                     <span class="material-icons-round text-[12px]">directions_run</span> Thiết lập Roadshow
                 </h4>
-                <div>
-                    <label class="text-[9px] text-slate-400 font-semibold mb-1 block">CHẾ ĐỘ XẾP CA (TỰ ĐỘNG)</label>
-                    {#if isEditing}
-                        <div class="flex flex-col gap-2 mt-2">
-                            <label class="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                                <input type="radio" bind:group={form.roadshowMode} value="different" class="accent-pink-500 w-3.5 h-3.5">
-                                Khác ca làm việc (Mặc định: Sáng xếp vào Chiều)
-                            </label>
-                            <label class="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                                <input type="radio" bind:group={form.roadshowMode} value="same" class="accent-pink-500 w-3.5 h-3.5">
-                                Cùng ca làm việc (Sáng xếp vào Sáng)
-                            </label>
+                
+                <label class="text-[9px] text-slate-400 font-semibold mb-1 block">TÙY CHỈNH THEO NGÀY TRONG TUẦN</label>
+                
+                {#if isEditing}
+                    <div class="flex gap-1 mt-1.5">
+                        {#each DAYS as d}
+                            <button type="button" class="flex-1 py-1.5 flex flex-col items-center justify-center rounded border transition-colors shadow-sm {form.roadshowMode[d] === 'same' ? 'bg-pink-50 border-pink-200 text-pink-600 hover:bg-pink-100' : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100'}" on:click={() => toggleDayMode(d)} title="Nhấn để đổi trạng thái">
+                                <span class="text-[9px] font-bold">{d}</span>
+                                <span class="material-icons-round text-[14px] mt-0.5">{form.roadshowMode[d] === 'same' ? 'drag_handle' : 'swap_horiz'}</span>
+                            </button>
+                        {/each}
+                    </div>
+                    <div class="flex justify-between items-center mt-2.5 pt-2 border-t border-dashed border-slate-200">
+                        <div class="text-[9px] text-slate-500 flex items-center gap-2">
+                            <span class="flex items-center gap-0.5"><span class="material-icons-round text-[12px] text-slate-400">swap_horiz</span> Khác ca</span>
+                            <span class="flex items-center gap-0.5 text-pink-500"><span class="material-icons-round text-[12px]">drag_handle</span> Cùng ca</span>
                         </div>
-                    {:else}
-                        <div class="text-[11px] font-bold text-pink-700 bg-pink-50 inline-block px-2 py-1 rounded border border-pink-100">
-                            {pg.roadshowMode === 'same' ? '🏃‍♂️ Chạy cùng ca làm việc' : '🔄 Chạy khác ca làm việc (Mặc định)'}
+                        <div class="flex gap-1.5">
+                            <button type="button" class="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-1 rounded font-bold hover:bg-slate-200" on:click={() => syncAllMode('different')}>Tất cả Khác</button>
+                            <button type="button" class="text-[9px] bg-pink-100 text-pink-600 px-1.5 py-1 rounded font-bold hover:bg-pink-200" on:click={() => syncAllMode('same')}>Tất cả Cùng</button>
                         </div>
-                    {/if}
-                </div>
+                    </div>
+                {:else}
+                    <div class="flex gap-1 mt-1">
+                        {#each DAYS as d}
+                            {@const rMode = initRoadshowMode(pg.roadshowMode)[d]}
+                            <div class="flex-1 py-1 flex flex-col items-center justify-center rounded border {rMode === 'same' ? 'bg-pink-50 border-pink-100 text-pink-600' : 'bg-slate-50 border-slate-100 text-slate-400'} opacity-90">
+                                <span class="text-[8px] font-bold">{d}</span>
+                                <span class="material-icons-round text-[12px] mt-0.5">{rMode === 'same' ? 'drag_handle' : 'swap_horiz'}</span>
+                            </div>
+                        {/each}
+                    </div>
+                    <div class="flex justify-center items-center gap-3 mt-2 text-[9px] text-slate-500 font-medium">
+                        <span class="flex items-center gap-0.5"><span class="material-icons-round text-[11px] text-slate-400">swap_horiz</span> Đảo ca (Mặc định)</span>
+                        <span class="text-slate-300">|</span>
+                        <span class="flex items-center gap-0.5 text-slate-600"><span class="material-icons-round text-[11px] text-pink-500">drag_handle</span> Cùng ca</span>
+                    </div>
+                {/if}
             </div>
 
             <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
