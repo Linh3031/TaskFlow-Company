@@ -18,7 +18,7 @@
   import Chatbot from './components/Chatbot.svelte';
   import SknvDashboard from './components/SknvDashboard.svelte';
 
-  const APP_VERSION = 24; 
+  const APP_VERSION = 25; 
   let showUpdatePrompt = false;
 
   // =========================================================================
