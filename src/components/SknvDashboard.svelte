@@ -13,11 +13,10 @@
     let errorMsg = '';
     let activeTab = 'tong_quan';
 
-    let sknvData = null; 
+    let sknvData = null;
     let allEmployeesData = []; 
     let selectedEmpId = '';
 
-    // Version Control Variables
     let hasNewUpdate = false;
     let lastUpdatedTime = null;
 
@@ -26,7 +25,6 @@
     $: isStoreAdmin = role.includes('QUAN LY') || role.includes('QUẢN LÝ');
     $: isUserAdmin = isSuperAdmin || isStoreAdmin;
 
-    // Reactivity Lock: Chỉ kiểm tra Metadata (1 Read), KHÔNG tải data ngầm
     $: if ($activeStoreId && !role.includes('PG')) {
         checkMetadata($activeStoreId);
     } else if (role.includes('PG')) {
@@ -42,7 +40,7 @@
         const rawUsername = String($currentUser?.username || '');
         const myEmpId = rawUsername.match(/\d+/)?.[0] || rawUsername;
         const kho = String(targetWarehouse || $currentUser?.maKho || $currentUser?.ma_kho || '').trim();
-
+        
         if (!kho || kho === 'ALL') {
              checking = false;
              errorMsg = "Vui lòng chọn 1 siêu thị cụ thể.";
@@ -51,9 +49,7 @@
 
         const cacheKey = `sknv_data_${kho}`;
         const versionKey = `sknv_version_${kho}`;
-
         try {
-            // 1. Tải Metadata từ Firebase (1 LƯỢT ĐỌC DUY NHẤT)
             const metaRef = doc(dbDoanhThu, 'sknv_metadata', kho);
             const metaSnap = await getDoc(metaRef);
 
@@ -63,16 +59,13 @@
                 lastUpdatedTime = new Date(serverVersion).toLocaleString('vi-VN', { hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit' });
             }
 
-            // 2. Lấy bộ nhớ dưới LocalStorage lên so sánh
             const localVersion = parseInt(localStorage.getItem(versionKey) || '0', 10);
             const localData = localStorage.getItem(cacheKey);
 
             if (serverVersion > localVersion || !localData) {
-                // KHO CÓ DỮ LIỆU MỚI (hoặc người dùng chưa từng tải)
                 hasNewUpdate = true;
-                if (localData) loadFromLocal(localData, myEmpId); // Vẫn load data cũ ra cho xem bình thường
+                if (localData) loadFromLocal(localData, myEmpId); 
             } else {
-                // SỐ LIỆU ĐÃ MỚI NHẤT -> Không cần làm gì thêm
                 hasNewUpdate = false;
                 loadFromLocal(localData, myEmpId);
             }
@@ -89,7 +82,6 @@
             const parsed = JSON.parse(jsonString);
             allEmployeesData = parsed.allEmployeesData || [];
             if (allEmployeesData.length > 0) {
-                // Ưu tiên chọn chính mình, nếu không chọn người đầu tiên
                 const me = allEmployeesData.find(e => e.maNV === myEmpId);
                 sknvData = me || allEmployeesData[0];
                 selectedEmpId = sknvData.maNV;
@@ -98,7 +90,7 @@
             }
         } catch (e) {
             console.error("Lỗi parse local data", e);
-            hasNewUpdate = true; // Data trong máy bị hỏng -> Ép tải lại
+            hasNewUpdate = true; 
         }
     }
 
@@ -110,48 +102,48 @@
         const myEmpId = rawUsername.match(/\d+/)?.[0] || rawUsername;
         const targetWarehouse = String($activeStoreId || $currentUser?.maKho || $currentUser?.ma_kho || '').trim();
         const myPersonalWarehouse = String($currentUser?.maKho || $currentUser?.ma_kho || '').trim();
-
         const cacheKey = `sknv_data_${targetWarehouse}`;
         const versionKey = `sknv_version_${targetWarehouse}`;
 
+        const khoToFetch = (isStoreAdmin && !isSuperAdmin) ? myPersonalWarehouse : targetWarehouse;
+
         try {
-            let q;
-            if (isStoreAdmin && !isSuperAdmin) {
-                q = query(collection(dbDoanhThu, 'sknv_final_data'), where('maKho', '==', myPersonalWarehouse));
-            } else {
-                q = query(collection(dbDoanhThu, 'sknv_final_data'), where('maKho', '==', targetWarehouse));
-            }
+            const finalDocRef = doc(dbDoanhThu, 'sknv_final_data', khoToFetch);
+            const storeSnap = await getDoc(finalDocRef);
 
-            // [COSTLY QUERY] - Lấy danh sách nhân sự (N Reads)
-            const snap = await getDocs(q);
+            if (storeSnap.exists()) {
+                const cloudPayload = storeSnap.data();
+                allEmployeesData = cloudPayload.employees || [];
 
-            if (!snap.empty) {
-                allEmployeesData = snap.docs.map(d => d.data());
-                const me = allEmployeesData.find(e => e.maNV === myEmpId);
-                sknvData = me || allEmployeesData[0];
-                selectedEmpId = sknvData.maNV;
+                if (allEmployeesData.length > 0) {
+                    const me = allEmployeesData.find(e => e.maNV === myEmpId);
+                    sknvData = me || allEmployeesData[0];
+                    selectedEmpId = sknvData.maNV;
+                    
+                    localStorage.setItem(cacheKey, JSON.stringify({ allEmployeesData }));
+                    
+                    const metaRef = doc(dbDoanhThu, 'sknv_metadata', targetWarehouse);
+                    const metaSnap = await getDoc(metaRef);
+                    if (metaSnap.exists()) {
+                        localStorage.setItem(versionKey, metaSnap.data().lastUpdated.toString());
+                        lastUpdatedTime = new Date(metaSnap.data().lastUpdated).toLocaleString('vi-VN', { hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit' });
+                    } else {
+                        localStorage.setItem(versionKey, Date.now().toString());
+                    }
 
-                // LƯU CỨNG VÀO LOCAL BẢO VỆ FIREBASE
-                localStorage.setItem(cacheKey, JSON.stringify({ allEmployeesData }));
-
-                // Đóng dấu Version Server xuống Local
-                const metaRef = doc(dbDoanhThu, 'sknv_metadata', targetWarehouse);
-                const metaSnap = await getDoc(metaRef);
-                if (metaSnap.exists()) {
-                    localStorage.setItem(versionKey, metaSnap.data().lastUpdated.toString());
-                    lastUpdatedTime = new Date(metaSnap.data().lastUpdated).toLocaleString('vi-VN', { hour: '2-digit', minute:'2-digit', day: '2-digit', month: '2-digit' });
+                    hasNewUpdate = false;
                 } else {
-                    localStorage.setItem(versionKey, Date.now().toString());
+                    sknvData = null;
+                    allEmployeesData = [];
+                    errorMsg = `Kho ${targetWarehouse} hiện chưa có danh sách nhân sự.`;
                 }
-
-                hasNewUpdate = false;
             } else {
                 sknvData = null;
                 allEmployeesData = [];
                 errorMsg = `Kho ${targetWarehouse} hiện chưa có dữ liệu đồng bộ.`;
             }
         } catch (e) {
-            console.error(e);
+            console.error("Lỗi tải data:", e);
             errorMsg = "Không thể tải dữ liệu từ máy chủ.";
         } finally {
             loading = false;
@@ -183,10 +175,10 @@
                         class="relative bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:active:scale-100 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-sm flex items-center gap-1.5 transition-all active:scale-95"
                     >
                         {#if !loading}
-                            <span class="absolute -top-1 -right-1 flex h-3 w-3">
+                           <span class="absolute -top-1 -right-1 flex h-3 w-3">
                                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
                                 <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500 border border-white"></span>
-                            </span>
+                           </span>
                         {/if}
                         <span class="material-icons-round text-[15px] {loading ? 'animate-spin' : ''}">
                             {loading ? 'sync' : 'cloud_download'}
@@ -203,7 +195,7 @@
         </div>
         
         {#if sknvData && !errorMsg}
-            <div class="mt-3 flex items-center justify-between">
+             <div class="mt-3 flex items-center justify-between">
                 <div>
                     <div class="text-sm font-bold text-slate-800">{sknvData.hoTen}</div>
                     <div class="text-xs text-slate-500">Mã NV: {sknvData.maNV} | Kho: {sknvData.maKho}</div>
@@ -223,7 +215,7 @@
 
             <div class="flex gap-1 bg-gray-100 p-1 rounded-xl mt-3">
                 {#each [{id:'tong_quan', label:'Tổng Quan'}, {id:'thi_dua', label:'Thi Đua'}, {id:'chi_tiet', label:'Chi Tiết'}] as tab}
-                    <button 
+                     <button 
                         class="flex-1 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all {activeTab === tab.id ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}"
                         on:click={() => activeTab = tab.id}
                     >{tab.label}</button>
