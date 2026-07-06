@@ -17,7 +17,9 @@
     let loading = false;
     let isSaving = false;
     let unsubscribe = null;
-    let saveTimeout = null;
+
+    // [CodeGenesis] Biến quản lý trạng thái Khóa/Mở của Admin
+    let isScheduleUnlocked = false; 
 
     let selectedPGForModal = null;
     let selectedDayForStats = null;
@@ -153,6 +155,20 @@
         }
     }
 
+    // [CodeGenesis] HÀM TOGGLE BẬT TẮT KHÓA LỊCH CHO ADMIN
+    async function toggleScheduleLock() {
+        if (!isAdmin) return;
+        try {
+            isSaving = true;
+            const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
+            await setDoc(ref, { isUnlocked: !isScheduleUnlocked }, { merge: true });
+        } catch (e) {
+            console.error("Lỗi thao tác khóa/mở lịch:", e);
+        } finally {
+            isSaving = false;
+        }
+    }
+
     $: if (selectedViewStore) loadPGs();
     $: if (selectedViewStore && weekId) loadScheduleForWeek();
     
@@ -176,15 +192,21 @@
         if (unsubscribe) unsubscribe();
         const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
         unsubscribe = onSnapshot(ref, (snap) => {
-            if (snap.exists()) { pgScheduleData = snap.data().data || {}; } 
+            if (snap.exists()) { 
+                const docData = snap.data();
+                pgScheduleData = docData.data || {}; 
+                isScheduleUnlocked = docData.isUnlocked || false;
+            } 
             else {
                 pgScheduleData = {};
+                isScheduleUnlocked = false;
                 pgList.forEach(pg => { pgScheduleData[pg.id] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' }; });
             }
         });
     }
 
-    function updateShift(pgId, pgUsername, day, value) {
+    // [CodeGenesis] Phẫu thuật Atomic Write chống Race Condition & Thêm Logic Mở Khóa
+    async function updateShift(pgId, pgUsername, day, value) {
         const isOwner = $currentUser?.username === pgUsername;
         
         if (!isAdmin) {
@@ -192,13 +214,13 @@
                 pgScheduleData = { ...pgScheduleData }; // Force UI Sync
                 return;
             }
-            if (!isFutureWeek) {
-                alert("Bạn chỉ có thể đăng ký/chỉnh sửa lịch cho các tuần tiếp theo!");
+            if (!isFutureWeek && !isScheduleUnlocked) {
+                alert("Bạn chỉ có thể đăng ký/chỉnh sửa lịch cho các tuần tiếp theo hoặc khi Quản Lý đã mở khóa!");
                 pgScheduleData = { ...pgScheduleData }; // Force UI Sync
                 return;
             }
 
-            // [CodeGenesis] LOGIC GIỚI HẠN OFF 50%
+            // LOGIC GIỚI HẠN OFF 50%
             if (value === 'OFF') {
                 const currentPG = pgList.find(p => p.id === pgId);
                 const pgCategory = currentPG?.category || 'Khác';
@@ -222,28 +244,31 @@
             }
         }
 
+        // Cập nhật giao diện cá nhân ngay lập tức để không bị khựng
         if (!pgScheduleData[pgId]) pgScheduleData[pgId] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
         pgScheduleData[pgId][day] = value;
         pgScheduleData = { ...pgScheduleData }; 
-        triggerAutoSave();
-    }
 
-    function triggerAutoSave() {
+        // Thực thi Ghi Nguyên Tử (Atomic Merge Deep Object) - Fix triệt để Lost Update / Nhảy lịch
         isSaving = true;
-        if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(async () => {
-            try {
-                const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
-                await setDoc(ref, { data: pgScheduleData }, { merge: true });
-                isSaving = false;
-            } 
-            catch (e) { console.error("Lỗi lưu lịch PG:", e); isSaving = false; }
-        }, 800);
+        try {
+            const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
+            await setDoc(ref, { 
+                data: {
+                    [pgId]: {
+                        [day]: value
+                    }
+                }
+            }, { merge: true });
+        } catch (e) { 
+            console.error("Lỗi lưu lịch PG Atomic:", e); 
+        } finally {
+            isSaving = false; 
+        }
     }
 
     onDestroy(() => {
         if (unsubscribe) unsubscribe();
-        if (saveTimeout) clearTimeout(saveTimeout);
     });
 </script>
 
@@ -274,6 +299,11 @@
                          <span class="material-icons-round text-[16px]">my_location</span>
                     </button>
                 {:else}
+                    <button class="h-7 px-1.5 sm:px-2 flex items-center justify-center gap-1 {isScheduleUnlocked ? 'bg-amber-100 hover:bg-amber-200 text-amber-700 border border-amber-200' : 'bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-200'} rounded text-[11px] font-bold shadow-sm transition-colors" on:click={toggleScheduleLock} title="Bật/Tắt quyền sửa lịch tuần này">
+                        <span class="material-icons-round text-[16px]">{isScheduleUnlocked ? 'lock_open' : 'lock'}</span> 
+                        <span class="hidden sm:inline">{isScheduleUnlocked ? 'Đang Mở' : 'Đang Khóa'}</span>
+                    </button>
+
                     {#if lastDeletedData}
                         <button class="h-7 px-1.5 sm:px-2 flex items-center justify-center gap-1 bg-green-50 hover:bg-green-100 text-green-600 border border-green-100 rounded text-[11px] font-bold shadow-sm animate-pulse transition-colors" on:click={restoreSchedules} title="Khôi phục dữ liệu vừa xóa nhầm">
                              <span class="material-icons-round text-[16px]">restore</span> 
@@ -288,7 +318,7 @@
             </div>
         </div>
 
-        {#if !isAdmin && !isFutureWeek}
+        {#if !isAdmin && !isFutureWeek && !isScheduleUnlocked}
             <div class="text-[9px] text-red-500 font-bold flex items-center gap-1">
                 <span class="material-icons-round text-[10px]">lock</span> Tuần này đã khóa, không thể sửa lịch!
             </div>
@@ -346,7 +376,7 @@
                                             
                                             {#each DAYS as d}
                                                 {@const currentShift = pgScheduleData[pg.id]?.[d] || ''}
-                                                {@const canEdit = isAdmin || (isOwner && isFutureWeek)}
+                                                {@const canEdit = isAdmin || (isOwner && (isFutureWeek || isScheduleUnlocked))}
                                                 
                                                 <td class="p-0.5 sm:p-1 border-r last:border-0 align-middle">
                                                     <select 
@@ -376,7 +406,7 @@
     </div>
 
     <div class="p-1.5 bg-slate-100 border-t flex justify-between items-center px-4 shrink-0 text-[9px] sm:text-[10px] font-bold">
-        <span class="text-slate-500 truncate pr-2">Auto-save: Dữ liệu lưu tự động.</span>
+        <span class="text-slate-500 truncate pr-2">Cập nhật tức thời: Lịch đổi tới đâu lưu tự động tới đó.</span>
         {#if isSaving}
             <span class="text-amber-500 animate-pulse flex items-center gap-1 shrink-0"><span class="material-icons-round text-[12px]">sync</span> <span class="hidden sm:inline">Đang lưu...</span></span>
         {:else}
