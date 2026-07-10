@@ -35,6 +35,7 @@
     let form = {
         phone: pg.phone || '',
         phoneLeader: pg.phoneLeader || '',
+        shiftType: pg.shiftType || 'flexible', // [CodeGenesis] Thêm phân loại ca
         shiftMorning: pg.shiftMorning || '',
         shiftAfternoon: pg.shiftAfternoon || '',
         shiftSplit: pg.shiftSplit || '',
@@ -76,6 +77,7 @@
         form = {
             phone: pg.phone || '',
             phoneLeader: pg.phoneLeader || '',
+            shiftType: pg.shiftType || 'flexible',
             shiftMorning: pg.shiftMorning || '',
             shiftAfternoon: pg.shiftAfternoon || '',
             shiftSplit: pg.shiftSplit || '',
@@ -108,7 +110,7 @@
                 <h4 class="text-[10px] font-bold text-indigo-500 uppercase tracking-wider mb-2 flex items-center gap-1">
                     <span class="material-icons-round text-[12px]">contact_phone</span> Thông tin liên hệ
                 </h4>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-2 gap-3 mb-3">
                     <div>
                         <label class="text-[9px] text-slate-400 font-semibold mb-1 block">SĐT CÁ NHÂN</label>
                         {#if isEditing}
@@ -126,11 +128,29 @@
                         {/if}
                     </div>
                 </div>
+                <!-- [CodeGenesis] Thêm Select Box cho Loại Ca -->
+                <div class="pt-2 border-t border-indigo-50">
+                    <label class="text-[9px] text-slate-400 font-semibold mb-1 block">LOẠI CA LÀM VIỆC (QUOTA)</label>
+                    {#if isEditing}
+                        <select bind:value={form.shiftType} class="w-full text-xs p-1.5 border border-indigo-200 rounded outline-none focus:border-indigo-500 bg-indigo-50/30 cursor-pointer">
+                            <option value="flexible">Linh hoạt (Sáng / Chiều / Gãy)</option>
+                            <option value="morning_only">Cố định - Chỉ làm Sáng</option>
+                            <option value="afternoon_only">Cố định - Chỉ làm Chiều</option>
+                        </select>
+                    {:else}
+                        <div class="text-xs font-bold text-slate-700">
+                            {#if pg.shiftType === 'morning_only'} <span class="text-blue-600">Cố định - Chỉ làm Sáng</span>
+                            {:else if pg.shiftType === 'afternoon_only'} <span class="text-orange-600">Cố định - Chỉ làm Chiều</span>
+                            {:else} <span class="text-teal-600">Linh hoạt (Sáng / Chiều / Gãy)</span>
+                            {/if}
+                        </div>
+                    {/if}
+                </div>
             </div>
 
             <div class="bg-white p-3 rounded-xl border border-orange-100 shadow-sm">
                 <h4 class="text-[10px] font-bold text-orange-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                    <span class="material-icons-round text-[12px]">schedule</span> Cấu trúc ca làm việc
+                    <span class="material-icons-round text-[12px]">schedule</span> Cấu trúc ca chi tiết
                 </h4>
                 <div class="grid grid-cols-2 gap-3">
                     <div>

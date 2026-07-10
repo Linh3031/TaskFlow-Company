@@ -1,7 +1,7 @@
 <script>
     import { onMount, onDestroy } from 'svelte';
     import { db } from '../../lib/firebase';
-    import { collection, query, where, getDocs, doc, setDoc, onSnapshot } from 'firebase/firestore';
+    import { collection, query, where, doc, setDoc, onSnapshot } from 'firebase/firestore';
     // Lấy thông tin User đang đăng nhập để phân quyền xếp ca
     import { currentUser } from '../../lib/stores';
     import PGInfoModal from './PGInfoModal.svelte';
@@ -17,6 +17,7 @@
     let loading = false;
     let isSaving = false;
     let unsubscribe = null;
+    let pgUnsubscribe = null; // [CodeGenesis] Thêm biến quản lý Realtime PG
 
     // [CodeGenesis] Biến quản lý trạng thái Khóa/Mở của Admin
     let isScheduleUnlocked = false; 
@@ -84,9 +85,7 @@
         if (!$currentUser) return;
         const row = document.getElementById('pg-row-' + $currentUser.username);
         if (row) {
-            // Cuộn trượt mượt mà tới dòng của PG
             row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Nháy sáng ô Tên để gây chú ý
             const td = row.querySelector('td');
             if (td) {
                 td.classList.add('!bg-yellow-200', 'transition-colors', 'duration-300');
@@ -111,17 +110,13 @@
         try {
             isSaving = true;
             const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
-            
-            // Sao lưu dữ liệu lịch hiện tại trước khi thực hiện xóa sạch
             lastDeletedData = JSON.parse(JSON.stringify(pgScheduleData));
 
-            // Xây dựng tập dữ liệu trống cho tất cả PG đang có mặt trong kho
             const resetData = {};
             pgList.forEach(pg => {
                 resetData[pg.id] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
             });
 
-            // Ghi đè cập nhật lên Firestore
             await setDoc(ref, { data: resetData }, { merge: true });
             alert("Đã xóa sạch toàn bộ lịch PG của tuần này thành công!");
         } catch (e) {
@@ -142,10 +137,8 @@
         try {
             isSaving = true;
             const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
-            
-            // Đẩy lại bản sao lưu tạm thời lên Firestore
             await setDoc(ref, { data: lastDeletedData }, { merge: true });
-            lastDeletedData = null; // Khôi phục thành công -> Giải phóng bộ nhớ tạm
+            lastDeletedData = null; 
             alert("Đã khôi phục dữ liệu lịch PG thành công!");
         } catch (e) {
             console.error("Lỗi khi khôi phục lịch PG:", e);
@@ -172,20 +165,26 @@
     $: if (selectedViewStore) loadPGs();
     $: if (selectedViewStore && weekId) loadScheduleForWeek();
     
-    async function loadPGs() {
-        try {
-            loading = true;
-            const q = query(collection(db, 'users'), where('storeIds', 'array-contains', selectedViewStore), where('role', '==', 'pg'));
-            const snap = await getDocs(q);
+    // [CodeGenesis] Nâng cấp loadPGs lên Realtime (onSnapshot) để chống dính cache
+    function loadPGs() {
+        loading = true;
+        const q = query(collection(db, 'users'), where('storeIds', 'array-contains', selectedViewStore), where('role', '==', 'pg'));
+        
+        if (pgUnsubscribe) pgUnsubscribe();
+        
+        pgUnsubscribe = onSnapshot(q, (snap) => {
             pgList = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            
             groupedPGs = pgList.reduce((acc, pg) => {
                 const cat = pg.category || 'Khác';
                 if (!acc[cat]) acc[cat] = [];
                 acc[cat].push(pg);
                 return acc;
             }, {});
-        } catch (e) { console.error("Lỗi load PG:", e); } finally { loading = false; }
+            loading = false;
+        }, (error) => {
+            console.error("Lỗi tải danh sách PG Realtime:", error);
+            loading = false;
+        });
     }
 
     function loadScheduleForWeek() {
@@ -205,9 +204,11 @@
         });
     }
 
-    // [CodeGenesis] Phẫu thuật Atomic Write chống Race Condition & Thêm Logic Mở Khóa
+    // [CodeGenesis] Phẫu thuật Atomic Write & Các Logic Ràng Buộc
     async function updateShift(pgId, pgUsername, day, value) {
         const isOwner = $currentUser?.username === pgUsername;
+        const currentPG = pgList.find(p => p.id === pgId);
+        const shiftType = currentPG?.shiftType || 'flexible';
         
         if (!isAdmin) {
             if (!isOwner) {
@@ -216,40 +217,59 @@
             }
             if (!isFutureWeek && !isScheduleUnlocked) {
                 alert("Bạn chỉ có thể đăng ký/chỉnh sửa lịch cho các tuần tiếp theo hoặc khi Quản Lý đã mở khóa!");
-                pgScheduleData = { ...pgScheduleData }; // Force UI Sync
+                pgScheduleData = { ...pgScheduleData }; 
                 return;
             }
 
-            // LOGIC GIỚI HẠN OFF 50%
+            // [MỚI] LOGIC GIỚI HẠN TỶ LỆ 50-50 CỦA PG LINH HOẠT TRONG TUẦN
+            if (shiftType !== 'morning_only' && shiftType !== 'afternoon_only') {
+                if (value === 'Sáng' || value === 'Chiều') {
+                    let typeCount = 0;
+                    const weekData = pgScheduleData[pgId] || {};
+                    
+                    // Đếm số ca Sáng/Chiều hiện có trong tuần (không tính ngày đang chọn)
+                    for (const [d, v] of Object.entries(weekData)) {
+                        if (d !== day && v === value) {
+                            typeCount++;
+                        }
+                    }
+                    
+                    // Ràng buộc: Không được chọn quá 4 ca cùng loại 1 tuần (để đảm bảo 3-4 hoặc 4-3)
+                    if (typeCount >= 4) {
+                        alert(`PG chỉ được xếp tối đa 4 ca [${value}] một tuần để đảm bảo tỷ lệ 50-50!`);
+                        pgScheduleData = { ...pgScheduleData }; // Ép Svelte render lại UI
+                        return;
+                    }
+                }
+            }
+
+            // LOGIC GIỚI HẠN OFF 50% DÀNH CHO NHÓM LINH HOẠT THEO NGÀY
             if (value === 'OFF') {
-                const currentPG = pgList.find(p => p.id === pgId);
                 const pgCategory = currentPG?.category || 'Khác';
                 const groupPGs = pgList.filter(p => (p.category || 'Khác') === pgCategory);
                 
-                // Làm tròn xuống theo yêu cầu
-                const maxOffs = Math.floor(groupPGs.length / 2);
-                
-                // Đếm số lượng PG trong NHÓM NÀY đã OFF ngày này (bỏ qua bản thân người đang sửa)
-                const currentOffCount = groupPGs.filter(p => 
-                    p.id !== pgId && 
-                    pgScheduleData[p.id] && 
-                    pgScheduleData[p.id][day] === 'OFF'
-                ).length;
+                if (shiftType !== 'morning_only' && shiftType !== 'afternoon_only') {
+                    const flexiblePGs = groupPGs.filter(p => p.shiftType !== 'morning_only' && p.shiftType !== 'afternoon_only');
+                    const maxOffs = Math.floor(flexiblePGs.length / 2);
+                    const currentOffCount = flexiblePGs.filter(p => 
+                        p.id !== pgId && 
+                        pgScheduleData[p.id] && 
+                        pgScheduleData[p.id][day] === 'OFF'
+                    ).length;
 
-                if (currentOffCount >= maxOffs) {
-                    alert("Đã hết lượt off của ngày này, vui lòng chọn ngày khác hoặc liên hệ QL");
-                    pgScheduleData = { ...pgScheduleData }; // Ép Svelte render lại thẻ select về giá trị cũ
-                    return;
+                    if (currentOffCount >= maxOffs) {
+                        alert("Đã hết lượt off của ngày này, vui lòng chọn ngày khác hoặc liên hệ QL");
+                        pgScheduleData = { ...pgScheduleData };
+                        return;
+                    }
                 }
             }
         }
 
-        // Cập nhật giao diện cá nhân ngay lập tức để không bị khựng
         if (!pgScheduleData[pgId]) pgScheduleData[pgId] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
         pgScheduleData[pgId][day] = value;
         pgScheduleData = { ...pgScheduleData }; 
 
-        // Thực thi Ghi Nguyên Tử (Atomic Merge Deep Object) - Fix triệt để Lost Update / Nhảy lịch
         isSaving = true;
         try {
             const ref = doc(db, 'stores', selectedViewStore, 'pg_schedules', weekId);
@@ -269,6 +289,7 @@
 
     onDestroy(() => {
         if (unsubscribe) unsubscribe();
+        if (pgUnsubscribe) pgUnsubscribe(); // [CodeGenesis] Dọn dẹp listener Realtime
     });
 </script>
 
