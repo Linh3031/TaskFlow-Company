@@ -1,5 +1,5 @@
 <script>
-  // Version 16.2 - [CodeGenesis] Global Super Admin Override & Fix lỗi bốc hơi Bàn Giao
+  // Version 16.2 - [CodeGenesis] Phân quyền Tab hiển thị cho PG
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
@@ -17,19 +17,14 @@
   import HandoverInput from './components/HandoverInput.svelte';
   import Chatbot from './components/Chatbot.svelte';
   import SknvDashboard from './components/SknvDashboard.svelte';
+  import GroupTaskList from './components/GroupTaskList.svelte';
 
-  const APP_VERSION = 28; 
+  const APP_VERSION = 29; 
   let showUpdatePrompt = false;
 
-  // =========================================================================
-  // [NEW] ĐẶC QUYỀN TỐI CAO: Hack Global State cho linh-3031
-  // Đoạn code này sẽ tự động chạy ngầm, biến linh-3031 thành Super Admin 
-  // trên toàn bộ hệ thống (Header, AdminModal, Schedule...) mà không cần sửa DB.
-  // =========================================================================
   $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {
       $currentUser.role = 'super_admin';
   }
-  // =========================================================================
 
   let activeTab = '8nttt';
   let showAdminModal = false;
@@ -37,6 +32,7 @@
   let selectedTask = null;
   let noteInput = '';
   let selectedDate = getTodayStr();
+  let unsubmittedGroupTaskCount = 0; 
   
   let showTour = false;
   const tourKey = 'taskflow_v6_general_tour_seen';
@@ -55,6 +51,20 @@
   
   let hasCheckedInit = false; 
   let isTasksLoaded = false;
+
+  // [CodeGenesis] Ràng buộc quyền hiển thị Tab cho nhóm PG
+  const ALL_TABS = [
+      {id:'8nttt', icon:'fact_check', label:'8NTTT', color:'#00bcd4'},
+      {id:'sknv', icon:'health_and_safety', label:'SKNV', color:'#10b981'},
+      {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'},
+      {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'}, 
+      {id:'handover', icon:'assignment_ind', label:'Bàn Giao', color:'#9c27b0'},
+      {id:'group_task', icon:'groups', label:'Điểm Danh', color:'#f97316'}
+  ];
+
+  $: availableTabs = $currentUser?.role === 'pg' 
+      ? ALL_TABS.filter(t => ['8nttt', 'schedule', 'group_task'].includes(t.id))
+      : ALL_TABS;
 
   $: displayDateLabel = (() => {
       if (!selectedDate) return '';
@@ -137,13 +147,11 @@
   }
 
   async function initDailyTasksSafe(storeId, dateStr, currentTasks, template) {
-      // [SURGICAL FIX] Cho phép tạo việc cho hôm nay và tương lai, chặn ngược về quá khứ
       const today = new Date(getTodayStr());
       const target = new Date(dateStr);
       if (target < today) return; 
 
       hasCheckedInit = true;
-      // Lấy đúng thứ của ngày đang xem để sinh việc chuẩn xác
       const dayOfWeek = target.getDay();
       const batch = writeBatch(db);
       let hasUpdates = false;
@@ -188,12 +196,10 @@
       if (fetchTimer) clearTimeout(fetchTimer);
 
       fetchTimer = setTimeout(() => {
-        // [SURGICAL FIX] Tuyệt chủng công việc Demo
         unsubTemplate = onSnapshot(doc(db, 'settings', `template_${storeId}`), (docSnap) => {
             if (docSnap.exists()) {
                 taskTemplate.set(docSnap.data());
             } else {
-                // Trả về mảng rỗng để kho mới luôn sạch sẽ
                 taskTemplate.set({ warehouse: [], cashier: [], handover: [] });
             }
         });
@@ -294,15 +300,15 @@
       <Header on:openAdmin={() => showAdminModal = true} on:openTour={() => showTour = true} on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ -> Chọn "Thêm vào MH chính"')} on:jumpToTask={handleJumpToTask} />
       
      <nav id="tab-nav-container" class="tab-nav">
-        {#each [
-            {id:'8nttt', icon:'fact_check', label:'8NTTT', color:'#00bcd4'},
-            {id:'sknv', icon:'health_and_safety', label:'SKNV', color:'#10b981'},
-            {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'},
-            {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'}, 
-            {id:'handover', icon:'assignment_ind', label:'Bàn Giao', color:'#9c27b0'}
-        ] as t}
+        {#each availableTabs as t}
             <button class="tab-btn {activeTab===t.id?'active':''}" on:click={() => activeTab=t.id} style="--theme-color: {t.color};">
-                <div class="icon-box"><span class="material-icons-round">{t.icon}</span></div><small>{t.label}</small>
+                <div class="icon-box relative">
+                    <span class="material-icons-round">{t.icon}</span>
+                    {#if t.id === 'group_task' && unsubmittedGroupTaskCount > 0}
+                        <span class="absolute -top-1.5 -right-2.5 bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full shadow animate-pulse z-10">{unsubmittedGroupTaskCount}</span>
+                    {/if}
+                </div>
+                <small>{t.label}</small>
             </button>
         {/each}
       </nav>
@@ -320,6 +326,7 @@
                     {#if activeTab==='8nttt'}📋 Kiểm tra 8NTTT{/if}
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                     {#if activeTab==='handover'}🤝 Bàn Giao{/if}
+                    {#if activeTab==='group_task'}👥 Điểm Danh Tập Thể{/if}
                  {/if}
               </h3>
                {#if activeTab === 'warehouse' || activeTab === 'cashier' || activeTab === 'handover'}
@@ -348,6 +355,7 @@
         {:else if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> 
         {:else if activeTab === 'sknv'} <SknvDashboard />
         {:else if activeTab === '8nttt'} <DailyChecklist activeStoreId={$activeStoreId} dateStr={selectedDate} />
+        {:else if activeTab === 'group_task'} <GroupTaskList {selectedDate} on:updateBadge={(e) => unsubmittedGroupTaskCount = e.detail} />
         {:else} 
             {#if activeTab === 'handover'} <HandoverInput /> {/if}
             <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
@@ -384,7 +392,7 @@
   main { width: 100%; height: 100%; }
   .app-container { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-body); }
   .tab-nav { flex-shrink: 0; background: #ffffff; padding: 5px 10px; display: flex; gap: 5px; justify-content: space-between; border-bottom: 1px solid #eee; }
-  .tab-btn { flex: 1; border: none; background: transparent; padding: 5px; display: flex; flex-direction: column; align-items: center; color: #bbb; cursor: pointer; transition: all 0.2s ease; }
+  .tab-btn { flex: 1; border: none; background: transparent; padding: 5px; display: flex; flex-direction: column; align-items: center; color: #bbb; cursor: pointer; transition: all 0.2s ease; position: relative; }
   .icon-box { width: 36px; height: 24px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 2px; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
   .tab-btn small { font-size: 0.7rem; font-weight: 700; }
   .tab-btn.active { color: var(--theme-color); }
@@ -396,6 +404,7 @@
   footer { flex-shrink: 0; text-align: center; padding: 10px; color: #999; font-size: 0.75rem; font-weight: 700; background: #f4f7fc; }
   .theme-8nttt h3 { color: #00bcd4; }
   .theme-handover h3 { color: #9c27b0; }
+  .theme-group_task h3 { color: #f97316; }
   
   .animate-popIn { animation: popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
   @keyframes popIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
