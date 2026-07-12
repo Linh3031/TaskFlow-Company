@@ -22,9 +22,12 @@
     }
   }
 
+  // [CodeGenesis] Surgical Fix: Lọc sạch admin/super_admin khỏi danh sách đếm tổng
+  $: validUsers = storeUsers.filter(u => u.role !== 'admin' && u.role !== 'super_admin');
+
   $: estimatedCount = targetRole === 'ALL' 
-    ? storeUsers.length 
-    : storeUsers.filter(u => targetRole === 'PG' ? u.role === 'pg' : u.role !== 'pg').length;
+    ? validUsers.length 
+    : validUsers.filter(u => targetRole === 'PG' ? u.role === 'pg' : u.role !== 'pg').length;
 
   function handleSubmit() {
     if (!title.trim()) return alert("Vui lòng nhập nội dung công việc!");

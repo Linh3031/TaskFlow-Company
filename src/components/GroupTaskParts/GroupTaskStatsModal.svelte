@@ -13,8 +13,11 @@
   let submissions = [];
   let loading = false;
 
+  // [CodeGenesis] Surgical Fix: Miễn nhiễm Admin khỏi danh sách cần rà soát
   $: targetUsers = storeUsers.filter(u => {
     if (!task) return false;
+    if (u.role === 'admin' || u.role === 'super_admin') return false; 
+    
     if (task.targetRole === 'PG') return u.role === 'pg';
     if (task.targetRole === 'STAFF') return u.role !== 'pg';
     return true;
@@ -83,7 +86,6 @@
                       <span class="material-icons-round text-white text-xl">zoom_in</span>
                     </div>
                   {:else}
-                    <!-- Hiển thị Icon nếu công việc không yêu cầu ảnh -->
                     <div class="flex flex-col items-center justify-center h-full text-slate-300 bg-slate-50">
                       <span class="material-icons-round text-3xl text-green-400">task_alt</span>
                       <span class="text-[9px] font-bold mt-1 uppercase tracking-wider text-slate-400">Không dùng ảnh</span>
