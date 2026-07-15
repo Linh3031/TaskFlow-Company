@@ -243,14 +243,15 @@
                 }
             }
 
-            // LOGIC GIỚI HẠN OFF 50% DÀNH CHO NHÓM LINH HOẠT THEO NGÀY
+            // LOGIC GIỚI HẠN OFF TỐI ĐA 30% (LÀM TRÒN LÊN) DÀNH CHO NHÓM LINH HOẠT THEO NGÀY
             if (value === 'OFF') {
                 const pgCategory = currentPG?.category || 'Khác';
                 const groupPGs = pgList.filter(p => (p.category || 'Khác') === pgCategory);
                 
                 if (shiftType !== 'morning_only' && shiftType !== 'afternoon_only') {
                     const flexiblePGs = groupPGs.filter(p => p.shiftType !== 'morning_only' && p.shiftType !== 'afternoon_only');
-                    const maxOffs = Math.floor(flexiblePGs.length / 2);
+                    // [Surgical Change]: Tính 30% và làm tròn lên bằng Math.ceil
+                    const maxOffs = Math.ceil(flexiblePGs.length * 0.3);
                     const currentOffCount = flexiblePGs.filter(p => 
                         p.id !== pgId && 
                         pgScheduleData[p.id] && 
@@ -258,7 +259,7 @@
                     ).length;
 
                     if (currentOffCount >= maxOffs) {
-                        alert("Đã hết lượt off của ngày này, vui lòng chọn ngày khác hoặc liên hệ QL");
+                        alert("Đã hết lượt off của ngày này (Tối đa 30% nhân sự cùng nhóm), vui lòng chọn ngày khác hoặc liên hệ QL");
                         pgScheduleData = { ...pgScheduleData };
                         return;
                     }
