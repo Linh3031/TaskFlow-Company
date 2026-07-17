@@ -12,6 +12,9 @@
   let activeTab = 'DONE'; 
   let submissions = [];
   let loading = false;
+  
+  // [CodeGenesis] Thêm biến quản lý thanh tìm kiếm
+  let searchQuery = '';
 
   // [CodeGenesis] Surgical Fix: Miễn nhiễm Admin khỏi danh sách cần rà soát
   $: targetUsers = storeUsers.filter(u => {
@@ -26,6 +29,20 @@
   $: submittedUids = submissions.map(s => s.id);
   $: missingUsers = targetUsers.filter(u => !submittedUids.includes(String(u.username).toLowerCase()));
 
+  // [CodeGenesis] Logic phẫu thuật lọc theo từ khóa tìm kiếm
+  $: filteredSubmissions = submissions.filter(sub => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (sub.name || sub.id || '').toLowerCase().includes(q) || 
+           (sub.username || '').toLowerCase().includes(q);
+  });
+
+  $: filteredMissingUsers = missingUsers.filter(u => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (u.name || u.username || '').toLowerCase().includes(q);
+  });
+
   async function loadSubmissions() {
     if (!task) return;
     loading = true;
@@ -37,6 +54,7 @@
   }
 
   $: if (show && task) { loadSubmissions(); }
+  $: if (!show) { searchQuery = ''; } // Reset ô tìm kiếm khi đóng modal
 </script>
 
 {#if show && task}
@@ -68,6 +86,19 @@
         </button>
       </div>
 
+      <!-- [CodeGenesis] Thanh tìm kiếm nhân viên được cấy ghép an toàn vào bố cục -->
+      <div class="p-2.5 bg-white border-b border-slate-200 shrink-0 shadow-sm">
+        <div class="relative w-full">
+          <span class="material-icons-round absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+          <input type="text" bind:value={searchQuery} placeholder="Tìm nhân viên theo tên hoặc ID trong danh sách này..." class="w-full pl-8 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-indigo-500 focus:bg-white transition-colors">
+          {#if searchQuery}
+            <button type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 w-5 h-5 flex items-center justify-center" on:click={() => searchQuery = ''}>
+              <span class="material-icons-round text-sm">close</span>
+            </button>
+          {/if}
+        </div>
+      </div>
+
       <div class="flex-1 overflow-y-auto p-4 bg-slate-50/50 relative">
         {#if loading}
           <div class="absolute inset-0 bg-white/80 flex items-center justify-center z-10">
@@ -77,7 +108,7 @@
 
         {#if activeTab === 'DONE'}
           <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {#each submissions as sub, index}
+            {#each filteredSubmissions as sub, index}
               <div class="bg-white p-2 border border-slate-200 rounded-xl shadow-sm flex flex-col gap-1.5">
                 <div class="w-full h-28 rounded-lg overflow-hidden bg-slate-100 relative group border border-slate-100">
                   {#if sub.imageUrl}
@@ -98,13 +129,15 @@
                 </div>
               </div>
             {/each}
-            {#if submissions.length === 0}
-              <div class="col-span-full text-center py-10 text-slate-400 font-bold text-xs">Chưa có nhân viên nào điểm danh.</div>
+            {#if filteredSubmissions.length === 0}
+              <div class="col-span-full text-center py-10 text-slate-400 font-bold text-xs">
+                {searchQuery ? 'Không tìm thấy nhân viên nào phù hợp với từ khóa.' : 'Chưa có nhân viên nào điểm danh.'}
+              </div>
             {/if}
           </div>
         {:else}
           <div class="space-y-2">
-            {#each missingUsers as u}
+            {#each filteredMissingUsers as u}
               <div class="p-2.5 bg-red-50/50 border border-red-100 rounded-xl flex justify-between items-center">
                 <div class="flex items-center gap-2">
                   <div class="w-7 h-7 rounded-full bg-red-100 text-red-600 font-bold text-xs flex items-center justify-center">{String(u.name || u.username).charAt(0)}</div>
@@ -116,9 +149,9 @@
                 <span class="text-[10px] font-bold text-red-600 bg-white px-2 py-0.5 rounded border border-red-200 shadow-sm">Chưa điểm danh</span>
               </div>
             {/each}
-            {#if missingUsers.length === 0}
+            {#if filteredMissingUsers.length === 0}
               <div class="text-center py-10 text-green-600 font-bold text-xs bg-green-50 rounded-xl border border-green-200">
-                🎉 Tất cả nhân viên thuộc nhóm này đều đã hoàn tất điểm danh!
+                {searchQuery ? 'Không tìm thấy nhân viên nào phù hợp với từ khóa.' : '🎉 Tất cả nhân viên thuộc nhóm này đều đã hoàn tất điểm danh!'}
               </div>
             {/if}
           </div>

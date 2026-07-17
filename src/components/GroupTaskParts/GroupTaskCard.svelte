@@ -22,6 +22,14 @@
   $: requireImage = task.requireImage !== false; 
   $: isClosed = task.status === 'completed';
 
+  // [CodeGenesis] Phẫu thuật logic: Kiểm tra tự động khóa theo Deadline
+  $: isExpired = (() => {
+    if (!task.deadline) return false;
+    const now = new Date().getTime();
+    const deadlineTime = new Date(task.deadline).getTime();
+    return !isNaN(deadlineTime) && now > deadlineTime;
+  })();
+
   // [CodeGenesis] Lấy chi tiết lịch sử nộp của chính mình để hiện giờ/ảnh
   $: if (hasSubmitted && !mySubmission) {
     fetchMySubmission();
@@ -43,6 +51,7 @@
   }
 
   async function handleFileSelect(e) {
+    if (isExpired && !isAdmin) return alert("Công việc này đã hết hạn điểm danh!");
     const file = e.target.files[0];
     if (!file) return;
     isUploading = true;
@@ -68,12 +77,13 @@
   }
 
   function handleQuickComplete() {
+    if (isExpired && !isAdmin) return alert("Công việc này đã hết hạn điểm danh!");
     mySubmission = { imageUrl: null, submittedAt: new Date().toISOString() };
     dispatch('submitProof', { taskId: task.id, imageUrl: null, username: currentUser.username || 'Unknown', name: currentUser.name || currentUser.username });
   }
 </script>
 
-<div class="w-full bg-white border border-slate-200 rounded-xl p-4 shadow-sm transition-all duration-300 flex flex-col gap-3 {hasSubmitted || isClosed ? 'bg-slate-50/80 opacity-75 border-slate-200 order-last' : 'hover:border-indigo-300 order-first'}">
+<div class="w-full bg-white border border-slate-200 rounded-xl p-4 shadow-sm transition-all duration-300 flex flex-col gap-3 {hasSubmitted || isClosed || isExpired ? 'bg-slate-50/80 opacity-80 border-slate-200 order-last' : 'hover:border-indigo-300 order-first'}">
   <div class="flex justify-between items-start gap-2">
     <div class="flex-1 overflow-hidden">
       <div class="flex items-center gap-1.5 flex-wrap mb-1">
@@ -81,12 +91,13 @@
           {task.targetRole === 'PG' ? 'Nhóm PG' : task.targetRole === 'STAFF' ? 'Nhân viên' : 'Toàn bộ kho'}
         </span>
         {#if task.deadline}
-          <span class="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded flex items-center gap-0.5">
-            <span class="material-icons-round text-[12px] text-red-500">alarm</span> {formatDateTime(task.deadline)}
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded flex items-center gap-0.5 {isExpired ? 'bg-red-100 text-red-700 border border-red-200' : 'text-slate-500 bg-slate-100'}">
+            <span class="material-icons-round text-[12px] {isExpired ? 'text-red-600' : 'text-red-500'}">alarm</span> {formatDateTime(task.deadline)} {isExpired ? '(Đã hết hạn)' : ''}
           </span>
         {/if}
       </div>
-      <h4 class="font-bold text-sm text-slate-800 break-words {hasSubmitted || isClosed ? 'line-through text-slate-500' : ''}">{task.title}</h4>
+      <!-- [CodeGenesis] Đã thêm condition isExpired vào line-through -->
+      <h4 class="font-bold text-sm text-slate-800 break-words {hasSubmitted || isClosed || isExpired ? 'line-through text-slate-500' : ''}">{task.title}</h4>
       <p class="text-[11px] text-slate-400 mt-0.5">Tạo bởi: {task.createdBy || 'Admin'}</p>
     </div>
 
@@ -143,7 +154,7 @@
             </div>
           </div>
 
-          {#if !isClosed && requireImage}
+          {#if !isClosed && !isExpired && requireImage}
             <input type="file" hidden accept="image/*" bind:this={fileInput} on:change={handleFileSelect}>
             <button type="button" class="text-[11px] px-2 py-1 bg-white border border-indigo-200 rounded-lg font-bold text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-50 flex items-center gap-1" disabled={isUploading} on:click={() => fileInput.click()}>
               {#if isUploading}
@@ -158,6 +169,11 @@
         {#if isClosed}
           <span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg text-[11px] border border-slate-200 font-bold">
             <span class="material-icons-round text-sm">lock</span> Đã chốt kết thúc
+          </span>
+        {:else if isExpired}
+          <!-- [CodeGenesis] Huy hiệu hết hạn tự động khóa nút điểm danh -->
+          <span class="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2.5 py-1 rounded-lg text-[11px] border border-red-200 font-bold shadow-2xs">
+            <span class="material-icons-round text-sm">timer_off</span> Đã hết hạn điểm danh
           </span>
         {:else}
           {#if requireImage}
