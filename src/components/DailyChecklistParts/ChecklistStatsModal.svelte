@@ -44,7 +44,7 @@
                     <span class="material-icons-round">dashboard_customize</span> Tổng Quan 8NTTT - Tháng {statsData.month}
                 </h3>
             </div>
-            <button class="text-slate-400 hover:text-red-500 bg-white rounded-full p-1 shadow-sm" on:click={() => dispatch('close')}>
+            <button class="text-slate-400 hover:text-red-500 bg-white rounded-full p-1 shadow-sm" aria-label="Đóng thống kê" on:click={() => dispatch('close')}>
                 <span class="material-icons-round">close</span>
             </button>
         </div>
@@ -70,8 +70,23 @@
                 <div class="p-4 flex flex-col md:flex-row gap-4 h-full items-stretch">
                     
                     <div class="flex-[3] bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col max-h-full">
-                        <div class="p-3 bg-slate-50 border-b border-slate-200 font-bold text-slate-700 flex justify-between items-center shrink-0">
+                        <div class="p-3 bg-slate-50 border-b border-slate-200 font-bold text-slate-700 flex justify-between items-center shrink-0 flex-wrap gap-2">
                             <span class="flex items-center gap-1"><span class="material-icons-round text-indigo-500 text-sm">fact_check</span> Khu Vực Hiện Có ({totalAreas})</span>
+                            <div class="flex flex-wrap gap-2 justify-end">
+                                <button class="bg-red-50 border border-red-300 text-red-700 hover:bg-red-100 px-3 py-1 rounded-lg text-xs transition-colors flex items-center gap-1 shadow-sm font-bold" aria-label="Xóa tất cả khu vực" on:click={() => dispatch('deleteAll')}>
+                                    <span class="material-icons-round text-[16px]">delete_sweep</span> Xóa Hết
+                                </button>
+                                <button class="bg-teal-50 border border-teal-300 text-teal-700 hover:bg-teal-100 px-3 py-1 rounded-lg text-xs transition-colors flex items-center gap-1 shadow-sm font-bold" aria-label="Tải file mẫu" on:click={() => dispatch('exportTemplate')}>
+                                    <span class="material-icons-round text-[16px]">description</span> File Mẫu
+                                </button>
+                                <button class="bg-green-50 border border-green-300 text-green-700 hover:bg-green-100 px-3 py-1 rounded-lg text-xs transition-colors flex items-center gap-1 shadow-sm font-bold" aria-label="Xuất dữ liệu Excel" on:click={() => dispatch('exportExcel')}>
+                                    <span class="material-icons-round text-[16px]">file_download</span> Xuất Excel
+                                </button>
+                                <label for="import-excel-input" class="bg-blue-50 border border-blue-300 text-blue-700 hover:bg-blue-100 px-3 py-1 rounded-lg text-xs transition-colors flex items-center gap-1 shadow-sm font-bold cursor-pointer" aria-label="Nạp dữ liệu Excel">
+                                    <span class="material-icons-round text-[16px]">file_upload</span> Nạp Excel
+                                    <input type="file" id="import-excel-input" accept=".xlsx, .xls" class="hidden" on:change={(e) => { dispatch('importExcel', { file: e.target.files[0] }); e.target.value = null; }}>
+                                </label>
+                            </div>
                         </div>
                         <div class="flex-1 overflow-y-auto p-3 space-y-2">
                             {#each checklistData as item}
@@ -89,7 +104,7 @@
                                                 <span class="material-icons-round text-[12px] align-text-bottom mr-0.5">warning</span> Chưa phân người
                                             {/if}
                                         </div>
-                                        <button class="bg-indigo-50 hover:bg-indigo-600 text-indigo-500 hover:text-white border border-indigo-100 p-1.5 rounded-lg transition-colors flex items-center justify-center opacity-70 group-hover:opacity-100 shadow-sm" on:click={() => dispatch('editArea', item)} title="Chỉnh sửa khu vực này">
+                                        <button class="bg-indigo-50 hover:bg-indigo-600 text-indigo-500 hover:text-white border border-indigo-100 p-1.5 rounded-lg transition-colors flex items-center justify-center opacity-70 group-hover:opacity-100 shadow-sm" aria-label="Chỉnh sửa khu vực" on:click={() => dispatch('editArea', item)} title="Chỉnh sửa khu vực này">
                                             <span class="material-icons-round text-[16px]">edit</span>
                                         </button>
                                     </div>

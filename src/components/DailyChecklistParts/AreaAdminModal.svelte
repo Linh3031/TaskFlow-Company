@@ -3,6 +3,8 @@
     export let show = false;
     export let editingAreaId = null;
     export let newAreaName = '';
+    export let newStaffLimit = 0; // Thêm Prop cấu hình NV
+    export let newPgLimit = 0;    // Thêm Prop cấu hình PG
     export let allStaff = [];
     export let selectedStaffIds = [];
     export let currentItemAssignees = []; 
@@ -57,13 +59,25 @@
                 <label class="block text-xs font-bold text-slate-500 mb-1">Tên Khu Vực / Quầy Kệ</label>
                 <input type="text" bind:value={newAreaName} placeholder="Vd: Quầy Tivi Sony..." class="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-semibold focus:border-cyan-500 focus:ring-1 focus:ring-cyan-200 outline-none">
             </div>
+
+            <!-- CHÈN THÊM KHỐI ĐỊNH MỨC NĂNG LỰC -->
+            <div class="flex gap-3">
+                <div class="flex-1">
+                    <label class="block text-[10px] font-bold text-slate-500 mb-1">Số NV cần chia (Trộn Lịch)</label>
+                    <input type="number" min="0" bind:value={newStaffLimit} class="w-full p-2 border border-slate-300 rounded-lg text-sm text-center font-semibold outline-none focus:border-cyan-500">
+                </div>
+                <div class="flex-1">
+                    <label class="block text-[10px] font-bold text-slate-500 mb-1">Số PG cần chia (Trộn Lịch)</label>
+                    <input type="number" min="0" bind:value={newPgLimit} class="w-full p-2 border border-slate-300 rounded-lg text-sm text-center font-semibold outline-none focus:border-cyan-500">
+                </div>
+            </div>
             
-            <div class="flex flex-col h-full">
+            <div class="flex flex-col h-full border-t border-slate-100 pt-3">
                 <div class="flex justify-between items-end mb-2">
-                    <label class="block text-xs font-bold text-slate-500">Người Phụ Trách (Chọn nhiều)</label>
+                    <label class="block text-xs font-bold text-slate-500">Hoặc chọn thủ công (Bỏ qua nếu muốn máy tự trộn)</label>
                     {#if selectedStaffIds.length > 0}
                         <button class="text-[10px] font-bold text-red-500 hover:text-red-700 hover:bg-red-100 bg-red-50 px-2 py-0.5 rounded border border-red-200 transition-colors" on:click={clearAllSelected}>
-                            Bỏ chọn tất cả ({selectedStaffIds.length})
+                            Bỏ chọn ({selectedStaffIds.length})
                         </button>
                     {/if}
                 </div>
@@ -73,7 +87,7 @@
                     <input type="text" bind:value={searchStaffQuery} placeholder="Tìm nhân viên..." class="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-cyan-500">
                 </div>
 
-                <div class="max-h-56 overflow-y-auto bg-slate-50 border border-slate-200 rounded-lg p-1.5 space-y-0.5">
+                <div class="max-h-48 overflow-y-auto bg-slate-50 border border-slate-200 rounded-lg p-1.5 space-y-0.5">
                     {#each filteredStaff as s}
                         <label class="flex items-center gap-3 p-2 hover:bg-cyan-100 rounded-md cursor-pointer transition-colors border border-transparent hover:border-cyan-200 {selectedStaffIds.includes(s.id) ? 'bg-cyan-50 border-cyan-200' : ''}">
                             <input type="checkbox" checked={selectedStaffIds.includes(s.id)} on:change={() => toggleStaffSelection(s.id)} class="w-4 h-4 accent-cyan-600 rounded">

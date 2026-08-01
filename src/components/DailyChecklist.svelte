@@ -5,6 +5,7 @@
     import { currentUser } from '../lib/stores';
     import { getCurrentTimeShort, getTodayStr } from '../lib/utils';
     import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+    import * as XLSX from 'xlsx';
 
     import ChecklistHeader from './DailyChecklistParts/ChecklistHeader.svelte';
     import ChecklistItem from './DailyChecklistParts/ChecklistItem.svelte';
@@ -26,6 +27,8 @@
     let editingAreaId = null;
     let allStaff = [];
     let newAreaName = '';
+    let newStaffLimit = 0;
+    let newPgLimit = 0;   
     let selectedStaffIds = [];
     let currentItemAssignees = []; 
     
@@ -127,7 +130,66 @@
         }
     }
 
-    // [CodeGenesis] Phẫu Thuật Cào Data + Cắm Radar Debug
+    async function handleAutoRotate() {
+        if (!confirm("⚠️ TỰ ĐỘNG TRỘN LỊCH:\nHệ thống sẽ chia lại toàn bộ người vào các khu vực theo định mức đã cài. Quá trình này sẽ GHI ĐÈ dữ liệu hôm nay.\n\nBạn có chắc chắn?")) return;
+
+        await fetchAllStaff();
+
+        const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
+        const snap = await getDoc(templateRef);
+        let currentTemplateItems = snap.exists() ? (snap.data().items || []) : [];
+
+        const totalNeeded = currentTemplateItems.reduce((sum, item) => sum + (item.staffLimit || 0) + (item.pgLimit || 0), 0);
+        if (totalNeeded === 0) {
+            alert("❌ THẤT BẠI: Bạn chưa cài đặt số lượng người cần thiết (Định Mức) cho bất kỳ khu vực nào.\nVui lòng bấm 'Thêm Khu Vực' hoặc 'Sửa' khu vực hiện tại để điền số Nhân Viên / PG, hoặc Import bằng file Excel để hệ thống tự học định mức.");
+            return;
+        }
+
+        let listStaff = allStaff.filter(s => !(s.role || '').toLowerCase().includes('pg')).sort((a,b) => a.username.localeCompare(b.username));
+        let listPG = allStaff.filter(s => (s.role || '').toLowerCase().includes('pg')).sort((a,b) => a.username.localeCompare(b.username));
+
+        const dayNumber = parseInt(dateStr.split('-')[2], 10) || 1;
+        
+        const rotateArray = (arr, steps) => {
+            if (arr.length === 0) return [];
+            const offset = steps % arr.length;
+            return [...arr.slice(offset), ...arr.slice(0, offset)];
+        };
+
+        const rotatedStaff = rotateArray(listStaff, dayNumber);
+        const rotatedPG = rotateArray(listPG, dayNumber);
+
+        let staffIndex = 0;
+        let pgIndex = 0;
+
+        const newDailyItems = checklistData.map(item => {
+            let areaAssignees = [];
+            const templateItem = currentTemplateItems.find(i => i.id === item.id);
+            const limitStaff = templateItem?.staffLimit || 0;
+            const limitPG = templateItem?.pgLimit || 0;
+
+            for (let i = 0; i < limitStaff; i++) {
+                if (rotatedStaff.length > 0) {
+                    areaAssignees.push(rotatedStaff[staffIndex % rotatedStaff.length]);
+                    staffIndex++;
+                }
+            }
+            for (let i = 0; i < limitPG; i++) {
+                if (rotatedPG.length > 0) {
+                    areaAssignees.push(rotatedPG[pgIndex % rotatedPG.length]);
+                    pgIndex++;
+                }
+            }
+
+            return { ...item, assignees: areaAssignees.map(a => ({ id: a.id, username: a.username })) };
+        });
+
+        const dailyRef = getDailyRecordRef();
+        await updateDoc(dailyRef, { items: newDailyItems });
+        
+        alert("✅ Đã hoàn tất Trộn Lịch xoay vòng!");
+    }
+
     async function loadAndShowStats() {
         showStatsModal = true;
         statsLoading = true;
@@ -135,8 +197,6 @@
 
         console.warn("====== 🚀 BẮT ĐẦU CÀO DATA THỐNG KÊ (DEBUG MODE) ======");
         const [year, month] = dateStr.split('-');
-        console.warn(`[Stats Radar] DateStr gốc: ${dateStr} -> Year: ${year}, Month: ${month}`);
-
         const daysInMonth = new Date(year, month, 0).getDate();
         const daysArray = Array.from({length: daysInMonth}, (_, i) => i + 1);
         
@@ -145,7 +205,6 @@
             const fetchPromises = [];
             
             for(let i = 1; i <= daysInMonth; i++) {
-                // Tạo ID quét 2 kiểu định dạng: Có số 0 và không có số 0
                 const paddedMonth = month.toString().padStart(2, '0');
                 const paddedDay = i.toString().padStart(2, '0');
                 const standardRecordId = `${activeStoreId}_${year}-${paddedMonth}-${paddedDay}`;
@@ -157,45 +216,34 @@
                         getDoc(doc(db, '8nttt_daily_records', oldRecordId))
                     ]).then(([snapNew, snapOld]) => {
                         const finalSnap = snapNew.exists() ? snapNew : (snapOld.exists() ? snapOld : null);
-                        if (finalSnap) {
-                            console.log(`[Stats Radar] 🟢 TÌM THẤY DATA Ngày ${i}: (ID: ${finalSnap.id}) -> Có ${finalSnap.data().items?.length || 0} khu vực`);
-                        } else {
-                            console.log(`[Stats Radar] 🔴 Rỗng Ngày ${i} (Đã thử: ${standardRecordId} và ${oldRecordId})`);
-                        }
                         return { day: i, snap: finalSnap };
                     })
                 );
             }
             
             const results = await Promise.all(fetchPromises);
-            let totalImagesFound = 0;
-
+            
             results.forEach(({day, snap}) => {
                 if(snap && snap.data().items) {
                     snap.data().items.forEach(item => {
-                        // 1. Cố gắng cào từ luồng Data mới (uploaders)
                         if(item.uploaders && item.uploaders.length > 0) {
                             item.uploaders.forEach(username => {
                                 if(!username) return;
                                 if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {} };
                                 usersStats[username].total++;
                                 usersStats[username].days[day] = (usersStats[username].days[day] || 0) + 1;
-                                totalImagesFound++;
                             });
                         }
-                        // 2. Dự phòng cào từ luồng Data cũ (completedBy - Quy chuẩn 4 ảnh/lượt)
                         else if (item.completedBy && item.completed) {
                             const username = item.completedBy;
                             if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {} };
                             usersStats[username].total += 4;
                             usersStats[username].days[day] = (usersStats[username].days[day] || 0) + 4;
-                            totalImagesFound += 4;
                         }
                     });
                 }
             });
             
-            console.warn(`[Stats Radar] 🚀 TỔNG KẾT: Cào thành công ${totalImagesFound} lượt ảnh trong toàn tháng.`, usersStats);
             statsData = { month: `${month}/${year}`, days: daysArray, matrix: Object.values(usersStats) };
         } catch (error) {
             console.error("Lỗi lấy thống kê tháng:", error);
@@ -211,16 +259,28 @@
         if (item) { 
             editingAreaId = item.id;
             newAreaName = item.areaName;
+            
+            const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
+            const snap = await getDoc(templateRef);
+            let currentTemplateItems = snap.exists() ? (snap.data().items || []) : [];
+            const tItem = currentTemplateItems.find(i => i.id === item.id);
+            newStaffLimit = tItem?.staffLimit || 0;
+            newPgLimit = tItem?.pgLimit || 0;
+
             selectedStaffIds = (item.assignees || []).map(a => a.id);
             currentItemAssignees = item.assignees || []; 
         } else { 
             editingAreaId = null;
-            newAreaName = ''; selectedStaffIds = []; currentItemAssignees = [];
+            newAreaName = ''; 
+            newStaffLimit = 0;
+            newPgLimit = 0;
+            selectedStaffIds = []; 
+            currentItemAssignees = [];
         }
     }
 
     async function saveAreaToTemplate() {
-        if (!newAreaName.trim() || selectedStaffIds.length === 0) return alert("Vui lòng nhập tên và chọn người phụ trách!");
+        if (!newAreaName.trim()) return alert("Vui lòng nhập tên khu vực!");
         
         const assigneesData = allStaff.filter(s => selectedStaffIds.includes(s.id)).map(s => ({ id: s.id, username: s.username }));
         
@@ -229,9 +289,10 @@
         let currentItems = snap.exists() ? (snap.data().items || []) : [];
         let newItemData = null;
         
-        if (editingAreaId) { currentItems = currentItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), assignees: assigneesData } : i); } 
-        else { 
-            newItemData = { id: 'area_' + Date.now(), areaName: newAreaName.trim(), assignees: assigneesData };
+        if (editingAreaId) { 
+            currentItems = currentItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), staffLimit: newStaffLimit, pgLimit: newPgLimit, assignees: assigneesData } : i); 
+        } else { 
+            newItemData = { id: 'area_' + Date.now(), areaName: newAreaName.trim(), staffLimit: newStaffLimit, pgLimit: newPgLimit, assignees: assigneesData };
             currentItems.push(newItemData); 
         }
         await setDoc(templateRef, { items: currentItems }, { merge: true });
@@ -240,7 +301,7 @@
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
             let dailyItems = dailySnap.data().items || [];
-            if (editingAreaId) dailyItems = dailyItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), assignees: assigneesData } : i);
+            if (editingAreaId) dailyItems = dailyItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), staffLimit: newStaffLimit, pgLimit: newPgLimit, assignees: assigneesData } : i);
             else dailyItems.push({ ...newItemData, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null });
             await updateDoc(dailyRef, { items: dailyItems });
         } else if (!editingAreaId && newItemData) {
@@ -264,6 +325,210 @@
             let dailyItems = dailySnap.data().items || [];
             await updateDoc(dailyRef, { items: dailyItems.filter(i => i.id !== id) });
         }
+    }
+
+    async function handleDeleteAll() {
+        if (!confirm(`⚠️ NGUY HIỂM TỘT ĐỘ:\nBạn đang yêu cầu XÓA TOÀN BỘ danh sách khu vực.\nThao tác này KHÔNG THỂ KHÔI PHỤC và sẽ làm mất dữ liệu đã chụp hôm nay.\n\nBạn có chắc chắn muốn tiếp tục?`)) return;
+        
+        try {
+            const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
+            await setDoc(templateRef, { items: [] }, { merge: true });
+            
+            const dailyRef = getDailyRecordRef();
+            const dailySnap = await getDoc(dailyRef);
+            if (dailySnap.exists()) { 
+                await updateDoc(dailyRef, { items: [] });
+            }
+            alert("✅ Đã dọn dẹp trắng toàn bộ khu vực.");
+        } catch (error) {
+            alert("❌ Lỗi khi xóa: " + error.message);
+        }
+    }
+
+    // --- LOGIC XUẤT FILE MẪU CÓ HƯỚNG DẪN TRỰC QUAN ---
+    async function handleExportTemplate() {
+        await fetchAllStaff();
+        
+        const wsData = [];
+        
+        // 1. Dòng Mock Data Hướng Dẫn (Sẽ bị bỏ qua khi Import)
+        wsData.push({ 
+            'Tên Nhân Sự': '👉 HƯỚNG DẪN SỬ DỤNG:',
+            'Quầy Mẫu 1 (Đổi Tên Tùy Ý)': "Gõ chữ 'x' vào ô này",
+            'Quầy Mẫu 2 (Đổi Tên Tùy Ý)': "để phân công người.",
+            'Quầy Mẫu 3 (Đổi Tên Tùy Ý)': "Thêm/Xóa cột tùy ý."
+        });
+
+        // 2. Dữ liệu thật
+        allStaff.forEach(staff => {
+            wsData.push({ 
+                'Tên Nhân Sự': staff.username,
+                'Quầy Mẫu 1 (Đổi Tên Tùy Ý)': '',
+                'Quầy Mẫu 2 (Đổi Tên Tùy Ý)': '',
+                'Quầy Mẫu 3 (Đổi Tên Tùy Ý)': ''
+            });
+        });
+
+        const ws = XLSX.utils.json_to_sheet(wsData);
+        const colWidths = [{ wch: 30 }, { wch: 25 }, { wch: 25 }, { wch: 25 }];
+        ws['!cols'] = colWidths;
+        
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "FileMau_8NTTT");
+        XLSX.writeFile(wb, `FileMau_8NTTT_${activeStoreId}.xlsx`);
+    }
+
+    async function handleExportExcel() {
+        await fetchAllStaff();
+        
+        if (checklistData.length === 0) {
+            alert("⚠️ CẢNH BÁO: Chưa có khu vực nào để xuất. Đang tự động chuyển sang chế độ Xuất File Mẫu.");
+            return handleExportTemplate();
+        }
+
+        const wsData = allStaff.map(staff => {
+            const row = { 'Tên Nhân Sự': staff.username };
+            checklistData.forEach(item => {
+                const isAssigned = (item.assignees || []).some(a => a.id === staff.id);
+                row[item.areaName] = isAssigned ? 'x' : '';
+            });
+            return row;
+        });
+
+        const ws = XLSX.utils.json_to_sheet(wsData);
+        const colWidths = [{ wch: 30 }]; 
+        checklistData.forEach(() => colWidths.push({ wch: 20 })); 
+        ws['!cols'] = colWidths;
+        
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "PhanCong_8NTTT");
+        XLSX.writeFile(wb, `PhanCong_8NTTT_${dateStr}.xlsx`);
+    }
+
+    // --- LOGIC NẠP EXCEL & TỰ ĐỘNG TÍNH ĐỊNH MỨC ---
+    async function handleImportExcel(event) {
+        const file = event.detail.file;
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                await fetchAllStaff();
+                let unfoundUsers = [];
+                let updatedCount = 0;
+                
+                const staffMap = new Map(allStaff.map(s => [s.username.toLowerCase().trim(), s]));
+                const newAreaAssigneesMap = new Map();
+
+                // Quét 1: Tạo Map các khu vực từ header của Excel
+                for (let row of jsonData) {
+                    for (const key of Object.keys(row)) {
+                        if (key !== 'Tên Nhân Sự' && !key.includes('(Đổi Tên Tùy Ý)')) {
+                            const areaName = key.trim();
+                            const areaNameLower = areaName.toLowerCase();
+                            if (!newAreaAssigneesMap.has(areaNameLower)) {
+                                newAreaAssigneesMap.set(areaNameLower, { areaName: areaName, assignees: [] });
+                            }
+                        }
+                    }
+                }
+
+                // Quét 2: Gắn user vào khu vực (Bỏ qua dòng hướng dẫn)
+                for (let row of jsonData) {
+                    const staffNameRaw = row['Tên Nhân Sự'] || '';
+                    if (!staffNameRaw || staffNameRaw.includes('HƯỚNG DẪN')) continue; // Bỏ qua Mock Data
+                    
+                    const staff = staffMap.get(staffNameRaw.toLowerCase().trim());
+                    if (!staff) {
+                        unfoundUsers.push(staffNameRaw);
+                        continue;
+                    }
+
+                    for (const [key, value] of Object.entries(row)) {
+                        if (key !== 'Tên Nhân Sự' && !key.includes('(Đổi Tên Tùy Ý)') && (value === 'x' || value === 'X' || value === 1)) {
+                            const areaNameLower = key.trim().toLowerCase();
+                            newAreaAssigneesMap.get(areaNameLower).assignees.push({ id: staff.id, username: staff.username });
+                        }
+                    }
+                }
+
+                const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
+                const snap = await getDoc(templateRef);
+                let currentTemplateItems = snap.exists() ? (snap.data().items || []) : [];
+                
+                const dailyRef = getDailyRecordRef();
+                const dailySnap = await getDoc(dailyRef);
+                let currentDailyItems = dailySnap.exists() ? (dailySnap.data().items || []) : checklistData;
+
+                let areaMapTemplate = new Map(currentTemplateItems.map(i => [i.areaName.toLowerCase().trim(), i]));
+                let areaMapDaily = new Map(currentDailyItems.map(i => [i.areaName.toLowerCase().trim(), i]));
+
+                for (const [areaNameLower, data] of newAreaAssigneesMap.entries()) {
+                    // Logic Auto-learn: Tự động tính toán định mức (Capacity) từ danh sách được gán
+                    let staffCount = 0;
+                    let pgCount = 0;
+                    
+                    data.assignees.forEach(a => {
+                        const staffInfo = staffMap.get(a.username.toLowerCase().trim());
+                        if (staffInfo && (staffInfo.role || '').toLowerCase().includes('pg')) {
+                            pgCount++;
+                        } else {
+                            staffCount++;
+                        }
+                    });
+
+                    // Cập nhật hoặc tạo mới Area
+                    if (areaMapTemplate.has(areaNameLower)) {
+                        let existing = areaMapTemplate.get(areaNameLower);
+                        existing.assignees = data.assignees;
+                        existing.staffLimit = staffCount; // Máy tự học định mức
+                        existing.pgLimit = pgCount;       // Máy tự học định mức
+                    } else {
+                        const newItem = { 
+                            id: 'area_' + Date.now() + Math.random().toString(36).substring(2,9), 
+                            areaName: data.areaName, 
+                            assignees: data.assignees,
+                            staffLimit: staffCount,   // Ghi lại định mức để sau này Auto-Rotate
+                            pgLimit: pgCount 
+                        };
+                        currentTemplateItems.push(newItem);
+                        areaMapTemplate.set(areaNameLower, newItem);
+                    }
+
+                    if (areaMapDaily.has(areaNameLower)) {
+                        areaMapDaily.get(areaNameLower).assignees = data.assignees;
+                    } else {
+                        const newId = areaMapTemplate.get(areaNameLower).id; 
+                        currentDailyItems.push({ id: newId, areaName: data.areaName, assignees: data.assignees, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null });
+                    }
+                    updatedCount++;
+                }
+
+                await setDoc(templateRef, { items: currentTemplateItems }, { merge: true });
+                if (dailySnap.exists()) {
+                    await updateDoc(dailyRef, { items: currentDailyItems });
+                } else {
+                    await setDoc(dailyRef, { items: currentDailyItems, createdAt: serverTimestamp() });
+                }
+
+                let msg = `✅ Đã nạp và cập nhật thành công ${updatedCount} khu vực!\n💡 Hệ thống đã tự động tính toán định mức cho nút "Trộn Lịch".\n`;
+                if (unfoundUsers.length > 0) {
+                    const uniqueUnfound = [...new Set(unfoundUsers)];
+                    msg += `\n⚠️ CẢNH BÁO: Phát hiện nhân sự không tồn tại (đã bỏ qua):\n- ${uniqueUnfound.join('\n- ')}\n\nVui lòng không sửa tên nhân sự trên dòng Excel.`;
+                }
+                alert(msg);
+                
+            } catch (error) {
+                alert("Lỗi đọc file Excel: " + error.message);
+            }
+        };
+        reader.readAsArrayBuffer(file);
     }
 
     function compressImage(file, maxEdge = 800, quality = 0.5) {
@@ -351,7 +616,7 @@
 </script>
 
 <div class="w-full h-full flex flex-col bg-slate-50 rounded-xl border border-cyan-200 shadow-sm overflow-hidden relative">
-    <ChecklistHeader {isAdmin} on:openAdmin={() => openAdminModal(null)} on:openStats={loadAndShowStats} on:locate={scrollToMyArea} />
+    <ChecklistHeader {isAdmin} on:autoRotate={handleAutoRotate} on:openAdmin={() => openAdminModal(null)} on:openStats={loadAndShowStats} on:locate={scrollToMyArea} />
     <div class="flex-1 overflow-y-auto p-2 sm:p-3 bg-slate-50 space-y-3">
         {#if loading}
             <div class="flex justify-center py-10"><span class="material-icons-round animate-spin text-cyan-500 text-3xl">sync</span></div>
@@ -372,6 +637,18 @@
 
 <LightboxModal show={showLightbox} images={lightboxImages} currentIndex={lightboxIndex} on:close={() => showLightbox = false} on:updateIndex={(e) => lightboxIndex = e.detail} />
 
-<AreaAdminModal show={showAdminModal} {editingAreaId} {allStaff} {currentItemAssignees} bind:newAreaName bind:selectedStaffIds on:close={() => showAdminModal = false} on:save={saveAreaToTemplate} />
+<AreaAdminModal show={showAdminModal} {editingAreaId} {allStaff} {currentItemAssignees} bind:newAreaName bind:newStaffLimit bind:newPgLimit bind:selectedStaffIds on:close={() => showAdminModal = false} on:save={saveAreaToTemplate} />
 
-<ChecklistStatsModal show={showStatsModal} {statsData} {statsLoading} {allStaff} checklistData={sortedChecklistData} on:close={() => showStatsModal = false} on:editArea={(e) => openAdminModal({detail: e.detail})} />
+<ChecklistStatsModal 
+    show={showStatsModal} 
+    {statsData} 
+    {statsLoading} 
+    {allStaff} 
+    checklistData={sortedChecklistData} 
+    on:close={() => showStatsModal = false} 
+    on:editArea={(e) => openAdminModal({detail: e.detail})} 
+    on:exportExcel={handleExportExcel}
+    on:importExcel={handleImportExcel}
+    on:deleteAll={handleDeleteAll}
+    on:exportTemplate={handleExportTemplate}
+/>
