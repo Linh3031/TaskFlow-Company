@@ -371,9 +371,12 @@
     />
 {/if}
 
+<!-- [NEW] GẮN MODAL SẮP XẾP VÀO ĐÂY, TRUYỀN FULL STORE STAFF VÀ SCHEDULE DATA -->
 {#if showReorderModal && scheduleData}
     <StaffReorderModal 
         staffList={scheduleData.stats} 
+        fullStoreStaff={allStoreUsers}
+        {scheduleData}
         on:close={() => showReorderModal = false} 
         on:save={(e) => handleSaveStaffOrder(e.detail)} 
     />

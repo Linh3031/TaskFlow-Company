@@ -51,11 +51,13 @@
     <table class="w-full min-w-max text-sm text-center border-collapse">
         <thead class="bg-amber-400 text-slate-900 sticky top-0 z-30 shadow-md">
             <tr>
-                <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-[60] min-w-[140px] max-w-[140px] text-left pl-3 shadow {isAdmin ? 'cursor-pointer hover:bg-amber-50 group transition-colors' : ''}" title={isAdmin ? 'Sắp xếp lại nhân sự' : ''} on:click={() => { if(isAdmin) dispatch('openReorder') }}>
+                <th rowspan="2" class="p-2 sticky left-0 bg-white border-r border-amber-200 z-[60] min-w-[140px] max-w-[140px] text-left pl-3 shadow {isAdmin ? 'cursor-pointer hover:bg-amber-50 transition-colors' : ''}" on:click={() => { if(isAdmin) dispatch('openReorder') }}>
                     <div class="flex items-center justify-between">
-                        <span>NHÂN SỰ</span>
+                        <span class="font-bold">NHÂN SỰ</span>
                         {#if isAdmin}
-                            <span class="material-icons-round text-[14px] text-amber-500 opacity-30 group-hover:opacity-100 transition-opacity">sort</span>
+                            <button class="bg-amber-100 border border-amber-300 text-amber-700 px-1.5 py-0.5 rounded shadow-sm hover:bg-amber-600 hover:text-white transition-all flex items-center gap-1 group/btn" title="Sắp xếp / Thêm nhân sự mới">
+                                <span class="material-icons-round text-[16px] group-hover/btn:scale-110 transition-transform">person_add</span>
+                            </button>
                         {/if}
                     </div>
                 </th>
