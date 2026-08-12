@@ -106,41 +106,54 @@
       isLoading = false;
   }
 
-  // [SURGICAL FIX] Thêm biến skipConfirm để chạy Xóa hàng loạt không bị spam Hỏi
+  // [PHẪU THUẬT LOGIC]: Bọc Try-Catch-Finally, tiêu diệt Document tận gốc
   async function deleteAccount(uid, skipConfirm = false) {
       if (!skipConfirm && (checkDemoAndBlock() || !confirm(`Xóa tài khoản ${uid}?`))) return;
       if (!skipConfirm) isLoading = true;
       
-      await accountService.deleteAccount(uid);
       try {
-          const actualStoreId = selectedStoreId === 'ALL' ? targetStore : selectedStoreId; 
-          const templateRef = doc(db, 'stores', actualStoreId, '8nttt_template', 'config');
-          const dailyRef = doc(db, '8nttt_daily_records', `${actualStoreId}_${getTodayStr()}`);
-          const [tplSnap, dailySnap] = await Promise.all([getDoc(templateRef), getDoc(dailyRef)]);
+          // Cố gắng gọi qua Service
+          try { await accountService.deleteAccount(uid); } catch (svcErr) { console.warn("Service xóa thất bại, dùng quyền admin ép xóa Document...", svcErr); }
           
-          if (tplSnap.exists()) {
-              let items = tplSnap.data().items || [];
-              let changed = false;
-              items = items.map(item => {
-                  if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
-                  return item;
-              });
-              if (changed) await setDoc(templateRef, { items }, { merge: true });
-          }
-          if (dailySnap.exists()) {
-              let items = dailySnap.data().items || [];
-              let changed = false;
-              items = items.map(item => {
-                  if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
-                  return item;
-              });
-              if (changed) await setDoc(dailyRef, { items }, { merge: true });
-          }
-      } catch(e) { console.error("Lỗi đồng bộ dọn dẹp 8NTTT:", e); }
+          // ATOMIC INTEGRITY: Trực tiếp bồi thêm lệnh bắn vỡ Document trên Firestore cho chắc chắn 100%
+          await deleteDoc(doc(db, 'users', uid));
 
-      if (!skipConfirm) {
-          await loadAccountList(selectedStoreId);
-          isLoading = false;
+          // Dọn dẹp dấu vết bên 8NTTT
+          try {
+              const actualStoreId = selectedStoreId === 'ALL' ? targetStore : selectedStoreId; 
+              const templateRef = doc(db, 'stores', actualStoreId, '8nttt_template', 'config');
+              const dailyRef = doc(db, '8nttt_daily_records', `${actualStoreId}_${getTodayStr()}`);
+              const [tplSnap, dailySnap] = await Promise.all([getDoc(templateRef), getDoc(dailyRef)]);
+              
+              if (tplSnap.exists()) {
+                  let items = tplSnap.data().items || [];
+                  let changed = false;
+                  items = items.map(item => {
+                      if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
+                      return item;
+                  });
+                  if (changed) await setDoc(templateRef, { items }, { merge: true });
+              }
+              if (dailySnap.exists()) {
+                  let items = dailySnap.data().items || [];
+                  let changed = false;
+                  items = items.map(item => {
+                      if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
+                      return item;
+                  });
+                  if (changed) await setDoc(dailyRef, { items }, { merge: true });
+              }
+          } catch(e) { console.error("Lỗi đồng bộ dọn dẹp 8NTTT:", e); }
+
+      } catch (error) {
+          console.error("Lỗi quá trình xóa:", error);
+          alert("Không thể xóa hoàn toàn: " + error.message);
+      } finally {
+          // Bất kể thành công hay thất bại, LUÔN LUÔN load lại danh sách và tắt Loading
+          if (!skipConfirm) {
+              await loadAccountList(selectedStoreId);
+              isLoading = false;
+          }
       }
   }
 

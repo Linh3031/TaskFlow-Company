@@ -3,8 +3,7 @@
     export let show = false;
     export let editingAreaId = null;
     export let newAreaName = '';
-    export let newStaffLimit = 0; // Thêm Prop cấu hình NV
-    export let newPgLimit = 0;    // Thêm Prop cấu hình PG
+    export let newStaffLimit = 0; // Nay đóng vai trò là TỔNG NHÂN SỰ
     export let allStaff = [];
     export let selectedStaffIds = [];
     export let currentItemAssignees = []; 
@@ -60,16 +59,12 @@
                 <input type="text" bind:value={newAreaName} placeholder="Vd: Quầy Tivi Sony..." class="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-semibold focus:border-cyan-500 focus:ring-1 focus:ring-cyan-200 outline-none">
             </div>
 
-            <!-- CHÈN THÊM KHỐI ĐỊNH MỨC NĂNG LỰC -->
-            <div class="flex gap-3">
-                <div class="flex-1">
-                    <label class="block text-[10px] font-bold text-slate-500 mb-1">Số NV cần chia (Trộn Lịch)</label>
-                    <input type="number" min="0" bind:value={newStaffLimit} class="w-full p-2 border border-slate-300 rounded-lg text-sm text-center font-semibold outline-none focus:border-cyan-500">
-                </div>
-                <div class="flex-1">
-                    <label class="block text-[10px] font-bold text-slate-500 mb-1">Số PG cần chia (Trộn Lịch)</label>
-                    <input type="number" min="0" bind:value={newPgLimit} class="w-full p-2 border border-slate-300 rounded-lg text-sm text-center font-semibold outline-none focus:border-cyan-500">
-                </div>
+            <!-- CHỈ GIỮ LẠI 1 Ô ĐỊNH MỨC TỔNG -->
+            <div>
+                <label class="block text-[11px] font-bold text-slate-500 mb-1 flex items-center gap-1">
+                    <span class="material-icons-round text-[14px] text-cyan-600">groups</span> Số lượng nhân sự cần cho khu vực này (Để Trộn Lịch)
+                </label>
+                <input type="number" min="0" bind:value={newStaffLimit} class="w-full p-2.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-200 bg-slate-50">
             </div>
             
             <div class="flex flex-col h-full border-t border-slate-100 pt-3">

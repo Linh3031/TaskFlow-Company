@@ -5,12 +5,21 @@
     export let statsLoading = false;
     export let allStaff = [];
     export let checklistData = [];
+    export let excludedStaffIds = []; // Nhận danh sách đã bị miễn trừ từ DB
 
     const dispatch = createEventDispatcher();
     
-    let activeTab = 'allocation'; // 'allocation' | 'upload'
+    let activeTab = 'allocation'; 
     let sortBy = 'total';
     let sortDesc = true;
+    
+    // Quản lý trạng thái checkbox mượt mà khi đóng/mở modal
+    let localExcludedIds = [];
+    let prevShow = false;
+    $: if (show && !prevShow) {
+        localExcludedIds = [...excludedStaffIds];
+    }
+    $: prevShow = show;
 
     $: sortedMatrix = [...statsData.matrix].sort((a, b) => {
         if (sortBy === 'total') return sortDesc ? b.total - a.total : a.total - b.total;
@@ -32,6 +41,10 @@
     $: unassignedStaff = allStaff.filter(s => !assignedStaffIds.has(s.id));
     $: unassignedCount = unassignedStaff.length;
     $: totalAreas = checklistData.length;
+
+    function handleSaveExcluded() {
+        dispatch('saveExcluded', localExcludedIds);
+    }
 </script>
 
 {#if show}
@@ -117,19 +130,30 @@
                     </div>
 
                     <div class="flex-[2] bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col max-h-full">
-                        <div class="p-3 bg-red-50 border-b border-red-100 font-bold text-red-700 flex justify-between items-center shrink-0">
+                        <!-- PHẪU THUẬT: Thêm nút Lưu tại Header Cột Nhân Sự Trống -->
+                        <div class="p-2.5 bg-red-50 border-b border-red-100 font-bold text-red-700 flex justify-between items-center shrink-0">
                             <span class="flex items-center gap-1"><span class="material-icons-round text-red-500 text-sm">person_off</span> Nhân Sự Trống ({unassignedCount})</span>
+                            {#if unassignedCount > 0}
+                                <button class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded shadow-sm text-xs transition-colors flex items-center gap-1" on:click={handleSaveExcluded}>
+                                    <span class="material-icons-round text-[14px]">save</span> Lưu
+                                </button>
+                            {/if}
                         </div>
                         <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50/50">
                             {#each unassignedStaff as staff}
-                                <div class="p-2 bg-white border border-slate-200 rounded-lg flex items-center gap-2 shadow-sm">
-                                    <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                                <div class="p-2 bg-white border border-slate-200 rounded-lg flex items-center gap-2 shadow-sm {localExcludedIds.includes(staff.id) ? 'opacity-60 bg-slate-100' : ''}">
+                                    <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
                                         <span class="material-icons-round text-[18px]">person_outline</span>
                                     </div>
-                                    <div class="flex flex-col">
-                                        <span class="font-bold text-slate-700 text-sm">{staff.username}</span>
+                                    <div class="flex flex-col flex-1 min-w-0">
+                                        <span class="font-bold text-slate-700 text-sm truncate">{staff.username}</span>
                                         <span class="text-[10px] text-slate-400 uppercase">{staff.role}</span>
                                     </div>
+                                    <!-- PHẪU THUẬT: Thêm Checkbox chọn loại trừ -->
+                                    <label class="flex items-center gap-1.5 cursor-pointer pl-2 border-l border-slate-200" title="Đánh dấu để bỏ qua khi Trộn Lịch">
+                                        <span class="text-[10px] font-bold {localExcludedIds.includes(staff.id) ? 'text-red-500' : 'text-slate-400'} hidden sm:inline">Loại Trừ</span>
+                                        <input type="checkbox" value={staff.id} bind:group={localExcludedIds} class="w-5 h-5 accent-red-500 rounded border-slate-300 cursor-pointer">
+                                    </label>
                                 </div>
                             {/each}
                             {#if unassignedCount === 0 && allStaff.length > 0}

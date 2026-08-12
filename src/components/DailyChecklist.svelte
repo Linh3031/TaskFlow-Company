@@ -28,7 +28,6 @@
     let allStaff = [];
     let newAreaName = '';
     let newStaffLimit = 0;
-    let newPgLimit = 0;   
     let selectedStaffIds = [];
     let currentItemAssignees = []; 
     
@@ -39,6 +38,9 @@
     let showStatsModal = false;
     let statsData = { matrix: [], days: [], month: '' };
     let statsLoading = false;
+
+    // Biến lưu trữ ID nhân sự bị loại trừ
+    let excludedStaffIds = [];
 
     $: sortedChecklistData = [...checklistData].sort((a, b) => {
         if (a.completed === b.completed) return 0;
@@ -130,25 +132,50 @@
         }
     }
 
+    // LƯU CẤU HÌNH MIỄN TRỪ VÀO DATABASE
+    async function handleSaveExcluded(event) {
+        const newExcludedIds = event.detail;
+        try {
+            const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
+            await setDoc(templateRef, { excludedStaffIds: newExcludedIds }, { merge: true });
+            excludedStaffIds = newExcludedIds;
+            alert("✅ Đã lưu cấu hình Loại Trừ nhân sự khỏi tính năng Trộn Lịch.");
+        } catch (error) {
+            alert("❌ Lỗi khi lưu cấu hình: " + error.message);
+        }
+    }
+
     async function handleAutoRotate() {
-        if (!confirm("⚠️ TỰ ĐỘNG TRỘN LỊCH:\nHệ thống sẽ chia lại toàn bộ người vào các khu vực theo định mức đã cài. Quá trình này sẽ GHI ĐÈ dữ liệu hôm nay.\n\nBạn có chắc chắn?")) return;
+        if (!confirm("⚠️ TỰ ĐỘNG TRỘN LỊCH:\nHệ thống sẽ chia lại người vào các khu vực.\nLịch này sẽ được áp dụng cho ngày hôm nay và GHI ĐÈ LÊN TOÀN BỘ CÁC NGÀY TƯƠNG LAI trong tháng này.\n\nBạn có chắc chắn?")) return;
 
         await fetchAllStaff();
 
         const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
         const snap = await getDoc(templateRef);
         let currentTemplateItems = snap.exists() ? (snap.data().items || []) : [];
+        let currentExcludedIds = snap.exists() ? (snap.data().excludedStaffIds || []) : [];
 
-        const totalNeeded = currentTemplateItems.reduce((sum, item) => sum + (item.staffLimit || 0) + (item.pgLimit || 0), 0);
+        // Kiểm tra định mức
+        let totalNeeded = currentTemplateItems.reduce((sum, item) => sum + (item.staffLimit || 0), 0);
         if (totalNeeded === 0) {
-            alert("❌ THẤT BẠI: Bạn chưa cài đặt số lượng người cần thiết (Định Mức) cho bất kỳ khu vực nào.\nVui lòng bấm 'Thêm Khu Vực' hoặc 'Sửa' khu vực hiện tại để điền số Nhân Viên / PG, hoặc Import bằng file Excel để hệ thống tự học định mức.");
-            return;
+            totalNeeded = checklistData.reduce((sum, item) => sum + (item.assignees ? item.assignees.length : 0), 0);
+            if (totalNeeded === 0) {
+                alert("❌ THẤT BẠI: Bạn chưa cài đặt số lượng người cần thiết (Định Mức) cho bất kỳ khu vực nào.\nVui lòng bấm 'Thêm Khu Vực' để điền, hoặc Import File Mẫu có ĐỊNH MỨC ở Dòng Số 2 để hệ thống tự nhận diện.");
+                return;
+            }
         }
 
-        let listStaff = allStaff.filter(s => !(s.role || '').toLowerCase().includes('pg')).sort((a,b) => a.username.localeCompare(b.username));
-        let listPG = allStaff.filter(s => (s.role || '').toLowerCase().includes('pg')).sort((a,b) => a.username.localeCompare(b.username));
+        // LỌC BỎ NHỮNG NGƯỜI NẰM TRONG DANH SÁCH MIỄN TRỪ TRƯỚC KHI TRỘN
+        let listStaff = allStaff
+            .filter(s => !currentExcludedIds.includes(s.id))
+            .sort((a,b) => a.username.localeCompare(b.username));
+        
+        if (listStaff.length === 0) {
+             alert("❌ THẤT BẠI: Không có nhân sự nào hợp lệ để trộn (có thể tất cả đã bị đưa vào danh sách Loại Trừ).");
+             return;
+        }
 
-        const dayNumber = parseInt(dateStr.split('-')[2], 10) || 1;
+        const randomOffset = Math.floor(Math.random() * (listStaff.length - 1)) + 1;
         
         const rotateArray = (arr, steps) => {
             if (arr.length === 0) return [];
@@ -156,17 +183,15 @@
             return [...arr.slice(offset), ...arr.slice(0, offset)];
         };
 
-        const rotatedStaff = rotateArray(listStaff, dayNumber);
-        const rotatedPG = rotateArray(listPG, dayNumber);
-
+        const rotatedStaff = rotateArray(listStaff, randomOffset);
         let staffIndex = 0;
-        let pgIndex = 0;
 
         const newDailyItems = checklistData.map(item => {
             let areaAssignees = [];
             const templateItem = currentTemplateItems.find(i => i.id === item.id);
-            const limitStaff = templateItem?.staffLimit || 0;
-            const limitPG = templateItem?.pgLimit || 0;
+            
+            const fallbackLimit = (item.assignees && item.assignees.length > 0) ? item.assignees.length : 1;
+            const limitStaff = templateItem?.staffLimit || fallbackLimit; 
 
             for (let i = 0; i < limitStaff; i++) {
                 if (rotatedStaff.length > 0) {
@@ -174,20 +199,60 @@
                     staffIndex++;
                 }
             }
-            for (let i = 0; i < limitPG; i++) {
-                if (rotatedPG.length > 0) {
-                    areaAssignees.push(rotatedPG[pgIndex % rotatedPG.length]);
-                    pgIndex++;
-                }
-            }
-
             return { ...item, assignees: areaAssignees.map(a => ({ id: a.id, username: a.username })) };
         });
 
         const dailyRef = getDailyRecordRef();
         await updateDoc(dailyRef, { items: newDailyItems });
         
-        alert("✅ Đã hoàn tất Trộn Lịch xoay vòng!");
+        const updatedTemplateItems = currentTemplateItems.map(tItem => {
+            const dailyItem = newDailyItems.find(d => d.id === tItem.id);
+            if (dailyItem) {
+                return { 
+                    ...tItem, 
+                    assignees: dailyItem.assignees, 
+                    staffLimit: tItem.staffLimit || dailyItem.assignees.length
+                };
+            }
+            return tItem;
+        });
+        await setDoc(templateRef, { items: updatedTemplateItems }, { merge: true });
+
+        try {
+            const [year, month, day] = dateStr.split('-');
+            const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+            const currentDayNumber = parseInt(day, 10);
+            
+            const futureItems = newDailyItems.map(i => ({
+                ...i,
+                completed: false,
+                imageUrls: [],
+                uploaders: [],
+                completedBy: null,
+                completedAt: null
+            }));
+
+            const batchPromises = [];
+            for (let i = currentDayNumber + 1; i <= daysInMonth; i++) {
+                const paddedDay = i.toString().padStart(2, '0');
+                const futureDateStr = `${year}-${month}-${paddedDay}`;
+                const fRef = doc(db, '8nttt_daily_records', `${activeStoreId}_${futureDateStr}`);
+                
+                batchPromises.push(setDoc(fRef, { items: futureItems, createdAt: serverTimestamp() }, { merge: true }));
+                
+                const oldFutureDateStr = `${year}-${parseInt(month, 10)}-${i}`;
+                if (oldFutureDateStr !== futureDateStr) {
+                    const oldFRef = doc(db, '8nttt_daily_records', `${activeStoreId}_${oldFutureDateStr}`);
+                    batchPromises.push(setDoc(oldFRef, { items: futureItems, createdAt: serverTimestamp() }, { merge: true }));
+                }
+            }
+            
+            await Promise.all(batchPromises);
+        } catch (err) {
+            console.error("Lỗi khi đồng bộ các ngày tương lai:", err);
+        }
+        
+        alert("✅ Đã Trộn Lịch! Lịch này đã được tự động chép đè cho TOÀN BỘ các ngày còn lại trong tháng.");
     }
 
     async function loadAndShowStats() {
@@ -195,7 +260,13 @@
         statsLoading = true;
         await fetchAllStaff();
 
-        console.warn("====== 🚀 BẮT ĐẦU CÀO DATA THỐNG KÊ (DEBUG MODE) ======");
+        // NẠP DANH SÁCH MIỄN TRỪ TỪ TEMPLATE KHI MỞ MODAL THỐNG KÊ
+        const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
+        const snap = await getDoc(templateRef);
+        if (snap.exists()) {
+            excludedStaffIds = snap.data().excludedStaffIds || [];
+        }
+
         const [year, month] = dateStr.split('-');
         const daysInMonth = new Date(year, month, 0).getDate();
         const daysArray = Array.from({length: daysInMonth}, (_, i) => i + 1);
@@ -264,8 +335,7 @@
             const snap = await getDoc(templateRef);
             let currentTemplateItems = snap.exists() ? (snap.data().items || []) : [];
             const tItem = currentTemplateItems.find(i => i.id === item.id);
-            newStaffLimit = tItem?.staffLimit || 0;
-            newPgLimit = tItem?.pgLimit || 0;
+            newStaffLimit = tItem?.staffLimit || 0; 
 
             selectedStaffIds = (item.assignees || []).map(a => a.id);
             currentItemAssignees = item.assignees || []; 
@@ -273,7 +343,6 @@
             editingAreaId = null;
             newAreaName = ''; 
             newStaffLimit = 0;
-            newPgLimit = 0;
             selectedStaffIds = []; 
             currentItemAssignees = [];
         }
@@ -290,9 +359,9 @@
         let newItemData = null;
         
         if (editingAreaId) { 
-            currentItems = currentItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), staffLimit: newStaffLimit, pgLimit: newPgLimit, assignees: assigneesData } : i); 
+            currentItems = currentItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), staffLimit: newStaffLimit, assignees: assigneesData } : i); 
         } else { 
-            newItemData = { id: 'area_' + Date.now(), areaName: newAreaName.trim(), staffLimit: newStaffLimit, pgLimit: newPgLimit, assignees: assigneesData };
+            newItemData = { id: 'area_' + Date.now(), areaName: newAreaName.trim(), staffLimit: newStaffLimit, assignees: assigneesData };
             currentItems.push(newItemData); 
         }
         await setDoc(templateRef, { items: currentItems }, { merge: true });
@@ -301,7 +370,7 @@
         const dailySnap = await getDoc(dailyRef);
         if (dailySnap.exists()) {
             let dailyItems = dailySnap.data().items || [];
-            if (editingAreaId) dailyItems = dailyItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), staffLimit: newStaffLimit, pgLimit: newPgLimit, assignees: assigneesData } : i);
+            if (editingAreaId) dailyItems = dailyItems.map(i => i.id === editingAreaId ? { ...i, areaName: newAreaName.trim(), staffLimit: newStaffLimit, assignees: assigneesData } : i);
             else dailyItems.push({ ...newItemData, completed: false, imageUrls: [], uploaders: [], completedBy: null, completedAt: null });
             await updateDoc(dailyRef, { items: dailyItems });
         } else if (!editingAreaId && newItemData) {
@@ -345,13 +414,11 @@
         }
     }
 
-    // --- LOGIC XUẤT FILE MẪU CÓ HƯỚNG DẪN TRỰC QUAN ---
     async function handleExportTemplate() {
         await fetchAllStaff();
         
         const wsData = [];
         
-        // 1. Dòng Mock Data Hướng Dẫn (Sẽ bị bỏ qua khi Import)
         wsData.push({ 
             'Tên Nhân Sự': '👉 HƯỚNG DẪN SỬ DỤNG:',
             'Quầy Mẫu 1 (Đổi Tên Tùy Ý)': "Gõ chữ 'x' vào ô này",
@@ -359,7 +426,13 @@
             'Quầy Mẫu 3 (Đổi Tên Tùy Ý)': "Thêm/Xóa cột tùy ý."
         });
 
-        // 2. Dữ liệu thật
+        wsData.push({
+            'Tên Nhân Sự': '⚙️ SỐ LƯỢNG CẦN (Nhập số):',
+            'Quầy Mẫu 1 (Đổi Tên Tùy Ý)': 1,
+            'Quầy Mẫu 2 (Đổi Tên Tùy Ý)': 1,
+            'Quầy Mẫu 3 (Đổi Tên Tùy Ý)': 1
+        });
+
         allStaff.forEach(staff => {
             wsData.push({ 
                 'Tên Nhân Sự': staff.username,
@@ -386,13 +459,26 @@
             return handleExportTemplate();
         }
 
-        const wsData = allStaff.map(staff => {
+        const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
+        const snap = await getDoc(templateRef);
+        let currentTemplateItems = snap.exists() ? (snap.data().items || []) : [];
+
+        const wsData = [];
+        
+        const quotaRow = { 'Tên Nhân Sự': '⚙️ SỐ LƯỢNG CẦN (Nhập số):' };
+        checklistData.forEach(item => {
+            const tItem = currentTemplateItems.find(i => i.id === item.id);
+            quotaRow[item.areaName] = tItem ? (tItem.staffLimit || 0) : 0;
+        });
+        wsData.push(quotaRow);
+
+        allStaff.forEach(staff => {
             const row = { 'Tên Nhân Sự': staff.username };
             checklistData.forEach(item => {
                 const isAssigned = (item.assignees || []).some(a => a.id === staff.id);
                 row[item.areaName] = isAssigned ? 'x' : '';
             });
-            return row;
+            wsData.push(row);
         });
 
         const ws = XLSX.utils.json_to_sheet(wsData);
@@ -405,7 +491,6 @@
         XLSX.writeFile(wb, `PhanCong_8NTTT_${dateStr}.xlsx`);
     }
 
-    // --- LOGIC NẠP EXCEL & TỰ ĐỘNG TÍNH ĐỊNH MỨC ---
     async function handleImportExcel(event) {
         const file = event.detail.file;
         if (!file) return;
@@ -425,8 +510,9 @@
                 
                 const staffMap = new Map(allStaff.map(s => [s.username.toLowerCase().trim(), s]));
                 const newAreaAssigneesMap = new Map();
+                const quotaMap = new Map(); 
+                let hasQuotaRow = false;
 
-                // Quét 1: Tạo Map các khu vực từ header của Excel
                 for (let row of jsonData) {
                     for (const key of Object.keys(row)) {
                         if (key !== 'Tên Nhân Sự' && !key.includes('(Đổi Tên Tùy Ý)')) {
@@ -439,12 +525,22 @@
                     }
                 }
 
-                // Quét 2: Gắn user vào khu vực (Bỏ qua dòng hướng dẫn)
                 for (let row of jsonData) {
-                    const staffNameRaw = row['Tên Nhân Sự'] || '';
-                    if (!staffNameRaw || staffNameRaw.includes('HƯỚNG DẪN')) continue; // Bỏ qua Mock Data
+                    const staffNameRaw = String(row['Tên Nhân Sự'] || '').trim();
                     
-                    const staff = staffMap.get(staffNameRaw.toLowerCase().trim());
+                    if (staffNameRaw.includes('SỐ LƯỢNG CẦN') || staffNameRaw.includes('ĐỊNH MỨC')) {
+                        hasQuotaRow = true;
+                        for (const [key, value] of Object.entries(row)) {
+                            if (key !== 'Tên Nhân Sự' && !key.includes('(Đổi Tên Tùy Ý)')) {
+                                quotaMap.set(key.trim().toLowerCase(), parseInt(value) || 0);
+                            }
+                        }
+                        continue; 
+                    }
+
+                    if (!staffNameRaw || staffNameRaw.includes('HƯỚNG DẪN')) continue; 
+                    
+                    const staff = staffMap.get(staffNameRaw.toLowerCase());
                     if (!staff) {
                         unfoundUsers.push(staffNameRaw);
                         continue;
@@ -470,32 +566,20 @@
                 let areaMapDaily = new Map(currentDailyItems.map(i => [i.areaName.toLowerCase().trim(), i]));
 
                 for (const [areaNameLower, data] of newAreaAssigneesMap.entries()) {
-                    // Logic Auto-learn: Tự động tính toán định mức (Capacity) từ danh sách được gán
-                    let staffCount = 0;
-                    let pgCount = 0;
                     
-                    data.assignees.forEach(a => {
-                        const staffInfo = staffMap.get(a.username.toLowerCase().trim());
-                        if (staffInfo && (staffInfo.role || '').toLowerCase().includes('pg')) {
-                            pgCount++;
-                        } else {
-                            staffCount++;
-                        }
-                    });
+                    let fallbackCount = data.assignees.length; 
+                    let finalLimit = hasQuotaRow && quotaMap.has(areaNameLower) ? quotaMap.get(areaNameLower) : fallbackCount;
 
-                    // Cập nhật hoặc tạo mới Area
                     if (areaMapTemplate.has(areaNameLower)) {
                         let existing = areaMapTemplate.get(areaNameLower);
                         existing.assignees = data.assignees;
-                        existing.staffLimit = staffCount; // Máy tự học định mức
-                        existing.pgLimit = pgCount;       // Máy tự học định mức
+                        existing.staffLimit = finalLimit; 
                     } else {
                         const newItem = { 
                             id: 'area_' + Date.now() + Math.random().toString(36).substring(2,9), 
                             areaName: data.areaName, 
                             assignees: data.assignees,
-                            staffLimit: staffCount,   // Ghi lại định mức để sau này Auto-Rotate
-                            pgLimit: pgCount 
+                            staffLimit: finalLimit
                         };
                         currentTemplateItems.push(newItem);
                         areaMapTemplate.set(areaNameLower, newItem);
@@ -517,7 +601,7 @@
                     await setDoc(dailyRef, { items: currentDailyItems, createdAt: serverTimestamp() });
                 }
 
-                let msg = `✅ Đã nạp và cập nhật thành công ${updatedCount} khu vực!\n💡 Hệ thống đã tự động tính toán định mức cho nút "Trộn Lịch".\n`;
+                let msg = `✅ Đã nạp và cập nhật thành công ${updatedCount} khu vực!\n💡 Hệ thống đã tự cập nhật định mức số lượng cho lần Trộn Lịch sau.\n`;
                 if (unfoundUsers.length > 0) {
                     const uniqueUnfound = [...new Set(unfoundUsers)];
                     msg += `\n⚠️ CẢNH BÁO: Phát hiện nhân sự không tồn tại (đã bỏ qua):\n- ${uniqueUnfound.join('\n- ')}\n\nVui lòng không sửa tên nhân sự trên dòng Excel.`;
@@ -637,7 +721,7 @@
 
 <LightboxModal show={showLightbox} images={lightboxImages} currentIndex={lightboxIndex} on:close={() => showLightbox = false} on:updateIndex={(e) => lightboxIndex = e.detail} />
 
-<AreaAdminModal show={showAdminModal} {editingAreaId} {allStaff} {currentItemAssignees} bind:newAreaName bind:newStaffLimit bind:newPgLimit bind:selectedStaffIds on:close={() => showAdminModal = false} on:save={saveAreaToTemplate} />
+<AreaAdminModal show={showAdminModal} {editingAreaId} {allStaff} {currentItemAssignees} bind:newAreaName bind:newStaffLimit bind:selectedStaffIds on:close={() => showAdminModal = false} on:save={saveAreaToTemplate} />
 
 <ChecklistStatsModal 
     show={showStatsModal} 
@@ -645,10 +729,12 @@
     {statsLoading} 
     {allStaff} 
     checklistData={sortedChecklistData} 
+    {excludedStaffIds}
     on:close={() => showStatsModal = false} 
     on:editArea={(e) => openAdminModal({detail: e.detail})} 
     on:exportExcel={handleExportExcel}
     on:importExcel={handleImportExcel}
     on:deleteAll={handleDeleteAll}
     on:exportTemplate={handleExportTemplate}
+    on:saveExcluded={handleSaveExcluded}
 />
