@@ -1,8 +1,6 @@
 <script>
   import { db } from '../../../lib/firebase';
-  // [CodeGenesis] Phẫu thuật: Bổ sung getDoc để kéo dữ liệu Lịch và 8NTTT về
   import { doc, writeBatch, serverTimestamp, updateDoc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
-  // [CodeGenesis] Phẫu thuật: Bổ sung getTodayStr để quét dữ liệu ngày hôm nay
   import { safeString, getTodayStr } from '../../../lib/utils';
   import { createEventDispatcher } from 'svelte';
   import { currentUser } from '../../../lib/stores';
@@ -75,9 +73,11 @@
       isLoading = true;
       try {
           if (editUser) {
-              const oldUid = safeString(editUser.username).toLowerCase();
+              // [PHẪU THUẬT LOGIC]: Bắt buộc lấy ID tuyệt đối của object cũ, không tự suy luận lại từ username
+              const oldUid = editUser.id; 
+              
               if (newUid !== oldUid) {
-                  if (!confirm(`⚠️ BẠN ĐANG ĐỔI TÊN ĐĂNG NHẬP!\n\nHệ thống sẽ chuyển từ [${editUser.username}] sang [${exactUsername}]. Bạn có chắc chắn?`)) {
+                  if (!confirm(`⚠️ BẠN ĐANG ĐỔI TÊN ĐĂNG NHẬP!\n\nHệ thống sẽ chuyển từ ID [${oldUid}] sang [${newUid}]. Bạn có chắc chắn?`)) {
                       isLoading = false;
                       return;
                   }
@@ -97,6 +97,7 @@
 
               if (newUid !== oldUid) {
                   const fullNewData = { ...editUser, ...updateData };
+                  delete fullNewData.id; // [QUAN TRỌNG NHẤT]: Xóa key id để không lưu bóng ma vào Firebase
                   fullNewData.username_idx = newUid;
 
                   const batch = writeBatch(db);
@@ -106,7 +107,7 @@
                   await batch.commit();
 
                   // =========================================================================
-                  // [CodeGenesis] "LIÊN LẠC VIÊN": CẬP NHẬT DÂY CHUYỀN (CASCADE UPDATE)
+                  // "LIÊN LẠC VIÊN": CẬP NHẬT DÂY CHUYỀN
                   // =========================================================================
                   try {
                       const today = new Date();
@@ -114,7 +115,6 @@
                       const todayStr = getTodayStr();
 
                       for (const sid of finalStoreIds) {
-                          // 1. Chạy sang Bảng Lịch Tháng để đổi tên
                           const scheduleRef = doc(db, 'stores', sid, 'schedules', currentMonthStr);
                           const scheduleSnap = await getDoc(scheduleRef);
                           if (scheduleSnap.exists()) {
@@ -138,7 +138,6 @@
                               if (isSchedChanged) await updateDoc(scheduleRef, { stats: schedData.stats, data: schedData.data });
                           }
 
-                          // 2. Chạy sang Template 8 NTTT để đổi tên người phụ trách
                           const templateRef = doc(db, 'stores', sid, '8nttt_template', 'config');
                           const templateSnap = await getDoc(templateRef);
                           if (templateSnap.exists()) {
@@ -154,7 +153,6 @@
                               if (isTplChanged) await updateDoc(templateRef, { items: tplItems });
                           }
 
-                          // 3. Chạy sang Sổ 8 NTTT Hôm Nay đổi tên (nếu họ vừa up ảnh xong rồi mới đổi tên)
                           const dailyRef = doc(db, '8nttt_daily_records', `${sid}_${todayStr}`);
                           const dailySnap = await getDoc(dailyRef);
                           if (dailySnap.exists()) {
@@ -163,17 +161,14 @@
                               dailyItems = dailyItems.map(item => {
                                   let newItem = { ...item };
                                   let changed = false;
-                                  // Đổi tên phân công
                                   if (newItem.assignees && newItem.assignees.some(a => a.id === oldUid)) {
                                       changed = true;
                                       newItem.assignees = newItem.assignees.map(a => a.id === oldUid ? { ...a, username: exactUsername } : a);
                                   }
-                                  // Đổi tên trong lịch sử người chụp ảnh
                                   if (newItem.uploaders && newItem.uploaders.includes(editUser.username)) { 
                                       changed = true;
                                       newItem.uploaders = newItem.uploaders.map(u => u === editUser.username ? exactUsername : u);
                                   }
-                                  // Đổi tên người chốt hạ khu vực
                                   if (newItem.completedBy === editUser.username) {
                                       changed = true;
                                       newItem.completedBy = exactUsername;
@@ -190,7 +185,11 @@
                   // =========================================================================
 
               } else {
-                  await updateDoc(doc(db, 'users', oldUid), updateData);
+                  // Cập nhật Document giữ nguyên ID
+                  const updatePayload = { ...updateData };
+                  delete updatePayload.id; // An toàn trên hết
+                  await updateDoc(doc(db, 'users', oldUid), updatePayload);
+                  
                   if (isSuperAdmin) {
                       const batch = writeBatch(db);
                       finalStoreIds.forEach(s => { batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}` }, { merge: true }); });

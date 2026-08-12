@@ -98,50 +98,53 @@
       try {
           if (sid === 'ALL') {
               const snap = await getDocs(collection(db, 'users'));
-              accountList = snap.docs.map(d => ({id: d.id, ...d.data()}));
+              // [PHẪU THUẬT LOGIC]: Đảo ngược thứ tự spread để id thực (d.id) luôn đè lên id ảo trong data
+              accountList = snap.docs.map(d => ({ ...d.data(), id: d.id }));
           } else {
-              accountList = await accountService.loadAccountList(sid);
+              let rawList = await accountService.loadAccountList(sid);
+              // [PHẪU THUẬT LOGIC]: Ép dùng username_idx làm ID chuẩn nếu Service bị lỗi Ghost ID
+              accountList = rawList.map(acc => ({ ...acc, id: acc.username_idx || acc.id }));
           }
       } catch(e) { console.error("Lỗi fetch DB, fallback:", e); }
       isLoading = false;
   }
 
-  // [PHẪU THUẬT LOGIC]: Bọc Try-Catch-Finally, tiêu diệt Document tận gốc
   async function deleteAccount(uid, skipConfirm = false) {
       if (!skipConfirm && (checkDemoAndBlock() || !confirm(`Xóa tài khoản ${uid}?`))) return;
       if (!skipConfirm) isLoading = true;
       
       try {
-          // Cố gắng gọi qua Service
           try { await accountService.deleteAccount(uid); } catch (svcErr) { console.warn("Service xóa thất bại, dùng quyền admin ép xóa Document...", svcErr); }
           
-          // ATOMIC INTEGRITY: Trực tiếp bồi thêm lệnh bắn vỡ Document trên Firestore cho chắc chắn 100%
           await deleteDoc(doc(db, 'users', uid));
 
-          // Dọn dẹp dấu vết bên 8NTTT
           try {
               const actualStoreId = selectedStoreId === 'ALL' ? targetStore : selectedStoreId; 
-              const templateRef = doc(db, 'stores', actualStoreId, '8nttt_template', 'config');
-              const dailyRef = doc(db, '8nttt_daily_records', `${actualStoreId}_${getTodayStr()}`);
-              const [tplSnap, dailySnap] = await Promise.all([getDoc(templateRef), getDoc(dailyRef)]);
               
-              if (tplSnap.exists()) {
-                  let items = tplSnap.data().items || [];
-                  let changed = false;
-                  items = items.map(item => {
-                      if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
-                      return item;
-                  });
-                  if (changed) await setDoc(templateRef, { items }, { merge: true });
-              }
-              if (dailySnap.exists()) {
-                  let items = dailySnap.data().items || [];
-                  let changed = false;
-                  items = items.map(item => {
-                      if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
-                      return item;
-                  });
-                  if (changed) await setDoc(dailyRef, { items }, { merge: true });
+              // NGĂN CHẶN CRASH ngầm nếu actualStoreId bị trống
+              if (actualStoreId && actualStoreId !== 'ALL' && actualStoreId.trim() !== '') {
+                  const templateRef = doc(db, 'stores', actualStoreId, '8nttt_template', 'config');
+                  const dailyRef = doc(db, '8nttt_daily_records', `${actualStoreId}_${getTodayStr()}`);
+                  const [tplSnap, dailySnap] = await Promise.all([getDoc(templateRef), getDoc(dailyRef)]);
+                  
+                  if (tplSnap.exists()) {
+                      let items = tplSnap.data().items || [];
+                      let changed = false;
+                      items = items.map(item => {
+                          if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
+                          return item;
+                      });
+                      if (changed) await setDoc(templateRef, { items }, { merge: true });
+                  }
+                  if (dailySnap.exists()) {
+                      let items = dailySnap.data().items || [];
+                      let changed = false;
+                      items = items.map(item => {
+                          if (item.assignees && item.assignees.some(a => a.id === uid)) { changed = true; return { ...item, assignees: item.assignees.filter(a => a.id !== uid) }; }
+                          return item;
+                      });
+                      if (changed) await setDoc(dailyRef, { items }, { merge: true });
+                  }
               }
           } catch(e) { console.error("Lỗi đồng bộ dọn dẹp 8NTTT:", e); }
 
@@ -149,7 +152,6 @@
           console.error("Lỗi quá trình xóa:", error);
           alert("Không thể xóa hoàn toàn: " + error.message);
       } finally {
-          // Bất kể thành công hay thất bại, LUÔN LUÔN load lại danh sách và tắt Loading
           if (!skipConfirm) {
               await loadAccountList(selectedStoreId);
               isLoading = false;
@@ -157,16 +159,15 @@
       }
   }
 
-  // [NEW] Logic Hủy Diệt Mã Kho và User bên trong
   async function handleDeleteStore(storeId) {
       if (checkDemoAndBlock()) return;
       
-      // Quét tìm tất cả nhân sự thuộc kho này trong Database (không chỉ accountList đang hiển thị)
       isLoading = true;
       let usersToDelete = [];
       try {
           const snap = await getDocs(query(collection(db, 'users'), where('storeIds', 'array-contains', storeId)));
-          usersToDelete = snap.docs.map(d => ({id: d.id, ...d.data()}));
+          // [PHẪU THUẬT LOGIC]: Đảo thứ tự spread chống Ghost ID
+          usersToDelete = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       } catch(e) {
           alert("Lỗi quét dữ liệu: " + e.message); isLoading = false; return;
       }
@@ -176,11 +177,9 @@
 
       isLoading = true;
       try {
-          // 1. Dùng vòng lặp gọi deleteAccount (skipConfirm = true) để dọn dẹp từng User an toàn
           for (const u of usersToDelete) {
               await deleteAccount(u.id, true);
           }
-          // 2. Tiêu diệt Document của kho trong collection 'stores'
           await deleteDoc(doc(db, 'stores', storeId));
 
           alert(`✅ Đã xóa thành công kho ${storeId} và ${usersToDelete.length} tài khoản.`);
