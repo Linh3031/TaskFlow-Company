@@ -6,7 +6,6 @@
     export let selectedViewStore;
     export let isAdmin = false;
 
-    // --- LOGIC TÍNH NGÀY MẶC ĐỊNH ---
     function initDates() {
         return { start: '', end: '' }; 
     }
@@ -15,7 +14,6 @@
     let endDate = initDates().end;
     let roadshowDays = []; 
     
-    // Data lưu trữ dưới dạng: { '2026-03-04': { morning: [], afternoon: [] }, ... }
     let roadshowData = {};
     let allStaff = []; 
     let loading = false;
@@ -24,13 +22,15 @@
     let unsubscribe = null;
     let unsubscribeStaff = null; 
 
-    // State cho Modal Search
     let showSearchModal = false;
     let targetDate = '';
-    let targetSlot = ''; // 'morning' | 'afternoon'
+    let targetSlot = '';
     let searchQuery = '';
 
-    // Lắng nghe sự thay đổi của khoảng ngày để Admin thao tác
+    // Logic tính toán ngày hôm nay để ẩn ngày cũ
+    const todayLocal = new Date();
+    const todayStr = `${todayLocal.getFullYear()}-${String(todayLocal.getMonth()+1).padStart(2,'0')}-${String(todayLocal.getDate()).padStart(2,'0')}`;
+
     $: {
         if (isAdmin && startDate && endDate && startDate <= endDate) {
             roadshowDays = getDatesInRange(startDate, endDate);
@@ -39,14 +39,14 @@
         }
     }
 
+    // Auto ẩn lịch cũ
     $: displayDays = Array.from(new Set([
         ...roadshowDays,
         ...Object.keys(roadshowData).filter(d => 
             (roadshowData[d]?.morning?.length || 0) > 0 || (roadshowData[d]?.afternoon?.length || 0) > 0
         )
-    ])).sort();
+    ])).filter(d => d >= todayStr).sort();
 
-    // --- UTILS ---
     function getDatesInRange(startStr, endStr) {
         const arr = [];
         let current = new Date(startStr);
@@ -77,7 +77,6 @@
         return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
     }
 
-    // --- LẮNG NGHE NHÂN SỰ THỜI GIAN THỰC ---
     $: if (selectedViewStore) {
         if (unsubscribeStaff) unsubscribeStaff();
         const q = query(collection(db, 'users'), where('storeIds', 'array-contains', selectedViewStore));
@@ -88,7 +87,7 @@
                 username: d.data().username,
                 role: d.data().role,
                 type: d.data().role === 'pg' ? 'pg' : 'nv',
-                roadshowMode: d.data().roadshowMode // Lưu trữ Object cấu hình 7 ngày
+                roadshowMode: d.data().roadshowMode 
             }));
         }, (err) => {
             console.error("Lỗi đồng bộ danh sách nhân sự:", err);
@@ -120,10 +119,8 @@
         });
     }
 
-    // --- THUẬT TOÁN XÓA TOÀN BỘ LỊCH ---
     async function clearSchedule() {
         if (!isAdmin) return;
-        
         const targets = roadshowDays.length > 0 ? roadshowDays : displayDays;
         
         if (targets.length === 0) {
@@ -159,7 +156,6 @@
         }
     }
 
-    // --- THUẬT TOÁN AUTO-GEN TÍCH HỢP TÙY CHỈNH THEO NGÀY ---
     async function autoGenerate() {
         if (!isAdmin) return;
         if (roadshowDays.length === 0) {
@@ -191,9 +187,8 @@
                 const monthStr = dStr.substring(0, 7);
                 const dayNumStr = String(d.getDate());
                 const weekId = getWeekId(d);
-                const weekdayStr = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()]; // Thứ của ngày đang duyệt
+                const weekdayStr = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][d.getDay()];
 
-                // Bóc tách Nhân Viên nội bộ
                 const dayDataNV = nvSchedules[monthStr]?.[dayNumStr] || [];
                 dayDataNV.forEach(assign => {
                     const shift = assign.shift;
@@ -205,7 +200,6 @@
                     }
                 });
 
-                // Bóc tách PG theo thuật toán tùy chỉnh
                 const weekDataPG = pgSchedules[weekId] || {};
                 Object.keys(weekDataPG).forEach(pgId => {
                     const shift = weekDataPG[pgId][weekdayStr];
@@ -213,19 +207,18 @@
                     
                     if (pgInfo) {
                         const rawMode = pgInfo.roadshowMode;
-                        let dMode = 'different'; // Giá trị rớt đài (fallback)
+                        let dMode = 'different'; 
                         
-                        // [CodeGenesis] Phân rã dữ liệu Mode theo ngày
                         if (typeof rawMode === 'string') {
-                            dMode = rawMode; // Đọc data cũ
+                            dMode = rawMode;
                         } else if (typeof rawMode === 'object' && rawMode !== null) {
-                            dMode = rawMode[weekdayStr] || 'different'; // Đọc mode của chính xác thứ đó
+                            dMode = rawMode[weekdayStr] || 'different'; 
                         }
                         
                         if (dMode === 'same') {
                             if (shift === 'Sáng') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
                             if (shift === 'Chiều') dayObj.afternoon.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
-                        } else { // 'different'
+                        } else { 
                             if (shift === 'Sáng') dayObj.afternoon.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
                             if (shift === 'Chiều') dayObj.morning.push({ id: pgId, displayName: pgInfo.username, type: 'pg' });
                         }
@@ -252,7 +245,6 @@
         }
     }
 
-    // --- LOGIC CHỈNH SỬA THỦ CÔNG ---
     function removeUser(dateStr, slot, userId) {
         if (!isAdmin) return;
         roadshowData[dateStr][slot] = roadshowData[dateStr][slot].filter(u => u.id !== userId);
@@ -281,6 +273,47 @@
         roadshowData = { ...roadshowData }; 
         triggerAutoSave(targetDate);
         showSearchModal = false;
+    }
+
+    function copyStaffList(dateStr, slot) {
+        const list = roadshowData[dateStr]?.[slot] || [];
+        if(list.length === 0) return alert('Ca này chưa có nhân sự để copy!');
+        const text = list.map(p => p.displayName).join('\n');
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Đã copy danh sách nhân sự thành công!');
+        });
+    }
+
+    // [PHẪU THUẬT LOGIC]: Chuyển sang CSV hỗ trợ UTF-8 (chuẩn tiếng Việt) không lo lỗi định dạng Excel
+    function exportToExcel() {
+        if(displayDays.length === 0) return alert('Không có dữ liệu để xuất Excel!');
+        
+        // Thêm ký tự BOM để Excel đọc đúng tiếng Việt (UTF-8)
+        let csvContent = '\uFEFF'; 
+        csvContent += 'Ngày,Ca Sáng,Ca Chiều\n';
+        
+        displayDays.forEach(d => {
+            const morning = roadshowData[d]?.morning || [];
+            const afternoon = roadshowData[d]?.afternoon || [];
+            const maxLen = Math.max(morning.length, afternoon.length, 1);
+            
+            for(let i = 0; i < maxLen; i++) {
+                const dateCol = i === 0 ? formatDate(d) : '';
+                const morningName = morning[i] ? `"${morning[i].displayName}"` : '';
+                const afternoonName = afternoon[i] ? `"${afternoon[i].displayName}"` : '';
+                
+                csvContent += `"${dateCol}",${morningName},${afternoonName}\n`;
+            }
+        });
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        // Đổi thành .csv, Excel native support CSV.
+        a.download = `Roadshow_${selectedViewStore}_${new Date().getTime()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
     }
 
     let saveTimeout = {};
@@ -314,37 +347,39 @@
 
 <div class="w-full bg-slate-50 rounded-xl shadow-sm border border-amber-200 overflow-hidden flex flex-col h-full animate-fadeIn">
     
-    <div class="p-2 sm:p-3 bg-white border-b border-amber-200 flex flex-row justify-between items-center gap-2 shrink-0">
+    <!-- [PHẪU THUẬT LAYOUT]: Sửa Flex của Header để không đè lên nhau trên màn mobile -->
+    <div class="p-2 sm:p-3 bg-white border-b border-amber-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shrink-0">
         
         <div class="hidden sm:flex items-center gap-2 text-amber-600 shrink-0">
             <span class="material-icons-round text-2xl">campaign</span>
             <div>
                 <h3 class="font-bold text-sm">Chiến dịch Roadshow / Tờ rơi</h3>
-                <p class="text-[10px] opacity-80 text-slate-500">Quản lý nhân sự phát sinh ngắn hạn</p>
+                <p class="text-[10px] opacity-80 text-slate-500">Chỉ hiển thị từ ngày hôm nay</p>
             </div>
         </div>
 
-        <div class="flex items-center justify-between w-full sm:w-auto gap-2">
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full md:w-auto gap-2">
             {#if isAdmin}
-                <div class="bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-100 flex items-center gap-1.5 shadow-sm shrink-0">
-                    <div class="flex items-center gap-1">
-                        <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Từ:</span>
-                        <input type="date" bind:value={startDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                <!-- Block Date -->
+                <div class="bg-amber-50 px-1.5 py-1 rounded-lg border border-amber-200 flex items-center justify-between shadow-sm shrink-0 overflow-hidden relative">
+                    <div class="flex items-center flex-1">
+                        <span class="text-[9px] font-black text-amber-600 uppercase px-1 bg-amber-100 rounded-sm mr-1">Từ</span>
+                        <input type="date" bind:value={startDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer w-full">
                     </div>
-                    <div class="text-amber-300 font-bold">-</div>
-                    <div class="flex items-center gap-1">
-                        <span class="hidden sm:inline text-[10px] font-bold text-amber-600 uppercase">Đến:</span>
-                        <input type="date" bind:value={endDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                    <div class="text-amber-300 font-bold mx-1">|</div>
+                    <div class="flex items-center flex-1">
+                        <span class="text-[9px] font-black text-amber-600 uppercase px-1 bg-amber-100 rounded-sm mr-1">Đến</span>
+                        <input type="date" bind:value={endDate} class="bg-transparent text-[11px] sm:text-xs font-bold text-slate-700 outline-none cursor-pointer w-full">
                     </div>
                 </div>
             
-                <div class="flex items-center gap-1.5 shrink-0">
+                <!-- Block Buttons: Căn phải khi rớt dòng -->
+                <div class="flex items-center justify-end gap-1.5 shrink-0 self-end sm:self-auto">
                     <button class="bg-red-500 hover:bg-red-600 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-red-200 transition-colors flex items-center gap-1" on:click={clearSchedule} disabled={loading || (roadshowDays.length === 0 && displayDays.length === 0)} title="Xóa toàn bộ lịch đang hiển thị">
                         {#if loading} 
                             <span class="material-icons-round text-[14px] animate-spin">sync</span>
                         {:else} 
                             <span class="material-icons-round text-[14px]">delete_sweep</span> 
-                            <span class="hidden sm:inline">Xóa Lịch</span> 
                         {/if}
                     </button>
 
@@ -353,8 +388,11 @@
                             <span class="material-icons-round text-[14px] animate-spin">sync</span>
                         {:else} 
                             <span class="material-icons-round text-[14px]">auto_awesome</span> 
-                            <span class="hidden sm:inline">Tạo Lịch</span> 
                         {/if}
+                    </button>
+
+                    <button class="bg-green-600 hover:bg-green-700 text-white font-bold py-1.5 px-2.5 sm:px-3 rounded-lg text-xs shadow-sm shadow-green-200 transition-colors flex items-center gap-1" on:click={exportToExcel} disabled={displayDays.length === 0} title="Xuất danh sách ra file Excel">
+                        <span class="material-icons-round text-[14px]">download</span>
                     </button>
                 </div>
             {/if}
@@ -365,9 +403,9 @@
         {#if displayDays.length === 0}
             <div class="h-full w-full flex flex-col items-center justify-center opacity-60">
                 <span class="material-icons-round text-5xl text-amber-300 mb-2">date_range</span>
-                <p class="text-slate-500 font-bold">Chưa có lịch Roadshow.</p>
+                <p class="text-slate-500 font-bold">Chưa có lịch Roadshow (Từ hôm nay).</p>
                 {#if isAdmin}
-                    <p class="text-[10px] sm:text-xs text-amber-600 mt-1">Vui lòng chọn Từ ngày - Đến ngày và bấm Tạo Lịch để bắt đầu.</p>
+                    <p class="text-[10px] sm:text-xs text-amber-600 mt-1">Chọn Từ - Đến (trong khối ngày phía trên) và bấm Tạo Lịch để bắt đầu.</p>
                 {/if}
             </div>
         {:else}
@@ -385,16 +423,22 @@
 
                         <div class="flex-1 overflow-y-auto p-1.5 sm:p-2 space-y-1.5 sm:space-y-2">
                             
+                            <!-- CA SÁNG -->
                             <div class="bg-blue-50/40 rounded border border-blue-100 p-1 sm:p-1.5">
                                 <div class="flex justify-between items-center mb-1 sm:mb-1.5 px-0.5">
                                     <div class="text-[9px] sm:text-[10px] font-black text-blue-700 flex items-center gap-1 uppercase tracking-wide">
                                         <span>🌞</span> CA SÁNG
                                     </div>
-                                    {#if isAdmin}
-                                        <button class="text-[9px] font-bold text-blue-600 bg-white hover:bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => openSearchModal(d, 'morning')}>
-                                            <span class="material-icons-round text-[11px]">add</span> Thêm
+                                    <div class="flex gap-1">
+                                        <button class="text-[9px] font-bold text-slate-500 bg-white hover:bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => copyStaffList(d, 'morning')} title="Copy danh sách">
+                                            <span class="material-icons-round text-[11px]">content_copy</span>
                                         </button>
-                                    {/if}
+                                        {#if isAdmin}
+                                            <button class="text-[9px] font-bold text-blue-600 bg-white hover:bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => openSearchModal(d, 'morning')}>
+                                                <span class="material-icons-round text-[11px]">add</span> Thêm
+                                            </button>
+                                        {/if}
+                                    </div>
                                 </div>
 
                                 <div class="flex flex-wrap gap-1 sm:gap-1.5">
@@ -417,16 +461,22 @@
                                 </div>
                             </div>
 
+                            <!-- CA CHIỀU -->
                             <div class="bg-orange-50/40 rounded border border-orange-100 p-1 sm:p-1.5">
                                 <div class="flex justify-between items-center mb-1 sm:mb-1.5 px-0.5">
                                     <div class="text-[9px] sm:text-[10px] font-black text-orange-700 flex items-center gap-1 uppercase tracking-wide">
                                         <span>🌛</span> CA CHIỀU
                                     </div>
-                                    {#if isAdmin}
-                                        <button class="text-[9px] font-bold text-orange-600 bg-white hover:bg-orange-100 border border-orange-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => openSearchModal(d, 'afternoon')}>
-                                            <span class="material-icons-round text-[11px]">add</span> Thêm
+                                    <div class="flex gap-1">
+                                        <button class="text-[9px] font-bold text-slate-500 bg-white hover:bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => copyStaffList(d, 'afternoon')} title="Copy danh sách">
+                                            <span class="material-icons-round text-[11px]">content_copy</span>
                                         </button>
-                                    {/if}
+                                        {#if isAdmin}
+                                            <button class="text-[9px] font-bold text-orange-600 bg-white hover:bg-orange-100 border border-orange-200 px-1.5 py-0.5 rounded shadow-sm transition-colors flex items-center gap-0.5" on:click={() => openSearchModal(d, 'afternoon')}>
+                                                <span class="material-icons-round text-[11px]">add</span> Thêm
+                                            </button>
+                                        {/if}
+                                    </div>
                                 </div>
 
                                 <div class="flex flex-wrap gap-1 sm:gap-1.5">
