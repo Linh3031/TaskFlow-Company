@@ -5,6 +5,8 @@
     export let item;
     export let isAdmin = false;
     export let uploadingId = null;
+    export let todayScheduleMap = {}; // [CodeGenesis] Map Lịch được truyền từ cha
+    export let dateStr = ''; // Truyền xuống để khóa nếu là ngày cũ
 
     const dispatch = createEventDispatcher();
 
@@ -12,19 +14,30 @@
     $: uniqueContributors = (() => {
         const list = [];
         
-        // 1. Nhặt tất cả những người đã up ảnh (nếu có)
         if (item.uploaders && item.uploaders.length > 0) {
             list.push(...item.uploaders);
         }
-        
-        // 2. Dự phòng: Luôn nhét thêm người completedBy vào (để cứu dữ liệu cũ)
         if (item.completedBy) {
             list.push(item.completedBy);
         }
-        
-        // 3. Lọc trùng (Set) và loại bỏ các giá trị rỗng/undefined (filter Boolean)
         return Array.from(new Set(list)).filter(Boolean).join(', ');
     })();
+
+    // [CodeGenesis] Tính toán trạng thái OFF và lọc ra danh sách ca làm việc thực sự để khóa giờ
+    $: mappedAssignees = (item.assignees || []).map(a => {
+        const idLower = String(a.id || '').toLowerCase();
+        const nameLower = String(a.username || '').toLowerCase();
+        const shift = todayScheduleMap[idLower] || todayScheduleMap[nameLower] || '';
+        const isOff = shift === 'OFF';
+        return { ...a, shift, isOff };
+    });
+    
+    // Thu thập tất cả các ca của những người KHÔNG OFF trong khu vực này
+    // Chuyển cho ImageGrid để tính toán giờ khóa chung của quầy này.
+    $: activeShifts = mappedAssignees.filter(a => !a.isOff).map(a => a.shift);
+    
+    // Cờ báo hiệu khu vực này TẤT CẢ mọi người đều OFF
+    $: isAllOff = mappedAssignees.length > 0 && mappedAssignees.every(a => a.isOff);
 </script>
 
 <div class="bg-white p-3 rounded-xl border-y border-r shadow-sm flex flex-col gap-2 transition-all duration-300 {item.completed ? 'bg-slate-50 border-l-4 border-l-green-500 border-y-slate-200 border-r-slate-200 opacity-70 hover:opacity-100' : 'border-l-4 border-l-orange-500 border-y-slate-200 border-r-slate-200 hover:border-cyan-400'}">
@@ -46,9 +59,22 @@
                 {/if}
             </div>
              
-            <div class="text-[11px] text-slate-500 font-semibold mt-0.5 flex items-center gap-1">
+            <!-- [CodeGenesis] Phẫu thuật Badge OFF -->
+            <div class="text-[11px] text-slate-500 font-semibold mt-1 flex flex-wrap items-center gap-1.5">
                 <span class="material-icons-round text-[14px] text-indigo-400">groups</span>
-                {(item.assignees || []).map(a => a.username).join(', ') || 'Chưa gán người'}
+                {#if mappedAssignees.length > 0}
+                    {#each mappedAssignees as ma, index}
+                        <span class="flex items-center gap-1">
+                            <span>{ma.username}</span>
+                            {#if ma.isOff}
+                                <span class="text-[9px] text-red-500 font-bold border border-red-500 bg-red-50 px-1 rounded shadow-sm">OFF</span>
+                            {/if}
+                            {#if index < mappedAssignees.length - 1}<span>,</span>{/if}
+                        </span>
+                    {/each}
+                {:else}
+                    <span>Chưa gán người</span>
+                {/if}
             </div>
         </div>
         
@@ -73,9 +99,14 @@
         </div>
     </div>
 
+    <!-- [CodeGenesis] Truyền activeShifts, isAllOff, isAdmin và dateStr để grid xử lý khóa -->
     <ChecklistImageGrid 
         {item} 
         {uploadingId}
+        {activeShifts}
+        {isAllOff}
+        {isAdmin}
+        {dateStr}
         on:upload 
         on:openLightbox 
     />
