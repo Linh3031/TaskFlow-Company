@@ -5,7 +5,7 @@
     export let statsLoading = false;
     export let allStaff = [];
     export let checklistData = [];
-    export let excludedStaffIds = []; // Nhận danh sách đã bị miễn trừ từ DB
+    export let excludedStaffIds = []; 
 
     const dispatch = createEventDispatcher();
     
@@ -13,7 +13,6 @@
     let sortBy = 'total';
     let sortDesc = true;
     
-    // Quản lý trạng thái checkbox mượt mà khi đóng/mở modal
     let localExcludedIds = [];
     let prevShow = false;
     $: if (show && !prevShow) {
@@ -23,15 +22,17 @@
 
     $: sortedMatrix = [...statsData.matrix].sort((a, b) => {
         if (sortBy === 'total') return sortDesc ? b.total - a.total : a.total - b.total;
+        if (sortBy === 'late') return sortDesc ? (b.lateTotal || 0) - (a.lateTotal || 0) : (a.lateTotal || 0) - (b.lateTotal || 0);
         else return sortDesc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name);
     });
 
     function toggleSort(field) {
         if (sortBy === field) sortDesc = !sortDesc;
-        else { sortBy = field; sortDesc = field === 'total'; }
+        else { sortBy = field; sortDesc = true; }
     }
 
     $: grandTotal = sortedMatrix.reduce((sum, row) => sum + row.total, 0);
+    $: grandLate = sortedMatrix.reduce((sum, row) => sum + (row.lateTotal || 0), 0);
     $: dailyTotals = statsData.days.reduce((acc, day) => {
         acc[day] = sortedMatrix.reduce((sum, row) => sum + (row.days[day] || 0), 0);
         return acc;
@@ -130,7 +131,6 @@
                     </div>
 
                     <div class="flex-[2] bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col max-h-full">
-                        <!-- PHẪU THUẬT: Thêm nút Lưu tại Header Cột Nhân Sự Trống -->
                         <div class="p-2.5 bg-red-50 border-b border-red-100 font-bold text-red-700 flex justify-between items-center shrink-0">
                             <span class="flex items-center gap-1"><span class="material-icons-round text-red-500 text-sm">person_off</span> Nhân Sự Trống ({unassignedCount})</span>
                             {#if unassignedCount > 0}
@@ -149,7 +149,6 @@
                                         <span class="font-bold text-slate-700 text-sm truncate">{staff.username}</span>
                                         <span class="text-[10px] text-slate-400 uppercase">{staff.role}</span>
                                     </div>
-                                    <!-- PHẪU THUẬT: Thêm Checkbox chọn loại trừ -->
                                     <label class="flex items-center gap-1.5 cursor-pointer pl-2 border-l border-slate-200" title="Đánh dấu để bỏ qua khi Trộn Lịch">
                                         <span class="text-[10px] font-bold {localExcludedIds.includes(staff.id) ? 'text-red-500' : 'text-slate-400'} hidden sm:inline">Loại Trừ</span>
                                         <input type="checkbox" value={staff.id} bind:group={localExcludedIds} class="w-5 h-5 accent-red-500 rounded border-slate-300 cursor-pointer">
@@ -178,6 +177,9 @@
                             <th class="px-4 py-3 border-r border-slate-300 cursor-pointer hover:bg-slate-300 bg-indigo-100 text-indigo-800" on:click={() => toggleSort('total')}>
                                 <div class="flex items-center gap-1">TỔNG THÁNG {#if sortBy === 'total'}<span class="material-icons-round text-[14px]">{sortDesc ? 'arrow_downward' : 'arrow_upward'}</span>{/if}</div>
                             </th>
+                            <th class="px-3 py-3 border-r border-slate-300 cursor-pointer hover:bg-red-200 bg-red-100 text-red-800" on:click={() => toggleSort('late')}>
+                                <div class="flex items-center justify-center gap-1" title="Số lần chưa hoàn tất đúng hạn">SỐ LẦN TRỄ {#if sortBy === 'late'}<span class="material-icons-round text-[14px]">{sortDesc ? 'arrow_downward' : 'arrow_upward'}</span>{/if}</div>
+                            </th>
                             {#each statsData.days as day}
                                 <th class="px-2 py-3 border-r border-slate-300 text-center min-w-[35px]">{day}</th>
                             {/each}
@@ -188,14 +190,27 @@
                             <tr class="bg-white border-b hover:bg-indigo-50/50 transition-colors">
                                 <td class="px-4 py-2 border-r font-bold text-slate-800 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] whitespace-nowrap">{row.name}</td>
                                 <td class="px-4 py-2 border-r font-black text-indigo-600 bg-indigo-50/30 text-center text-base">{row.total}</td>
+                                <td class="px-3 py-2 border-r font-black text-red-600 bg-red-50/30 text-center text-base">{row.lateTotal || 0}</td>
                                 {#each statsData.days as day}
-                                    <td class="px-2 py-2 border-r text-center {row.days[day] ? 'font-bold text-cyan-600 bg-cyan-50/30' : 'text-slate-300'}">{row.days[day] || '-'}</td>
+                                    <td class="px-2 py-2 border-r text-center {row.dayStatuses && row.dayStatuses[day] === 'OFF' ? 'bg-slate-100/50' : ''}">
+                                        {#if row.dayStatuses && row.dayStatuses[day] === 'OFF'}
+                                            <div class="text-[9px] font-bold text-slate-400 border border-slate-300 px-1 py-0.5 rounded inline-block bg-white shadow-sm" title="Nghỉ / Không làm việc">OFF</div>
+                                        {:else if row.dayStatuses && row.dayStatuses[day] === 'LATE'}
+                                            <div class="text-[10px] font-bold text-white bg-red-500 rounded px-1.5 py-0.5 shadow-sm inline-block animate-pulse" title="Đã quá hạn hoàn tất báo cáo">
+                                                {row.days[day] || 0}
+                                            </div>
+                                        {:else}
+                                            <div class="{row.days[day] ? 'font-bold text-cyan-600 bg-cyan-50/30' : 'text-slate-300'} px-1 py-0.5 rounded inline-block">
+                                                {row.days[day] || '-'}
+                                            </div>
+                                        {/if}
+                                    </td>
                                 {/each}
                             </tr>
                         {/each}
                         {#if sortedMatrix.length === 0 && !statsLoading}
                             <tr>
-                                <td colspan={statsData.days.length + 2} class="text-center py-12 text-slate-500 font-bold">Không có dữ liệu upload nào.</td>
+                                <td colspan={statsData.days.length + 3} class="text-center py-12 text-slate-500 font-bold">Không có dữ liệu upload nào.</td>
                             </tr>
                         {/if}
                     </tbody>
@@ -205,6 +220,7 @@
                         <tr>
                             <td class="px-4 py-3 border-r border-indigo-200 font-black sticky left-0 bg-indigo-100 z-30 uppercase">Tổng Toàn Kho</td>
                             <td class="px-4 py-3 border-r border-indigo-200 font-black text-center text-lg text-indigo-700">{grandTotal}</td>
+                            <td class="px-3 py-3 border-r border-indigo-200 font-black text-center text-lg text-red-700">{grandLate}</td>
                             {#each statsData.days as day}
                                 <td class="px-2 py-3 border-r border-indigo-200 text-center font-bold {dailyTotals[day] ? 'text-indigo-800' : 'text-indigo-300'}">{dailyTotals[day] || '-'}</td>
                             {/each}

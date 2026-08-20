@@ -133,7 +133,6 @@ export async function executeAutoRotate(activeStoreId, dateStr, allStaff, checkl
     });
     await setDoc(templateRef, { items: updatedTemplateItems }, { merge: true });
 
-    // Cập nhật tương lai
     const [year, month, day] = dateStr.split('-');
     const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
     const currentDayNumber = parseInt(day, 10);
@@ -157,7 +156,7 @@ export async function executeAutoRotate(activeStoreId, dateStr, allStaff, checkl
     return { success: true, message: "✅ Đã Trộn Lịch! Lịch này đã được tự động chép đè cho TOÀN BỘ các ngày còn lại trong tháng." };
 }
 
-// --- LOGIC THỐNG KÊ ---
+// --- LOGIC THỐNG KÊ KÈM TÍNH TOÁN TRỄ/OFF ---
 export async function getMonthlyStats(activeStoreId, dateStr) {
     const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
     const snap = await getDoc(templateRef);
@@ -168,8 +167,58 @@ export async function getMonthlyStats(activeStoreId, dateStr) {
     const daysArray = Array.from({length: daysInMonth}, (_, i) => i + 1);
     
     let usersStats = {};
-    const fetchPromises = [];
     
+    const monthStrPadded = `${year}-${String(month).padStart(2, '0')}`;
+    const monthStrNormal = `${year}-${parseInt(month, 10)}`;
+
+    let staffScheduleData = {};
+    let staffSnap = await getDoc(doc(db, 'stores', activeStoreId, 'schedules', monthStrPadded));
+    if (!staffSnap.exists()) staffSnap = await getDoc(doc(db, 'stores', activeStoreId, 'schedules', monthStrNormal));
+    if (staffSnap.exists()) staffScheduleData = staffSnap.data().data || {};
+
+    let pgScheduleMap = {};
+    const daysToSample = [1, 8, 15, 22, 29, daysInMonth];
+    const weekIdsToFetch = new Set();
+    daysToSample.forEach(d => {
+        const dateUTC = new Date(Date.UTC(parseInt(year), parseInt(month)-1, d));
+        const dayNum = dateUTC.getUTCDay() || 7;
+        dateUTC.setUTCDate(dateUTC.getUTCDate() + 4 - dayNum);
+        const yearStart = new Date(Date.UTC(dateUTC.getUTCFullYear(),0,1));
+        const weekNo = Math.ceil((((dateUTC - yearStart) / 86400000) + 1)/7);
+        weekIdsToFetch.add(`${dateUTC.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`);
+    });
+
+    for (const wId of weekIdsToFetch) {
+        const wSnap = await getDoc(doc(db, 'stores', activeStoreId, 'pg_schedules', wId));
+        if (wSnap.exists()) pgScheduleMap[wId] = wSnap.data().data || {};
+    }
+
+    const getShift = (userId, username, dayNum, fullDateStr) => {
+        const dayAssignments = staffScheduleData[String(dayNum)] || staffScheduleData[dayNum] || [];
+        let assign = dayAssignments.find(a => String(a.staffId).toLowerCase() === userId || String(a.username).toLowerCase() === username);
+        if (assign) return assign.shift;
+
+        const date = new Date(fullDateStr);
+        const dateUTC = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+        const dayNumUTC = dateUTC.getUTCDay() || 7;
+        dateUTC.setUTCDate(dateUTC.getUTCDate() + 4 - dayNumUTC);
+        const yearStart = new Date(Date.UTC(dateUTC.getUTCFullYear(),0,1));
+        const weekNo = Math.ceil((((dateUTC - yearStart) / 86400000) + 1)/7);
+        const weekId = `${dateUTC.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+        
+        const daysMap = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+        const weekdayStr = daysMap[date.getDay()];
+
+        const weekData = pgScheduleMap[weekId] || {};
+        for (const [pgId, shifts] of Object.entries(weekData)) {
+            if (String(pgId).toLowerCase() === userId && shifts[weekdayStr]) {
+                return shifts[weekdayStr];
+            }
+        }
+        return '';
+    };
+
+    const fetchPromises = [];
     for(let i = 1; i <= daysInMonth; i++) {
         const paddedMonth = month.toString().padStart(2, '0');
         const paddedDay = i.toString().padStart(2, '0');
@@ -188,22 +237,65 @@ export async function getMonthlyStats(activeStoreId, dateStr) {
     }
     
     const results = await Promise.all(fetchPromises);
+    const now = new Date();
+    const todayObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
     results.forEach(({day, snap}) => {
+        const targetDateObj = new Date(year, parseInt(month) - 1, day);
+        const fullDateStrForDay = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+        
         if(snap && snap.data().items) {
             snap.data().items.forEach(item => {
+                
                 if(item.uploaders && item.uploaders.length > 0) {
                     item.uploaders.forEach(username => {
                         if(!username) return;
-                        if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {} };
+                        if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {}, lateTotal: 0, dayStatuses: {} };
                         usersStats[username].total++;
                         usersStats[username].days[day] = (usersStats[username].days[day] || 0) + 1;
                     });
                 }
                 else if (item.completedBy && item.completed) {
                     const username = item.completedBy;
-                    if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {} };
+                    if(!usersStats[username]) usersStats[username] = { name: username, total: 0, days: {}, lateTotal: 0, dayStatuses: {} };
                     usersStats[username].total += 4;
                     usersStats[username].days[day] = (usersStats[username].days[day] || 0) + 4;
+                }
+
+                if (item.assignees && item.assignees.length > 0) {
+                    item.assignees.forEach(a => {
+                        const uname = a.username;
+                        if(!uname) return;
+                        if(!usersStats[uname]) usersStats[uname] = { name: uname, total: 0, days: {}, lateTotal: 0, dayStatuses: {} };
+                        
+                        const shift = getShift(String(a.id || '').toLowerCase(), String(a.username || '').toLowerCase(), day, fullDateStrForDay);
+                        
+                        if (shift === 'OFF') {
+                            usersStats[uname].dayStatuses[day] = 'OFF';
+                        } else {
+                            let isLate = false;
+                            
+                            if (!item.completed && shift) {
+                                if (targetDateObj < todayObj) {
+                                    isLate = true;
+                                } else if (targetDateObj.getTime() === todayObj.getTime()) {
+                                    const s = String(shift).toLowerCase();
+                                    const currentHour = now.getHours();
+                                    let needsNoonLock = s.includes('2') || s === 'sáng' || s === 'full' || s === 'gãy';
+                                    let needsEveningLock = ((s.includes('4') || s.includes('5')) && !s.includes('2')) || s === 'chiều';
+                                    if (needsNoonLock && currentHour >= 12) isLate = true;
+                                    else if (needsEveningLock && currentHour >= 17) isLate = true;
+                                }
+                            }
+
+                            if (isLate) {
+                                if (usersStats[uname].dayStatuses[day] !== 'LATE') {
+                                    usersStats[uname].dayStatuses[day] = 'LATE';
+                                    usersStats[uname].lateTotal++;
+                                }
+                            }
+                        }
+                    });
                 }
             });
         }

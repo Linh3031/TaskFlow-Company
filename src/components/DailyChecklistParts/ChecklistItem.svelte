@@ -5,50 +5,64 @@
     export let item;
     export let isAdmin = false;
     export let uploadingId = null;
-    export let todayScheduleMap = {}; // [CodeGenesis] Map Lịch được truyền từ cha
-    export let dateStr = ''; // Truyền xuống để khóa nếu là ngày cũ
+    export let todayScheduleMap = {}; 
+    export let dateStr = ''; 
 
     const dispatch = createEventDispatcher();
 
-    // [CodeGenesis] Phẫu thuật: Gom toàn bộ người trong mảng VÀ người chốt hạ cuối cùng để không sót ai
     $: uniqueContributors = (() => {
         const list = [];
-        
-        if (item.uploaders && item.uploaders.length > 0) {
-            list.push(...item.uploaders);
-        }
-        if (item.completedBy) {
-            list.push(item.completedBy);
-        }
+        if (item.uploaders && item.uploaders.length > 0) list.push(...item.uploaders);
+        if (item.completedBy) list.push(item.completedBy);
         return Array.from(new Set(list)).filter(Boolean).join(', ');
     })();
 
-    // [CodeGenesis] Tính toán trạng thái OFF và lọc ra danh sách ca làm việc thực sự để khóa giờ
+    // [CodeGenesis] Phẫu thuật sử dụng Date Object để chặn lỗi đếm nhầm ngày tương lai
     $: mappedAssignees = (item.assignees || []).map(a => {
         const idLower = String(a.id || '').toLowerCase();
         const nameLower = String(a.username || '').toLowerCase();
         const shift = todayScheduleMap[idLower] || todayScheduleMap[nameLower] || '';
         const isOff = shift === 'OFF';
-        return { ...a, shift, isOff };
+
+        let isLate = false;
+        
+        if (!item.completed && !isOff && shift) {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            const targetDateObj = new Date(y, m - 1, d);
+            const now = new Date();
+            const todayObj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            
+            if (targetDateObj < todayObj) {
+                isLate = true;
+            } 
+            else if (targetDateObj.getTime() === todayObj.getTime()) {
+                const s = String(shift).toLowerCase();
+                const currentHour = now.getHours();
+                
+                let needsNoonLock = s.includes('2') || s === 'sáng' || s === 'full' || s === 'gãy';
+                let needsEveningLock = ((s.includes('4') || s.includes('5')) && !s.includes('2')) || s === 'chiều';
+
+                if (needsNoonLock && currentHour >= 12) isLate = true;
+                else if (needsEveningLock && currentHour >= 17) isLate = true;
+            }
+        }
+
+        return { ...a, shift, isOff, isLate };
     });
     
-    // Thu thập tất cả các ca của những người KHÔNG OFF trong khu vực này
-    // Chuyển cho ImageGrid để tính toán giờ khóa chung của quầy này.
     $: activeShifts = mappedAssignees.filter(a => !a.isOff).map(a => a.shift);
-    
-    // Cờ báo hiệu khu vực này TẤT CẢ mọi người đều OFF
     $: isAllOff = mappedAssignees.length > 0 && mappedAssignees.every(a => a.isOff);
 </script>
 
 <div class="bg-white p-3 rounded-xl border-y border-r shadow-sm flex flex-col gap-2 transition-all duration-300 {item.completed ? 'bg-slate-50 border-l-4 border-l-green-500 border-y-slate-200 border-r-slate-200 opacity-70 hover:opacity-100' : 'border-l-4 border-l-orange-500 border-y-slate-200 border-r-slate-200 hover:border-cyan-400'}">
                     
     <div class="flex justify-between items-start">
-        <div class="flex-1 pr-2">
+        <div class="flex-1 pr-2 min-w-0">
             <div class="flex items-center gap-2">
-                <div class="font-bold text-slate-800 text-sm {item.completed ? 'line-through decoration-green-400' : ''}">{item.areaName}</div>
+                <div class="font-bold text-slate-800 text-sm truncate {item.completed ? 'line-through decoration-green-400' : ''}">{item.areaName}</div>
                 
                 {#if isAdmin}
-                    <div class="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
+                    <div class="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity shrink-0">
                         <button class="text-slate-500 hover:text-indigo-600 p-0.5 rounded hover:bg-slate-100" on:click={() => dispatch('edit', item)} title="Sửa khu vực">
                             <span class="material-icons-round text-[14px]">edit</span>
                         </button>
@@ -59,21 +73,33 @@
                 {/if}
             </div>
              
-            <!-- [CodeGenesis] Phẫu thuật Badge OFF -->
-            <div class="text-[11px] text-slate-500 font-semibold mt-1 flex flex-wrap items-center gap-1.5">
-                <span class="material-icons-round text-[14px] text-indigo-400">groups</span>
+            <div class="text-[11px] text-slate-500 font-semibold mt-1.5 flex flex-wrap items-center gap-1.5">
+                <span class="material-icons-round text-[14px] text-indigo-400 shrink-0">groups</span>
+                
                 {#if mappedAssignees.length > 0}
-                    {#each mappedAssignees as ma, index}
-                        <span class="flex items-center gap-1">
-                            <span>{ma.username}</span>
-                            {#if ma.isOff}
-                                <span class="text-[9px] text-red-500 font-bold border border-red-500 bg-red-50 px-1 rounded shadow-sm">OFF</span>
-                            {/if}
-                            {#if index < mappedAssignees.length - 1}<span>,</span>{/if}
-                        </span>
-                    {/each}
+                    <div class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                        {#each mappedAssignees as ma, index}
+                            <div class="flex items-center gap-1">
+                                <span class={ma.isLate ? 'text-slate-700 font-bold' : ''}>{ma.username}</span>
+                                
+                                {#if ma.isOff}
+                                    <span class="text-[9px] text-red-500 font-bold border border-red-500 bg-red-50 px-1 rounded shadow-sm">OFF</span>
+                                {/if}
+                                
+                                {#if ma.isLate}
+                                    <span class="text-[9px] text-white font-black bg-gradient-to-r from-red-500 to-rose-600 px-1.5 py-0.5 rounded shadow-sm border border-red-700 animate-pulse flex items-center whitespace-nowrap">
+                                        Đã trễ
+                                    </span>
+                                {/if}
+                                
+                                {#if index < mappedAssignees.length - 1}
+                                    <span class="text-slate-300">,</span>
+                                {/if}
+                            </div>
+                        {/each}
+                    </div>
                 {:else}
-                    <span>Chưa gán người</span>
+                    <span class="text-red-400 font-bold">Chưa gán người</span>
                 {/if}
             </div>
         </div>
@@ -99,7 +125,6 @@
         </div>
     </div>
 
-    <!-- [CodeGenesis] Truyền activeShifts, isAllOff, isAdmin và dateStr để grid xử lý khóa -->
     <ChecklistImageGrid 
         {item} 
         {uploadingId}
