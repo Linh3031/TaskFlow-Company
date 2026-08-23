@@ -2,12 +2,12 @@
     import { onMount, onDestroy } from 'svelte';
     import { currentUser } from '../lib/stores';
     
-    // Import các Module Xử Lý Độc Lập
     import { exportTemplateData, exportExcelData, importExcelData } from './DailyChecklistParts/handlers/excelHandler.js';
     import { processAndUploadImages } from './DailyChecklistParts/handlers/imageHandler.js';
     import { 
         subscribeToChecklist, fetchAllStaffData, saveExcludedConfig, executeAutoRotate, 
-        getMonthlyStats, saveAreaConfig, removeArea, clearAllAreas, fetchScheduleMaps 
+        getMonthlyStats, saveAreaConfig, removeArea, clearAllAreas, 
+        fetchScheduleMaps, subscribeToScheduleMaps // [PHẪU THUẬT LOGIC]: Import hàm Realtime mới
     } from './DailyChecklistParts/handlers/dataSection.js';
 
     import ChecklistHeader from './DailyChecklistParts/ChecklistHeader.svelte';
@@ -25,6 +25,7 @@
     let loading = true;
     let uploadingId = null;
     let unsubscribe = null;
+    let unsubSchedules = null; // [PHẪU THUẬT LOGIC]: Biến dọn dẹp bộ nhớ cho lịch Realtime
     let activeRecordId = '';
     
     let showAdminModal = false;
@@ -47,14 +48,20 @@
     let todayScheduleMap = {}; 
     let scheduleLoading = false;
 
+    let searchQuery = '';
+
     $: sortedChecklistData = [...checklistData].sort((a, b) => {
         if (a.completed === b.completed) return 0;
         return a.completed ? 1 : -1;
     });
 
+    $: filteredChecklistData = sortedChecklistData.filter(item => 
+        item.areaName.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    );
+
     $: if (activeStoreId && dateStr) {
         initChecklist();
-        loadSchedules(); 
+        loadSchedulesRealtime(); // [PHẪU THUẬT LOGIC]: Gọi hàm Realtime thay vì hàm một lần
     }
 
     async function initChecklist() {
@@ -71,32 +78,42 @@
         }
     }
 
-    async function loadSchedules() {
-        scheduleLoading = true;
-        todayScheduleMap = await fetchScheduleMaps(activeStoreId, dateStr);
-        scheduleLoading = false;
-    }
-
     async function ensureStaffLoaded() {
         if (allStaff.length === 0) allStaff = await fetchAllStaffData(activeStoreId);
     }
 
-    // --- Các Hàm Điều Phối Action ---
+    // [PHẪU THUẬT LOGIC]: Hàm quản lý Lịch Realtime mới
+    async function loadSchedulesRealtime() {
+        if (unsubSchedules) {
+            unsubSchedules();
+            unsubSchedules = null;
+        }
+        scheduleLoading = true;
+        await ensureStaffLoaded();
+        unsubSchedules = subscribeToScheduleMaps(activeStoreId, dateStr, allStaff, (mapData) => {
+            todayScheduleMap = mapData;
+            scheduleLoading = false;
+        });
+    }
 
+    // --- Các Hàm Điều Phối Action ---
     function scrollToMyArea() {
         if (!$currentUser) return;
         const myArea = sortedChecklistData.find(item => (item.assignees || []).some(a => a.id === $currentUser.id || (a.username && a.username.toLowerCase() === $currentUser.username?.toLowerCase())));
         if (myArea) {
-            const wrapper = document.getElementById('area-' + myArea.id);
-            if (wrapper) {
-                wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                const target = wrapper.querySelector('div.bg-white') || wrapper.querySelector('div.bg-slate-50') || wrapper.firstElementChild;
-                if (target) {
-                    const originalTransition = target.style.transition;
-                    target.style.transition = "all 0.5s ease"; target.classList.add('!bg-yellow-200', '!border-yellow-400', 'shadow-lg');
-                    setTimeout(() => { target.classList.remove('!bg-yellow-200', '!border-yellow-400', 'shadow-lg'); target.style.transition = originalTransition; }, 2000);
-                }
-            } else { alert("Đã tìm thấy khu vực nhưng giao diện chưa tải kịp!"); }
+            searchQuery = ''; 
+            setTimeout(() => {
+                const wrapper = document.getElementById('area-' + myArea.id);
+                if (wrapper) {
+                    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const target = wrapper.querySelector('div.bg-white') || wrapper.querySelector('div.bg-slate-50') || wrapper.firstElementChild;
+                    if (target) {
+                        const originalTransition = target.style.transition;
+                        target.style.transition = "all 0.5s ease"; target.classList.add('!bg-yellow-200', '!border-yellow-400', 'shadow-lg');
+                        setTimeout(() => { target.classList.remove('!bg-yellow-200', '!border-yellow-400', 'shadow-lg'); target.style.transition = originalTransition; }, 2000);
+                    }
+                } else { alert("Đã tìm thấy khu vực nhưng giao diện chưa tải kịp!"); }
+            }, 50);
         } else { alert("Hôm nay bạn chưa được phân công!"); }
     }
 
@@ -120,7 +137,7 @@
         statsLoading = true;
         await ensureStaffLoaded();
         try {
-            const res = await getMonthlyStats(activeStoreId, dateStr);
+            const res = await getMonthlyStats(activeStoreId, dateStr, allStaff);
             statsData = res.statsData;
             excludedStaffIds = res.excludedStaffIds;
         } catch (error) { console.error("Lỗi lấy thống kê:", error); } 
@@ -211,7 +228,12 @@
     }
 
     function openLightbox(event) { lightboxImages = event.detail.images; lightboxIndex = event.detail.index; showLightbox = true; }
-    onDestroy(() => { if (unsubscribe) unsubscribe(); });
+    
+    // [PHẪU THUẬT LOGIC]: Hủy lắng nghe 2 đường để dọn rác bộ nhớ
+    onDestroy(() => { 
+        if (unsubscribe) unsubscribe(); 
+        if (unsubSchedules) unsubSchedules();
+    });
 </script>
 
 <div class="w-full h-full flex flex-col bg-slate-50 rounded-xl border border-cyan-200 shadow-sm overflow-hidden relative">
@@ -220,9 +242,30 @@
     {#if scheduleLoading}
         <div class="bg-indigo-50 border-b border-indigo-100 p-1.5 flex justify-center items-center gap-2">
             <span class="material-icons-round text-[12px] text-indigo-500 animate-spin">sync</span>
-            <span class="text-[10px] text-indigo-600 font-bold">Đang đồng bộ Lịch làm việc để xét trạng thái OFF...</span>
+            <span class="text-[10px] text-indigo-600 font-bold">Đang đồng bộ Lịch làm việc Realtime...</span>
         </div>
     {/if}
+
+    <div class="px-3 pt-3 pb-0 shrink-0">
+        <div class="relative flex items-center bg-white rounded-lg border border-slate-300 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-200 transition-all shadow-sm">
+            <span class="material-icons-round absolute left-2.5 text-slate-400 text-[18px]">search</span>
+            <input 
+                type="text" 
+                bind:value={searchQuery} 
+                placeholder="Tìm / Lọc tên khu vực (VD: Vách tivi...)" 
+                class="w-full pl-9 pr-10 py-2 bg-transparent text-sm font-semibold text-slate-700 outline-none"
+            >
+            {#if searchQuery}
+                <button 
+                    class="absolute right-2 text-slate-400 hover:text-red-500 bg-slate-100 hover:bg-red-50 w-6 h-6 rounded-full transition-colors flex items-center justify-center" 
+                    on:click={() => searchQuery = ''}
+                    title="Xóa bộ lọc"
+                >
+                    <span class="material-icons-round text-[14px]">close</span>
+                </button>
+            {/if}
+        </div>
+    </div>
 
     <div class="flex-1 overflow-y-auto p-2 sm:p-3 bg-slate-50 space-y-3">
         {#if loading}
@@ -232,8 +275,13 @@
                 <span class="material-icons-round text-5xl opacity-50 mb-2">assignment_turned_in</span>
                 <p class="font-bold text-sm">Chưa có dữ liệu hoặc đã bị xóa.</p>
             </div>
+        {:else if filteredChecklistData.length === 0}
+            <div class="text-center py-10 text-slate-400 animate-pulse">
+                <span class="material-icons-round text-5xl opacity-50 mb-2">search_off</span>
+                <p class="font-bold text-sm">Không tìm thấy khu vực nào khớp với "{searchQuery}"</p>
+            </div>
         {:else}
-            {#each sortedChecklistData as item (item.id)}
+            {#each filteredChecklistData as item (item.id)}
                 <div id="area-{item.id}">
                     <ChecklistItem 
                         {item} 

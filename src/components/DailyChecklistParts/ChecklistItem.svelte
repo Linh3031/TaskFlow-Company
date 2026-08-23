@@ -17,16 +17,18 @@
         return Array.from(new Set(list)).filter(Boolean).join(', ');
     })();
 
-    // [CodeGenesis] Phẫu thuật sử dụng Date Object để chặn lỗi đếm nhầm ngày tương lai
     $: mappedAssignees = (item.assignees || []).map(a => {
-        const idLower = String(a.id || '').toLowerCase();
-        const nameLower = String(a.username || '').toLowerCase();
-        const shift = todayScheduleMap[idLower] || todayScheduleMap[nameLower] || '';
-        const isOff = shift === 'OFF';
+        // [PHẪU THUẬT LOGIC]: Bơm .normalize('NFC') để đồng bộ chuẩn Unicode với dataSection
+        const idLower = String(a.id || '').normalize('NFC').trim().toLowerCase();
+        const nameLower = String(a.username || '').normalize('NFC').trim().toLowerCase();
+        
+        let shiftRaw = todayScheduleMap[idLower] || todayScheduleMap[nameLower] || '';
+        const shift = String(shiftRaw).trim();
+        const isOff = shift.toUpperCase() === 'OFF';
 
         let isLate = false;
         
-        if (!item.completed && !isOff && shift) {
+        if (!item.completed && !isOff) {
             const [y, m, d] = dateStr.split('-').map(Number);
             const targetDateObj = new Date(y, m - 1, d);
             const now = new Date();
@@ -36,11 +38,11 @@
                 isLate = true;
             } 
             else if (targetDateObj.getTime() === todayObj.getTime()) {
-                const s = String(shift).toLowerCase();
+                const s = shift.toLowerCase();
                 const currentHour = now.getHours();
                 
                 let needsNoonLock = s.includes('2') || s === 'sáng' || s === 'full' || s === 'gãy';
-                let needsEveningLock = ((s.includes('4') || s.includes('5')) && !s.includes('2')) || s === 'chiều';
+                let needsEveningLock = ((s.includes('4') || s.includes('5')) && !s.includes('2')) || s === 'chiều' || s === ''; 
 
                 if (needsNoonLock && currentHour >= 12) isLate = true;
                 else if (needsEveningLock && currentHour >= 17) isLate = true;

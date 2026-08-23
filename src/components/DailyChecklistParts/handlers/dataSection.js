@@ -67,9 +67,17 @@ export async function subscribeToChecklist(activeStoreId, dateStr, currentUser, 
 export async function fetchAllStaffData(activeStoreId) {
     const q = query(collection(db, 'users'), where('storeIds', 'array-contains', activeStoreId));
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, username: d.data().username, role: d.data().role }))
-        .filter(s => s.role !== 'admin' && s.role !== 'super_admin' && s.username)
-        .sort((a, b) => a.username.localeCompare(b.username));
+    return snap.docs.map(d => {
+        const data = d.data();
+        // [PHẪU THUẬT LOGIC]: Ưu tiên lấy data.id để đồng bộ hóa hoàn toàn với cơ chế Object Spread bên PGScheduleTable
+        return { 
+            id: data.id || d.id, 
+            username: data.username, 
+            role: data.role 
+        };
+    })
+    .filter(s => s.role !== 'admin' && s.role !== 'super_admin' && s.username)
+    .sort((a, b) => a.username.localeCompare(b.username));
 }
 
 // --- LOGIC CẤU HÌNH & TRỘN LỊCH ---
@@ -157,7 +165,7 @@ export async function executeAutoRotate(activeStoreId, dateStr, allStaff, checkl
 }
 
 // --- LOGIC THỐNG KÊ KÈM TÍNH TOÁN TRỄ/OFF ---
-export async function getMonthlyStats(activeStoreId, dateStr) {
+export async function getMonthlyStats(activeStoreId, dateStr, allStaff) {
     const templateRef = doc(db, 'stores', activeStoreId, '8nttt_template', 'config');
     const snap = await getDoc(templateRef);
     const excludedStaffIds = snap.exists() ? (snap.data().excludedStaffIds || []) : [];
@@ -194,8 +202,14 @@ export async function getMonthlyStats(activeStoreId, dateStr) {
     }
 
     const getShift = (userId, username, dayNum, fullDateStr) => {
+        const normId = String(userId || '').normalize('NFC').trim().toLowerCase();
+        const normName = String(username || '').normalize('NFC').trim().toLowerCase();
+        
         const dayAssignments = staffScheduleData[String(dayNum)] || staffScheduleData[dayNum] || [];
-        let assign = dayAssignments.find(a => String(a.staffId).toLowerCase() === userId || String(a.username).toLowerCase() === username);
+        let assign = dayAssignments.find(a => 
+            String(a.staffId || '').normalize('NFC').trim().toLowerCase() === normId || 
+            String(a.username || '').normalize('NFC').trim().toLowerCase() === normName
+        );
         if (assign) return assign.shift;
 
         const date = new Date(fullDateStr);
@@ -211,8 +225,19 @@ export async function getMonthlyStats(activeStoreId, dateStr) {
 
         const weekData = pgScheduleMap[weekId] || {};
         for (const [pgId, shifts] of Object.entries(weekData)) {
-            if (String(pgId).toLowerCase() === userId && shifts[weekdayStr]) {
+            const currentNormId = String(pgId).normalize('NFC').trim().toLowerCase();
+            
+            // Check matching ID
+            if (currentNormId === normId && shifts[weekdayStr]) {
                 return shifts[weekdayStr];
+            }
+            
+            // [PHẪU THUẬT LOGIC]: Bổ trợ tra cứu PG bằng Username qua danh sách allStaff
+            if (allStaff && allStaff.length > 0) {
+                const pgInfo = allStaff.find(s => String(s.id).normalize('NFC').trim().toLowerCase() === currentNormId);
+                if (pgInfo && String(pgInfo.username).normalize('NFC').trim().toLowerCase() === normName && shifts[weekdayStr]) {
+                    return shifts[weekdayStr];
+                }
             }
         }
         return '';
@@ -268,9 +293,9 @@ export async function getMonthlyStats(activeStoreId, dateStr) {
                         if(!uname) return;
                         if(!usersStats[uname]) usersStats[uname] = { name: uname, total: 0, days: {}, lateTotal: 0, dayStatuses: {} };
                         
-                        const shift = getShift(String(a.id || '').toLowerCase(), String(a.username || '').toLowerCase(), day, fullDateStrForDay);
+                        const shift = getShift(a.id, a.username, day, fullDateStrForDay);
                         
-                        if (shift === 'OFF') {
+                        if (shift.toUpperCase() === 'OFF') {
                             usersStats[uname].dayStatuses[day] = 'OFF';
                         } else {
                             let isLate = false;
@@ -361,7 +386,7 @@ export async function clearAllAreas(activeStoreId, dateStr, activeRecordId) {
     }
 }
 
-export async function fetchScheduleMaps(activeStoreId, dateStr) {
+export async function fetchScheduleMaps(activeStoreId, dateStr, allStaff = []) {
     const todayScheduleMap = {};
     const targetDate = new Date(dateStr);
     const year = targetDate.getFullYear();
@@ -380,8 +405,8 @@ export async function fetchScheduleMaps(activeStoreId, dateStr) {
         const scheduleData = staffSnap.data().data || {};
         const dayAssignments = scheduleData[String(day)] || scheduleData[day] || [];
         dayAssignments.forEach(assign => {
-            if (assign && assign.staffId) todayScheduleMap[String(assign.staffId).toLowerCase()] = assign.shift;
-            if (assign && assign.username) todayScheduleMap[String(assign.username).toLowerCase()] = assign.shift;
+            if (assign && assign.staffId) todayScheduleMap[String(assign.staffId).normalize('NFC').trim().toLowerCase()] = assign.shift;
+            if (assign && assign.username) todayScheduleMap[String(assign.username).normalize('NFC').trim().toLowerCase()] = assign.shift;
         });
     }
 
@@ -399,9 +424,96 @@ export async function fetchScheduleMaps(activeStoreId, dateStr) {
         const pgData = pgSnap.data().data || {};
         for (const [pgId, shifts] of Object.entries(pgData)) {
             if (shifts && shifts[dayStr]) {
-                todayScheduleMap[String(pgId).toLowerCase()] = shifts[dayStr];
+                const shiftVal = shifts[dayStr];
+                const normId = String(pgId).normalize('NFC').trim().toLowerCase();
+                todayScheduleMap[normId] = shiftVal;
+                
+                // [PHẪU THUẬT LOGIC]: Bơm Username cho PG để phòng ngừa lỗi thiếu ID
+                if (allStaff && allStaff.length > 0) {
+                    const pgInfo = allStaff.find(s => String(s.id).normalize('NFC').trim().toLowerCase() === normId);
+                    if (pgInfo && pgInfo.username) {
+                        todayScheduleMap[String(pgInfo.username).normalize('NFC').trim().toLowerCase()] = shiftVal;
+                    }
+                }
             }
         }
     }
     return todayScheduleMap;
+}
+
+// --- LOGIC LẮNG NGHE LỊCH TRÌNH REALTIME DÀNH RIÊNG CHO 8NTTT ---
+export function subscribeToScheduleMaps(activeStoreId, dateStr, allStaff, onUpdate) {
+    let staffMapData = {};
+    let pgMapData = {};
+
+    const [y, m, d_val] = dateStr.split('-').map(Number);
+    const targetDateObj = new Date(y, m - 1, d_val);
+    const year = targetDateObj.getFullYear();
+    const month = targetDateObj.getMonth() + 1;
+    const day = targetDateObj.getDate();
+
+    const monthStrPadded = `${year}-${String(month).padStart(2, '0')}`;
+    const monthStrNormal = `${year}-${month}`;
+
+    const d_utc = new Date(Date.UTC(year, month - 1, day));
+    const dayNum = d_utc.getUTCDay() || 7;
+    d_utc.setUTCDate(d_utc.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d_utc.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((d_utc - yearStart) / 86400000) + 1) / 7);
+    const weekId = `${d_utc.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+
+    const daysMap = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const dayStr = daysMap[targetDateObj.getDay()];
+
+    function compileAndEmit() {
+        const finalMap = {};
+        const dayAssignments = staffMapData[String(day)] || staffMapData[day] || [];
+        dayAssignments.forEach(assign => {
+            if (assign && assign.staffId) finalMap[String(assign.staffId).normalize('NFC').trim().toLowerCase()] = assign.shift;
+            if (assign && assign.username) finalMap[String(assign.username).normalize('NFC').trim().toLowerCase()] = assign.shift;
+        });
+
+        for (const [pgId, shifts] of Object.entries(pgMapData)) {
+            if (shifts && shifts[dayStr]) {
+                const shiftVal = shifts[dayStr];
+                const normId = String(pgId).normalize('NFC').trim().toLowerCase();
+                finalMap[normId] = shiftVal;
+                
+                if (allStaff && allStaff.length > 0) {
+                    const pgInfo = allStaff.find(s => String(s.id).normalize('NFC').trim().toLowerCase() === normId);
+                    if (pgInfo && pgInfo.username) {
+                        finalMap[String(pgInfo.username).normalize('NFC').trim().toLowerCase()] = shiftVal;
+                    }
+                }
+            }
+        }
+        onUpdate(finalMap);
+    }
+
+    const unsubStaffPadded = onSnapshot(doc(db, 'stores', activeStoreId, 'schedules', monthStrPadded), (snap) => {
+        if (snap.exists()) {
+            staffMapData = { ...staffMapData, ...snap.data().data };
+            compileAndEmit();
+        }
+    });
+
+    const unsubStaffNormal = (monthStrPadded !== monthStrNormal) 
+        ? onSnapshot(doc(db, 'stores', activeStoreId, 'schedules', monthStrNormal), (snap) => {
+            if (snap.exists()) {
+                staffMapData = { ...staffMapData, ...snap.data().data };
+                compileAndEmit();
+            }
+        }) 
+        : () => {};
+
+    const unsubPG = onSnapshot(doc(db, 'stores', activeStoreId, 'pg_schedules', weekId), (snap) => {
+        pgMapData = snap.exists() ? (snap.data().data || {}) : {};
+        compileAndEmit();
+    });
+
+    return () => {
+        unsubStaffPadded();
+        unsubStaffNormal();
+        unsubPG();
+    };
 }
