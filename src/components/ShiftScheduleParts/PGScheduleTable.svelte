@@ -17,25 +17,27 @@
     let loading = false;
     let isSaving = false;
     let unsubscribe = null;
-    let pgUnsubscribe = null; // [CodeGenesis] Thêm biến quản lý Realtime PG
+    let pgUnsubscribe = null; 
 
-    // [CodeGenesis] Biến quản lý trạng thái Khóa/Mở của Admin
+    // Biến quản lý trạng thái Khóa/Mở của Admin
     let isScheduleUnlocked = false; 
 
     let selectedPGForModal = null;
     let selectedDayForStats = null;
+    
     // Quản lý Tuần
     let currentDate = new Date();
     $: weekId = getWeekId(currentDate);
     $: weekLabel = getWeekLabel(currentDate);
-    // [CodeGenesis v2] LOGIC KHÓA THỜI GIAN
+    
+    // LOGIC KHÓA THỜI GIAN
     let realCurrentDate = new Date();
     $: realCurrentWeekId = getWeekId(realCurrentDate);
     $: isFutureWeek = weekId > realCurrentWeekId; 
 
     // Bộ nhớ tạm lưu trữ lịch trước khi xóa phòng trường hợp ấn nhầm
     let lastDeletedData = null;
-    $: if (weekId) lastDeletedData = null; // Tự động hủy cache nếu đổi tuần để tránh khôi phục sai lệch tuần
+    $: if (weekId) lastDeletedData = null; 
 
     const SHIFT_COLORS = {
         '': 'bg-slate-50 text-slate-400 border-dashed border-slate-200',
@@ -45,6 +47,7 @@
         'Gãy': 'bg-purple-100 text-purple-700 border-purple-200 font-bold',
         'Full': 'bg-teal-100 text-teal-700 border-teal-200 font-bold'
     };
+    
     const CATEGORY_COLORS = [
         'bg-blue-100 text-blue-800 border-blue-200',
         'bg-green-100 text-green-800 border-green-200',
@@ -53,6 +56,7 @@
         'bg-teal-100 text-teal-800 border-teal-200',
         'bg-rose-100 text-rose-800 border-rose-200'
     ];
+    
     const DAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
     
     function getWeekId(d) {
@@ -80,7 +84,6 @@
         currentDate = newDate;
     }
 
-    // [CodeGenesis v2] HÀM CUỘN TỚI LỊCH CÁ NHÂN
     function scrollToMyRow() {
         if (!$currentUser) return;
         const row = document.getElementById('pg-row-' + $currentUser.username);
@@ -96,7 +99,6 @@
         }
     }
 
-    // [CodeGenesis] HÀM XÓA TOÀN BỘ LỊCH CHO ADMIN
     async function clearAllSchedules() {
         if (!isAdmin) return;
         if (pgList.length === 0) {
@@ -127,7 +129,6 @@
         }
     }
 
-    // [CodeGenesis] HÀM KHÔI PHỤC LỊCH CHO ADMIN
     async function restoreSchedules() {
         if (!isAdmin || !lastDeletedData) return;
 
@@ -148,7 +149,6 @@
         }
     }
 
-    // [CodeGenesis] HÀM TOGGLE BẬT TẮT KHÓA LỊCH CHO ADMIN
     async function toggleScheduleLock() {
         if (!isAdmin) return;
         try {
@@ -165,7 +165,6 @@
     $: if (selectedViewStore) loadPGs();
     $: if (selectedViewStore && weekId) loadScheduleForWeek();
     
-    // [CodeGenesis] Nâng cấp loadPGs lên Realtime (onSnapshot) để chống dính cache
     function loadPGs() {
         loading = true;
         const q = query(collection(db, 'users'), where('storeIds', 'array-contains', selectedViewStore), where('role', '==', 'pg'));
@@ -204,69 +203,95 @@
         });
     }
 
-    // [CodeGenesis] Phẫu thuật Atomic Write & Các Logic Ràng Buộc
-    async function updateShift(pgId, pgUsername, day, value) {
+    // [PHẪU THUẬT LOGIC]: Bổ sung tham số "e" (Event) để ép DOM reset khi cần
+    async function updateShift(e, pgId, pgUsername, day, value) {
+        const originalValue = pgScheduleData[pgId]?.[day] || ''; // Chốt sổ giá trị gốc trước khi thay đổi
+        
         const isOwner = $currentUser?.username === pgUsername;
         const currentPG = pgList.find(p => p.id === pgId);
         const shiftType = currentPG?.shiftType || 'flexible';
         
-        if (!isAdmin) {
-            if (!isOwner) {
-                pgScheduleData = { ...pgScheduleData }; // Force UI Sync
-                return;
-            }
-            if (!isFutureWeek && !isScheduleUnlocked) {
-                alert("Bạn chỉ có thể đăng ký/chỉnh sửa lịch cho các tuần tiếp theo hoặc khi Quản Lý đã mở khóa!");
-                pgScheduleData = { ...pgScheduleData }; 
-                return;
-            }
+        if (!isAdmin && !isOwner) {
+            e.target.value = originalValue; // Ép DOM quay về
+            return;
+        }
 
-            // [MỚI] LOGIC GIỚI HẠN TỶ LỆ 50-50 CỦA PG LINH HOẠT TRONG TUẦN
-            if (shiftType !== 'morning_only' && shiftType !== 'afternoon_only') {
-                if (value === 'Sáng' || value === 'Chiều') {
-                    let typeCount = 0;
-                    const weekData = pgScheduleData[pgId] || {};
-                    
-                    // Đếm số ca Sáng/Chiều hiện có trong tuần (không tính ngày đang chọn)
-                    for (const [d, v] of Object.entries(weekData)) {
-                        if (d !== day && v === value) {
-                            typeCount++;
-                        }
-                    }
-                    
-                    // Ràng buộc: Không được chọn quá 4 ca cùng loại 1 tuần (để đảm bảo 3-4 hoặc 4-3)
-                    if (typeCount >= 4) {
-                        alert(`PG chỉ được xếp tối đa 4 ca [${value}] một tuần để đảm bảo tỷ lệ 50-50!`);
-                        pgScheduleData = { ...pgScheduleData }; // Ép Svelte render lại UI
-                        return;
+        if (!isAdmin && !isFutureWeek && !isScheduleUnlocked) {
+            alert("Bạn chỉ có thể đăng ký/chỉnh sửa lịch cho các tuần tiếp theo hoặc khi Quản Lý đã mở khóa!");
+            e.target.value = originalValue; // Ép DOM quay về
+            return;
+        }
+
+        let warningMsg = "";
+        const pgCategory = currentPG?.category || 'Khác';
+        const groupPGs = pgList.filter(p => (p.category || 'Khác') === pgCategory);
+
+        // 1. Ràng buộc: Tối đa 4 ca (Sáng/Chiều) một tuần (Chỉ áp dụng linh hoạt)
+        if (shiftType !== 'morning_only' && shiftType !== 'afternoon_only') {
+            if (value === 'Sáng' || value === 'Chiều') {
+                let typeCount = 0;
+                const weekData = pgScheduleData[pgId] || {};
+                for (const [d, v] of Object.entries(weekData)) {
+                    if (d !== day && v === value) {
+                        typeCount++;
                     }
                 }
-            }
-
-            // LOGIC GIỚI HẠN OFF TỐI ĐA 30% (LÀM TRÒN LÊN) DÀNH CHO NHÓM LINH HOẠT THEO NGÀY
-            if (value === 'OFF') {
-                const pgCategory = currentPG?.category || 'Khác';
-                const groupPGs = pgList.filter(p => (p.category || 'Khác') === pgCategory);
-                
-                if (shiftType !== 'morning_only' && shiftType !== 'afternoon_only') {
-                    const flexiblePGs = groupPGs.filter(p => p.shiftType !== 'morning_only' && p.shiftType !== 'afternoon_only');
-                    // [Surgical Change]: Tính 30% và làm tròn lên bằng Math.ceil
-                    const maxOffs = Math.ceil(flexiblePGs.length * 0.3);
-                    const currentOffCount = flexiblePGs.filter(p => 
-                        p.id !== pgId && 
-                        pgScheduleData[p.id] && 
-                        pgScheduleData[p.id][day] === 'OFF'
-                    ).length;
-
-                    if (currentOffCount >= maxOffs) {
-                        alert("Đã hết lượt off của ngày này (Tối đa 30% nhân sự cùng nhóm), vui lòng chọn ngày khác hoặc liên hệ QL");
-                        pgScheduleData = { ...pgScheduleData };
-                        return;
-                    }
+                if (typeCount >= 4) {
+                    warningMsg = `PG linh hoạt chỉ được xếp tối đa 4 ca [${value}] một tuần để đảm bảo tỷ lệ 50-50!`;
                 }
             }
         }
 
+        // 2. Ràng buộc: 50% số lượng PG linh hoạt làm cùng ca trong 1 ngày
+        if (!warningMsg && value !== '' && value !== 'OFF') {
+            if (shiftType !== 'morning_only' && shiftType !== 'afternoon_only') {
+                const flexiblePGs = groupPGs.filter(p => p.shiftType !== 'morning_only' && p.shiftType !== 'afternoon_only');
+                const maxSameShift = Math.ceil(flexiblePGs.length * 0.5);
+                
+                const currentSameShiftCount = flexiblePGs.filter(p => 
+                    p.id !== pgId && 
+                    pgScheduleData[p.id] && 
+                    pgScheduleData[p.id][day] === value
+                ).length;
+
+                if (currentSameShiftCount >= maxSameShift) {
+                    warningMsg = `Vượt giới hạn 50% quân số cùng ca!\n(Tối đa ${maxSameShift}/${flexiblePGs.length} PG linh hoạt của nhóm ${pgCategory} làm ca [${value}] vào ngày này).`;
+                }
+            }
+        }
+
+        // 3. Ràng buộc: OFF tối đa 30% TỔNG NHÂN SỰ của bộ phận (Bao gồm cả ca cố định)
+        if (!warningMsg && value === 'OFF') {
+            const maxOffs = Math.ceil(groupPGs.length * 0.3);
+            const currentOffCount = groupPGs.filter(p => 
+                p.id !== pgId && 
+                pgScheduleData[p.id] && 
+                pgScheduleData[p.id][day] === 'OFF'
+            ).length;
+
+            if (currentOffCount >= maxOffs) {
+                warningMsg = `Vượt giới hạn OFF!\n(Tối đa ${maxOffs} người / ${groupPGs.length} tổng nhân sự nhóm ${pgCategory} được OFF cùng ngày).`;
+            }
+        }
+
+        // --- XỬ LÝ CẢNH BÁO & QUYỀN ADMIN BYPASS ---
+        if (warningMsg) {
+            if (isAdmin) {
+                const isOverride = confirm(warningMsg + "\n\nQuyền ADMIN: Bạn có muốn GHI ĐÈ để bỏ qua cảnh báo này không?");
+                if (!isOverride) {
+                    // Nếu nhấn Cancel -> Tát DOM tỉnh lại bằng originalValue
+                    e.target.value = originalValue; 
+                    return;
+                }
+            } else {
+                alert(warningMsg + "\nVui lòng chọn ca/ngày khác hoặc liên hệ Quản lý.");
+                // Bị chặn cứng -> Tát DOM tỉnh lại bằng originalValue
+                e.target.value = originalValue; 
+                return;
+            }
+        }
+
+        // Tiến hành cập nhật State thật sự nếu hợp lệ (Hoặc Admin nhấn OK ghi đè)
         if (!pgScheduleData[pgId]) pgScheduleData[pgId] = { 'T2':'', 'T3':'', 'T4':'', 'T5':'', 'T6':'', 'T7':'', 'CN':'' };
         pgScheduleData[pgId][day] = value;
         pgScheduleData = { ...pgScheduleData }; 
@@ -281,8 +306,10 @@
                     }
                 }
             }, { merge: true });
-        } catch (e) { 
-            console.error("Lỗi lưu lịch PG Atomic:", e); 
+        } catch (error) { 
+            console.error("Lỗi lưu lịch PG Atomic:", error); 
+            // Rollback UI nếu lỗi mạng
+            e.target.value = originalValue;
         } finally {
             isSaving = false; 
         }
@@ -290,7 +317,7 @@
 
     onDestroy(() => {
         if (unsubscribe) unsubscribe();
-        if (pgUnsubscribe) pgUnsubscribe(); // [CodeGenesis] Dọn dẹp listener Realtime
+        if (pgUnsubscribe) pgUnsubscribe(); 
     });
 </script>
 
@@ -401,11 +428,12 @@
                                                 {@const canEdit = isAdmin || (isOwner && (isFutureWeek || isScheduleUnlocked))}
                                                 
                                                 <td class="p-0.5 sm:p-1 border-r last:border-0 align-middle">
+                                                    <!-- [Surgical Fix]: Pass 'e' event vào updateShift -->
                                                     <select 
                                                         class="w-full h-7 sm:h-8 rounded border text-[10px] sm:text-[11px] font-semibold outline-none text-center cursor-pointer transition-colors shadow-sm appearance-none {SHIFT_COLORS[currentShift]} {!canEdit ? 'pointer-events-none opacity-80' : 'hover:border-indigo-300'}"
                                                         value={currentShift}
                                                         disabled={!canEdit}
-                                                        on:change={(e) => updateShift(pg.id, pg.username, d, e.target.value)}
+                                                        on:change={(e) => updateShift(e, pg.id, pg.username, d, e.target.value)}
                                                     >
                                                         <option value="" class="bg-white text-gray-500">—</option>
                                                         <option value="OFF" class="bg-white text-red-600 font-bold">OFF</option>
