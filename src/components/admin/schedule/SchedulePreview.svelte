@@ -231,11 +231,12 @@
 </div>
 
 {#if showHistoryModal}
-    <CumulativeHistoryModal 
+    <CumulativeHistoryModal
         {storeId}
         currentMonth={viewMonth}
         currentYear={viewYear}
         currentStats={previewStats}
+        scheduleData={previewScheduleData}
         on:close={() => showHistoryModal = false}
     />
 {/if}

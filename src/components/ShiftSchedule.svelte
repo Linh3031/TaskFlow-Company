@@ -342,7 +342,7 @@
     <RoadshowPanel selectedViewStore={$activeStoreId} {isAdmin} />
 {/if}
 
-{#if showHistoryModal && scheduleData} <CumulativeHistoryModal storeId={$activeStoreId} currentMonth={viewMonth} currentYear={viewYear} currentStats={scheduleData.stats} on:close={() => showHistoryModal = false} /> {/if}
+{#if showHistoryModal && scheduleData} <CumulativeHistoryModal storeId={$activeStoreId} currentMonth={viewMonth} currentYear={viewYear} currentStats={scheduleData.stats} scheduleData={scheduleData.data} on:close={() => showHistoryModal = false} /> {/if}
 
 {#if selectedStaff} 
     <PersonalScheduleModal 

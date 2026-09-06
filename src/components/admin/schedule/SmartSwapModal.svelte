@@ -1,6 +1,7 @@
 <script>
     import { createEventDispatcher } from 'svelte';
     import { findSmartSwap } from '../../../lib/smartSwap.js';
+    import { getWeekendHardRoleCount } from '../../../lib/shiftUtils.js';
     
     export let scheduleData;
     export let staffList;
@@ -28,7 +29,7 @@
         if (roleFilter === 'GH') return Number(stats.gh)||0;
         if (roleFilter === 'TN') return Number(stats.tn)||0;
         if (roleFilter === 'Kho') return Number(stats.kho)||0;
-        if (roleFilter === 'Weekend') return Number(stats.weCount || stats.weekendHardRoles)||0;
+        if (roleFilter === 'Weekend') return getWeekendHardRoleCount(staffId, { data: scheduleData }, month, year);
         return 0;
     }
 

@@ -3,11 +3,17 @@
     import { db } from '../lib/firebase';
     import { doc, getDoc } from 'firebase/firestore';
     import { createEventDispatcher } from 'svelte';
+    import { getWeekendHardRoleCount } from '../lib/shiftUtils.js';
 
     export let storeId;
     export let currentMonth; // 1-12
     export let currentYear;
     export let currentStats = []; // Dữ liệu của tháng hiện tại
+    export let scheduleData = null; // Map lịch theo ngày của tháng hiện tại, dùng tính lại số ca cuối tuần trực tiếp (tránh field weekendHardRoles bị cache cũ)
+
+    function getCurrentWeekend(staffId) {
+        return getWeekendHardRoleCount(staffId, { data: scheduleData }, currentMonth, currentYear);
+    }
 
     const dispatch = createEventDispatcher();
     let loading = true;
@@ -111,7 +117,7 @@
                 totalTN: (curr.tn || 0) + (past1.tn || 0) + (past2.tn || 0),
                 totalKho: (curr.kho || 0) + (past1.kho || 0) + (past2.kho || 0),
                 totalNV: currNV + (past1.nv || 0) + (past2.nv || 0), // [NEW] Thêm logic tính tổng 3 tháng
-                totalWeekend: (curr.weekendHardRoles || 0) + (past1.weekend || 0) + (past2.weekend || 0)
+                totalWeekend: getCurrentWeekend(staff.staffId) + (past1.weekend || 0) + (past2.weekend || 0)
             };
         });
     }
@@ -223,8 +229,9 @@
                     </thead>
                     <tbody class="divide-y divide-slate-100">
                         {#each sortedData as staff, i}
-                            {@const currStat = currentStats.find(s => s.id === staff.staffId) || { gh: 0, tn: 0, kho: 0, weekendHardRoles: 0 }}
+                            {@const currStat = currentStats.find(s => s.id === staff.staffId) || { gh: 0, tn: 0, kho: 0 }}
                             {@const currNV = (Number(currStat.gh)||0) + (Number(currStat.tn)||0) + (Number(currStat.kho)||0)}
+                            {@const currWeekend = getCurrentWeekend(staff.staffId)}
 
                             <tr class="hover:bg-slate-50 transition-colors {sortField !== 'default' ? 'bg-slate-50/50' : ''}">
                                 <td class="p-3 border-r border-slate-100 sticky left-0 bg-white shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
@@ -257,7 +264,7 @@
                                         <span class="w-5 text-center {currStat.tn>0?'text-purple-600 font-bold bg-purple-100 rounded':'text-slate-300'}">{currStat.tn||'-'}</span>
                                         <span class="w-5 text-center {currStat.kho>0?'text-orange-600 font-bold bg-orange-100 rounded':'text-slate-300'}">{currStat.kho||'-'}</span>
                                         <span class="w-5 text-center {currNV>0?'text-emerald-700 font-bold bg-emerald-100 rounded':'text-slate-300'}">{currNV||'-'}</span>
-                                        <span class="w-5 text-center {currStat.weekendHardRoles>0?'text-red-600 font-bold bg-red-100 rounded':'text-slate-300'}">{currStat.weekendHardRoles||'-'}</span>
+                                        <span class="w-5 text-center {currWeekend>0?'text-red-600 font-bold bg-red-100 rounded':'text-slate-300'}">{currWeekend||'-'}</span>
                                     </div>
                                 </td>
 
