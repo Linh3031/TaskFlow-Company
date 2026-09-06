@@ -219,6 +219,18 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 const specificRoleCount = staff.baseStats.roles[targetRole] + staff.stats.roles[targetRole];
                 score -= specificRoleCount * 10000000; // Phạt 10 Triệu điểm cho mỗi ca cùng loại
 
+                // [TINH CHỈNH MỚI] Cân bằng TỈ LỆ Kho/Thu Ngân của riêng từng người
+                // (Cột Kho và cột TN có thể đã phẳng riêng lẻ, nhưng 1 người vẫn có thể lệch dồn về 1 phía)
+                if (targetRole === 'kho' || targetRole === 'tn') {
+                    const otherRole = targetRole === 'kho' ? 'tn' : 'kho';
+                    const otherRoleCount = staff.baseStats.roles[otherRole] + staff.stats.roles[otherRole];
+                    const personalGap = specificRoleCount - otherRoleCount;
+                    // Giới hạn mức phạt tối đa +-5 ca lệch, để không bao giờ vượt qua Luật Thép 2 (giãn ca theo tuần)
+                    // hay Luật Thép 4 (cuối tuần) — luật mới chỉ phân xử giữa các ứng viên đã hợp lệ, không ghi đè luật cứng
+                    const cappedGap = Math.max(-5, Math.min(5, personalGap));
+                    score -= cappedGap * 3000000; // Lệch về role đang xét thì bị phạt, lệch về role kia thì được ưu tiên
+                }
+
                 // Cân bằng TỔNG nghiệp vụ (Đã làm nhiều thì nhường)
                 const totalHardRoles = 
                     (staff.baseStats.roles.gh + staff.stats.roles.gh) +
@@ -405,6 +417,13 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
                 let minNames = eligibleStaff.filter(s => s[role] === min).map(s => `${s.name}(${min})`).join(', ');
                 warnings.push(`CẢNH BÁO LỆCH ${role.toUpperCase()}: Max=${max}, Min=${min}. [Thừa: ${maxNames}] - [Thiếu: ${minNames}]`);
             }
+        }
+    });
+
+    finalStaffStats.forEach(s => {
+        const personalGap = s.kho - s.tn;
+        if (Math.abs(personalGap) > 3) {
+            warnings.push(`CẢNH BÁO LỆCH KHO/TN CÁ NHÂN: ${s.name} có Kho=${s.kho}, Thu Ngân=${s.tn}`);
         }
     });
 

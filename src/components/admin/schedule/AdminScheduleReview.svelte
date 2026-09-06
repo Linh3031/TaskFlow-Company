@@ -103,8 +103,8 @@
             previewScheduleData = result.schedule; 
             previewStats = result.staffStats; 
             pureSystemStats = JSON.parse(JSON.stringify(result.staffStats));
-            
-            optimizationLogs = []; 
+
+            optimizationLogs = result.warnings || [];
             await tick();
             setTimeout(() => { const previewEl = document.getElementById('preview-schedule-container'); if(previewEl) previewEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
         } catch (e) { alert("Lỗi: " + e.message); } finally { isLoading = false; } 
