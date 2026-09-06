@@ -268,7 +268,7 @@
   function openEditShift(day, staffId, assign) { 
       if (!isAdmin) return;
       const staffInfo = scheduleData.stats.find(s => s.id === staffId);
-      tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo?.gender || 'Nữ', originalRole: assign.originalRole || assign.role || 'TV', originalShift: assign.originalShift || assign.shift };
+      tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo?.gender || 'Nữ', originalRole: (assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV')) || 'TV', originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift };
       editingShift = JSON.parse(JSON.stringify(tempEditingShift));
   }
   

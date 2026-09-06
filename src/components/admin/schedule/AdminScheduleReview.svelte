@@ -325,7 +325,7 @@
 
     function openEditPreviewShift(day, staffId, assign) { 
         const staffInfo = previewStats.find(s => s.id === staffId);
-        tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo ? staffInfo.gender : 'Nữ', originalRole: assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV'), originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift }; 
+        tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo ? staffInfo.gender : 'Nữ', originalRole: (assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV')) || 'TV', originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift };
         editingShift = JSON.parse(JSON.stringify(tempEditingShift)); 
     }
     
