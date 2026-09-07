@@ -2,6 +2,7 @@
 
 export function getShiftColor(code) {
     if (code === 'OFF') return 'bg-red-600 text-white border-red-700 font-black tracking-wider text-[10px] shadow-sm';
+    if (code === 'FULL') return 'bg-red-600 text-yellow-300 border-red-700 font-black tracking-wider text-[10px] shadow-sm';
     const map = { '123': 'bg-green-50 text-green-700 border-green-100', '456': 'bg-orange-50 text-orange-700 border-orange-100', '23': 'bg-cyan-50 text-cyan-700 border-cyan-100', '45': 'bg-blue-50 text-blue-700 border-blue-100', '2-5': 'bg-pink-50 text-pink-700 border-pink-100', '2345': 'bg-red-50 text-red-700 border-red-100' };
     return map[code] || 'bg-white text-gray-800 border-gray-200';
 }
@@ -84,7 +85,7 @@ export function prepareDayStats(day, scheduleData, viewMonth, viewYear) {
             }
         }
     });
-    const customShiftOrder = ['123', '23', '45', '456', '2345', '2-5'];
+    const customShiftOrder = ['123', '23', '45', '456', '2345', '2-5', '123-456', 'FULL'];
     const sortedShiftArray = Object.keys(shiftDetails).sort((a, b) => {
         if (a === 'OFF') return 1;
         if (b === 'OFF') return -1;
@@ -187,6 +188,81 @@ export function applyShiftChangeLocalData(editingShift, scheduleData) {
     let tempScheduleData = { ...scheduleData, data: { ...scheduleData.data, [dayKey]: dayList } };
     let newStats = healScheduleStats(tempScheduleData);
     
+    return { dayKey, dayList, newStats };
+}
+
+export function applyShiftSwapLocalData(editingShift, swapTarget, scheduleData) {
+    const dayKey = String(editingShift.day);
+    const dayList = [...scheduleData.data[dayKey]];
+
+    const idxA = dayList.findIndex(x => x.staffId === editingShift.staffId);
+    if (idxA !== -1) {
+        const newRoleA = editingShift.isOFF ? '' : (editingShift.role === 'TV' ? '' : editingShift.role);
+        dayList[idxA] = { ...dayList[idxA], shift: editingShift.isOFF ? 'OFF' : editingShift.shift, role: newRoleA };
+    }
+
+    const idxB = dayList.findIndex(x => x.staffId === swapTarget.staffId);
+    if (idxB !== -1) {
+        const newRoleB = swapTarget.isOFF ? '' : (swapTarget.role === 'TV' ? '' : swapTarget.role);
+        dayList[idxB] = { ...dayList[idxB], shift: swapTarget.isOFF ? 'OFF' : swapTarget.shift, role: newRoleB };
+    }
+
+    // [ĐÁNH DẤU ĐỔI CA]: Ghi nhớ A-B đang đổi ca với nhau, để lần sau bấm Reset 1 trong 2 người
+    // hệ thống tự nhắc reset luôn người còn lại. Nếu cả 2 đã về đúng ca gốc thì gỡ đánh dấu.
+    if (idxA !== -1 && idxB !== -1) {
+        const normRole = (r) => (!r || r === 'TV') ? '' : r;
+        const origShiftA = dayList[idxA].originalShift !== undefined ? dayList[idxA].originalShift : dayList[idxA].shift;
+        const origShiftB = dayList[idxB].originalShift !== undefined ? dayList[idxB].originalShift : dayList[idxB].shift;
+        const aBackToOriginal = dayList[idxA].shift === origShiftA && dayList[idxA].role === normRole(dayList[idxA].originalRole);
+        const bBackToOriginal = dayList[idxB].shift === origShiftB && dayList[idxB].role === normRole(dayList[idxB].originalRole);
+
+        if (aBackToOriginal && bBackToOriginal) {
+            dayList[idxA] = { ...dayList[idxA], swapWith: null };
+            dayList[idxB] = { ...dayList[idxB], swapWith: null };
+        } else {
+            dayList[idxA] = { ...dayList[idxA], swapWith: dayList[idxB].staffId };
+            dayList[idxB] = { ...dayList[idxB], swapWith: dayList[idxA].staffId };
+        }
+    }
+
+    let tempScheduleData = { ...scheduleData, data: { ...scheduleData.data, [dayKey]: dayList } };
+    let newStats = healScheduleStats(tempScheduleData);
+
+    return { dayKey, dayList, newStats };
+}
+
+// [GÁN CA FULL HÀNG LOẠT]: TV -> FULL; Kho/Thu Ngân -> ghép đủ 123-456 (giữ vai trò); GH và OFF giữ nguyên.
+export function applyAssignFullToAllLocalData(day, scheduleData) {
+    const dayKey = String(day);
+    const dayList = (scheduleData.data[dayKey] || []).map(assign => {
+        if (assign.shift === 'OFF') return assign;
+        const role = assign.role || '';
+        if (role === 'GH' || role === 'Giao Hàng') return assign;
+        if (role === 'Kho' || role === 'Thu Ngân' || role === 'TN') {
+            return { ...assign, shift: '123-456' };
+        }
+        return { ...assign, shift: 'FULL' };
+    });
+
+    let tempScheduleData = { ...scheduleData, data: { ...scheduleData.data, [dayKey]: dayList } };
+    let newStats = healScheduleStats(tempScheduleData);
+
+    return { dayKey, dayList, newStats };
+}
+
+// [RESET CẢ NGÀY VỀ GỐC]: Đưa toàn bộ NV trong ngày về đúng ca/vai trò gốc (originalShift/originalRole), gỡ mọi đánh dấu đổi ca dở dang.
+export function resetDayToOriginalLocalData(day, scheduleData) {
+    const dayKey = String(day);
+    const normRole = (r) => (!r || r === 'TV') ? '' : r;
+    const dayList = (scheduleData.data[dayKey] || []).map(assign => {
+        const origShift = assign.originalShift !== undefined ? assign.originalShift : assign.shift;
+        const origRole = assign.originalRole !== undefined ? assign.originalRole : assign.role;
+        return { ...assign, shift: origShift, role: origShift === 'OFF' ? '' : normRole(origRole), swapWith: null };
+    });
+
+    let tempScheduleData = { ...scheduleData, data: { ...scheduleData.data, [dayKey]: dayList } };
+    let newStats = healScheduleStats(tempScheduleData);
+
     return { dayKey, dayList, newStats };
 }
 

@@ -20,10 +20,10 @@
   import LegacySyncManager from './ShiftScheduleParts/LegacySyncManager.svelte';
   import StaffReorderModal from './admin/schedule/StaffReorderModal.svelte'; // [NEW] Import Modal Sắp xếp
 
-  import { 
-      getShiftColor, getRoleBadge, getWeekday, getWeekendHardRoleCount, 
-      preparePersonalSchedule, prepareDayStats, checkShiftQuotaWarning, 
-      applyShiftChangeLocalData, findMyStatRowId, healScheduleStats
+  import {
+      getShiftColor, getRoleBadge, getWeekday, getWeekendHardRoleCount,
+      preparePersonalSchedule, prepareDayStats, checkShiftQuotaWarning,
+      applyShiftChangeLocalData, applyShiftSwapLocalData, applyAssignFullToAllLocalData, resetDayToOriginalLocalData, findMyStatRowId, healScheduleStats
   } from '../lib/shiftUtils.js';
 
   export let activeTab;
@@ -172,6 +172,8 @@
                   dayList[idx1].role = step.role2 || 'TV';
                   dayList[idx2].shift = step.shift1;
                   dayList[idx2].role = step.role1 || 'TV';
+                  dayList[idx1].swapWith = step.staff2.id;
+                  dayList[idx2].swapWith = step.staff1.id;
               }
           });
 
@@ -184,14 +186,34 @@
           });
           
           await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), updatePayload);
-          
+
           showSmartSwap = false;
+          editingShift = null;
           alert("✅ Đã thực hiện đổi ca thành công!");
       } catch (e) {
           alert("Lỗi thực thi: " + e.message);
       } finally {
           loading = false;
       }
+  }
+
+  function handleSwapFlip(staffBId) {
+      if (!editingShift || !scheduleData) return;
+      const dayKey = String(editingShift.day);
+      const dayList = scheduleData.data[dayKey] || [];
+      const assignA = dayList.find(x => x.staffId === editingShift.staffId);
+      const assignB = dayList.find(x => x.staffId === staffBId);
+      const staffA = scheduleData.stats.find(s => s.id === editingShift.staffId);
+      const staffB = scheduleData.stats.find(s => s.id === staffBId);
+      if (!assignA || !assignB || !staffA || !staffB) return;
+
+      executeSmartSwap([{
+          day: editingShift.day,
+          staff1: { id: staffA.id, name: staffA.name },
+          staff2: { id: staffB.id, name: staffB.name },
+          shift1: assignA.shift, role1: assignA.role,
+          shift2: assignB.shift, role2: assignB.role
+      }]);
   }
 
   let smartCoverSuggestions = [];
@@ -268,20 +290,47 @@
   function openEditShift(day, staffId, assign) { 
       if (!isAdmin) return;
       const staffInfo = scheduleData.stats.find(s => s.id === staffId);
-      tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo?.gender || 'Nữ', originalRole: (assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV')) || 'TV', originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift };
+      tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo?.gender || 'Nữ', originalRole: (assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV')) || 'TV', originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift, swapWithId: assign.swapWith || null };
       editingShift = JSON.parse(JSON.stringify(tempEditingShift));
   }
   
-  async function saveShiftChange() { 
+  async function saveShiftChange(event) {
       if (!editingShift || !scheduleData) return;
       const warning = checkShiftQuotaWarning(editingShift, scheduleData);
       if (warning && !confirm(warning)) return;
-      
-      const { dayKey, dayList, newStats } = applyShiftChangeLocalData(editingShift, scheduleData);
-      try { 
+
+      const swapTarget = event?.detail?.swapTarget;
+      const { dayKey, dayList, newStats } = swapTarget
+          ? applyShiftSwapLocalData(editingShift, swapTarget, scheduleData)
+          : applyShiftChangeLocalData(editingShift, scheduleData);
+      try {
           await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
           editingShift = null; 
       } catch (e) { alert("Lỗi: " + e.message); } 
+  }
+
+  async function handleAssignFullToAll(day) {
+      if (!isAdmin || !scheduleData) return;
+      if (!confirm(`Xác nhận GÁN CA FULL cho TẤT CẢ nhân viên ngày ${day}?\n- NV Tư Vấn → FULL\n- NV Kho/Thu Ngân → ghép đủ 123-456 (giữ nguyên vai trò)\n- NV Giao Hàng và NV đang OFF → giữ nguyên`)) return;
+      loading = true;
+      try {
+          const { dayKey, dayList, newStats } = applyAssignFullToAllLocalData(day, scheduleData);
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
+          selectedDayStats = null;
+          alert(`✅ Đã gán ca FULL cho toàn bộ nhân viên ngày ${day}!`);
+      } catch (e) { alert("Lỗi: " + e.message); } finally { loading = false; }
+  }
+
+  async function handleResetDayToOriginal(day) {
+      if (!isAdmin || !scheduleData) return;
+      if (!confirm(`Xác nhận RESET TOÀN BỘ ca làm việc ngày ${day} về đúng lịch GỐC (trước khi chỉnh sửa)?\nMọi thay đổi tay trong ngày này (gán FULL, đổi ca, sửa ca lẻ...) sẽ bị hoàn tác.`)) return;
+      loading = true;
+      try {
+          const { dayKey, dayList, newStats } = resetDayToOriginalLocalData(day, scheduleData);
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { [`data.${dayKey}`]: dayList, stats: newStats });
+          selectedDayStats = null;
+          alert(`✅ Đã reset ca làm việc ngày ${day} về lịch gốc!`);
+      } catch (e) { alert("Lỗi: " + e.message); } finally { loading = false; }
   }
 
   function handleExportExcel() {
@@ -355,8 +404,8 @@
     /> 
 {/if}
 
-{#if editingShift} <EditShiftModal bind:editingShift {tempEditingShift} suggestions={smartCoverSuggestions} on:close={() => editingShift = null} on:save={saveShiftChange} on:applySmartCover={(e) => executeSmartCover(e.detail)} /> {/if}
-{#if selectedDayStats} <DayStatsModal {selectedDayStats} on:close={() => selectedDayStats = null} /> {/if}
+{#if editingShift} <EditShiftModal bind:editingShift {tempEditingShift} suggestions={smartCoverSuggestions} staffList={scheduleData.stats} dayAssignments={scheduleData.data[String(editingShift.day)] || []} on:close={() => editingShift = null} on:save={saveShiftChange} on:applySmartCover={(e) => executeSmartCover(e.detail)} on:swapFlip={(e) => handleSwapFlip(e.detail.staffBId)} /> {/if}
+{#if selectedDayStats} <DayStatsModal {selectedDayStats} {isAdmin} on:close={() => selectedDayStats = null} on:assignFullToAll={(e) => handleAssignFullToAll(e.detail)} on:resetDayToOriginal={(e) => handleResetDayToOriginal(e.detail)} /> {/if}
 
 {#if showSmartSwap && scheduleData}
     <SmartSwapModal 

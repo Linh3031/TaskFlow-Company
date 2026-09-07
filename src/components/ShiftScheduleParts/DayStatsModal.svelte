@@ -2,6 +2,7 @@
     import { createEventDispatcher } from 'svelte';
     const dispatch = createEventDispatcher();
     export let selectedDayStats;
+    export let isAdmin = false;
 
     // Trạng thái Tab: ROLE (Nghiệp vụ) | SHIFT (Ca làm việc)
     let viewMode = 'ROLE'; 
@@ -140,6 +141,16 @@
 
             {:else}
                 <div class="space-y-4">
+                    {#if isAdmin}
+                        <div class="flex gap-2">
+                            <button class="flex-1 py-2.5 rounded-xl bg-red-600 text-yellow-300 font-black text-xs tracking-wider shadow-sm hover:bg-red-700 transition-colors flex items-center justify-center gap-2" on:click={() => dispatch('assignFullToAll', selectedDayStats.day)}>
+                                <span class="material-icons-round text-base">bolt</span> Gán FULL cho tất cả
+                            </button>
+                            <button class="flex-1 py-2.5 rounded-xl bg-slate-600 text-white font-black text-xs tracking-wider shadow-sm hover:bg-slate-700 transition-colors flex items-center justify-center gap-2" on:click={() => dispatch('resetDayToOriginal', selectedDayStats.day)}>
+                                <span class="material-icons-round text-base">restart_alt</span> Reset cả ngày về gốc
+                            </button>
+                        </div>
+                    {/if}
                     {#each selectedDayStats.shiftDetails as { shift, people }}
                         <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                             
