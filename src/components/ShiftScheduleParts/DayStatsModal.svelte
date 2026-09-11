@@ -1,5 +1,6 @@
 <script>
     import { createEventDispatcher } from 'svelte';
+    import { compareShiftCodes } from '../../lib/shiftUtils.js';
     const dispatch = createEventDispatcher();
     export let selectedDayStats;
     export let isAdmin = false;
@@ -77,7 +78,7 @@
                                 <span class="bg-white text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">{selectedDayStats.matrix['Kho']['Total']} người</span>
                             </div>
                             <div class="p-3 grid gap-3 bg-white">
-                                {#each Object.keys(selectedDayStats.details['Kho']).sort() as shift}
+                                {#each Object.keys(selectedDayStats.details['Kho']).sort(compareShiftCodes) as shift}
                                     <div class="flex items-start gap-2 text-sm border-b border-orange-100 last:border-0 pb-2 last:pb-0">
                                         <div class="font-bold text-orange-600 bg-white border border-orange-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
                                         <div class="flex flex-wrap gap-1.5 pt-0.5">
@@ -99,7 +100,7 @@
                                 <span class="bg-white text-purple-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-purple-200">{selectedDayStats.matrix['Thu Ngân']['Total']} người</span>
                             </div>
                             <div class="p-3 grid gap-3 bg-white">
-                                {#each Object.keys(selectedDayStats.details['Thu Ngân']).sort() as shift}
+                                {#each Object.keys(selectedDayStats.details['Thu Ngân']).sort(compareShiftCodes) as shift}
                                     <div class="flex items-start gap-2 text-sm border-b border-purple-100 last:border-0 pb-2 last:pb-0">
                                         <div class="font-bold text-purple-600 bg-white border border-purple-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
                                         <div class="flex flex-wrap gap-1.5 pt-0.5">
@@ -121,7 +122,7 @@
                                 <span class="bg-white text-blue-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">{selectedDayStats.matrix['GH']['Total']} người</span>
                             </div>
                             <div class="p-3 grid gap-3 bg-white">
-                                {#each Object.keys(selectedDayStats.details['GH']).sort() as shift}
+                                {#each Object.keys(selectedDayStats.details['GH']).sort(compareShiftCodes) as shift}
                                     <div class="flex items-start gap-2 text-sm border-b border-blue-100 last:border-0 pb-2 last:pb-0">
                                         <div class="font-bold text-blue-600 bg-white border border-blue-200 px-2 py-1 rounded text-xs min-w-[40px] text-center shrink-0">{shift}</div>
                                         <div class="flex flex-wrap gap-1.5 pt-0.5">

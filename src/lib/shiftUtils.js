@@ -50,6 +50,29 @@ export function preparePersonalSchedule(staffId, staffName, scheduleData, viewMo
     return { id: staffId, name: staffName, days, blankCells, stats: stat };
 }
 
+// [SẮP XẾP MÃ CA]: Ca lẻ theo thứ tự thời gian trong ngày; ca full ghép (vd 123K-456 / 123-456K)
+// ưu tiên xếp người gốc ca 123 lên trước người gốc ca 456, để 2 nhóm nghiệp vụ không bị lẫn lộn.
+export function compareShiftCodes(a, b) {
+    if (a === 'OFF') return 1;
+    if (b === 'OFF') return -1;
+    const baseOrder = ['123', '23', '45', '456', '2345', '2-5'];
+    const idxA = baseOrder.indexOf(a);
+    const idxB = baseOrder.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+
+    const mergedOriginRank = (s) => {
+        if (/^123[^-]+-456$/.test(s)) return 1; // vd 123K-456, 123TN-456 -> gốc ca 123
+        if (/^123-456.+$/.test(s)) return 2; // vd 123-456K, 123-456TN -> gốc ca 456
+        return 3;
+    };
+    const rankA = mergedOriginRank(a);
+    const rankB = mergedOriginRank(b);
+    if (rankA !== rankB) return rankA - rankB;
+    return a.localeCompare(b);
+}
+
 export function prepareDayStats(day, scheduleData, viewMonth, viewYear) {
     if (!scheduleData || !scheduleData.data[day]) return null;
     const dayData = scheduleData.data[day];
@@ -59,7 +82,7 @@ export function prepareDayStats(day, scheduleData, viewMonth, viewYear) {
     
     const activeShifts = new Set();
     dayData.forEach(assign => { if (assign.shift !== 'OFF') activeShifts.add(assign.shift); }); 
-    const cols = Array.from(activeShifts).sort();
+    const cols = Array.from(activeShifts).sort(compareShiftCodes);
     roles.forEach(r => { cols.forEach(c => matrix[r][c] = 0); matrix[r]['Total'] = 0; });
     
     const targetRoles = ['Kho', 'Thu Ngân', 'GH'];
@@ -85,17 +108,7 @@ export function prepareDayStats(day, scheduleData, viewMonth, viewYear) {
             }
         }
     });
-    const customShiftOrder = ['123', '23', '45', '456', '2345', '2-5', '123-456', 'FULL'];
-    const sortedShiftArray = Object.keys(shiftDetails).sort((a, b) => {
-        if (a === 'OFF') return 1;
-        if (b === 'OFF') return -1;
-        const idxA = customShiftOrder.indexOf(a);
-        const idxB = customShiftOrder.indexOf(b);
-        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-        if (idxA !== -1) return -1;
-        if (idxB !== -1) return 1;
-        return a.localeCompare(b);
-    }).map(key => ({ shift: key, people: shiftDetails[key] }));
+    const sortedShiftArray = Object.keys(shiftDetails).sort(compareShiftCodes).map(key => ({ shift: key, people: shiftDetails[key] }));
     return { day, weekday: getWeekday(day, viewMonth, viewYear), cols, matrix, roles, details, shiftDetails: sortedShiftArray };
 }
 
@@ -231,7 +244,9 @@ export function applyShiftSwapLocalData(editingShift, swapTarget, scheduleData) 
     return { dayKey, dayList, newStats };
 }
 
-// [GÁN CA FULL HÀNG LOẠT]: TV -> FULL; Kho/Thu Ngân -> ghép đủ 123-456 (giữ vai trò); GH và OFF giữ nguyên.
+// [GÁN CA FULL HÀNG LOẠT]: TV -> FULL; Kho/Thu Ngân -> ghép đủ 123-456, gắn chữ vai trò (K/TN) ngay cạnh nửa ca nghiệp vụ gốc
+// để còn phân biệt được người đó vốn làm nghiệp vụ ở nửa 123 hay nửa 456 (vd: gốc 123 -> "123K-456", gốc 456 -> "123-456K");
+// GH và OFF giữ nguyên.
 export function applyAssignFullToAllLocalData(day, scheduleData) {
     const dayKey = String(day);
     const dayList = (scheduleData.data[dayKey] || []).map(assign => {
@@ -239,7 +254,9 @@ export function applyAssignFullToAllLocalData(day, scheduleData) {
         const role = assign.role || '';
         if (role === 'GH' || role === 'Giao Hàng') return assign;
         if (role === 'Kho' || role === 'Thu Ngân' || role === 'TN') {
-            return { ...assign, shift: '123-456' };
+            const tag = role === 'Kho' ? 'K' : 'TN';
+            const mergedShift = assign.shift === '123' ? `123${tag}-456` : `123-456${tag}`;
+            return { ...assign, shift: mergedShift };
         }
         return { ...assign, shift: 'FULL' };
     });
