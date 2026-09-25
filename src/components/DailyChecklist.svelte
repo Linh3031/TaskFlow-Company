@@ -45,7 +45,8 @@
     let statsLoading = false;
     let excludedStaffIds = [];
 
-    let todayScheduleMap = {}; 
+    let todayScheduleMap = {};
+    let todayRoleMap = {};
     let scheduleLoading = false;
 
     let searchQuery = '';
@@ -90,8 +91,9 @@
         }
         scheduleLoading = true;
         await ensureStaffLoaded();
-        unsubSchedules = subscribeToScheduleMaps(activeStoreId, dateStr, allStaff, (mapData) => {
+        unsubSchedules = subscribeToScheduleMaps(activeStoreId, dateStr, allStaff, (mapData, roleData) => {
             todayScheduleMap = mapData;
+            todayRoleMap = roleData || {};
             scheduleLoading = false;
         });
     }
@@ -287,7 +289,8 @@
                         {item} 
                         {isAdmin} 
                         {uploadingId}
-                        {todayScheduleMap} 
+                        {todayScheduleMap}
+                        {todayRoleMap}
                         {dateStr}
                         on:edit={openAdminModal} 
                         on:delete={deleteArea} 

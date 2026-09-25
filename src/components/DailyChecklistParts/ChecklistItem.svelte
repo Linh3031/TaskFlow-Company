@@ -1,12 +1,14 @@
 <script>
     import { createEventDispatcher } from 'svelte';
     import ChecklistImageGrid from './ChecklistImageGrid.svelte';
+    import { ROLE_MAP } from '../../lib/shiftConstants.js';
 
     export let item;
     export let isAdmin = false;
     export let uploadingId = null;
-    export let todayScheduleMap = {}; 
-    export let dateStr = ''; 
+    export let todayScheduleMap = {};
+    export let todayRoleMap = {};
+    export let dateStr = '';
 
     const dispatch = createEventDispatcher();
 
@@ -26,9 +28,12 @@
         const shift = String(shiftRaw).trim();
         const isOff = shift.toUpperCase() === 'OFF';
 
+        const roleRaw = String(todayRoleMap[idLower] || todayRoleMap[nameLower] || '').trim();
+        const isGH = ROLE_MAP[roleRaw] === 'gh';
+
         let isLate = false;
-        
-        if (!item.completed && !isOff) {
+
+        if (!item.completed && !isOff && !isGH) {
             const [y, m, d] = dateStr.split('-').map(Number);
             const targetDateObj = new Date(y, m - 1, d);
             const now = new Date();
@@ -49,7 +54,7 @@
             }
         }
 
-        return { ...a, shift, isOff, isLate };
+        return { ...a, shift, isOff, isLate, isGH };
     });
     
     $: activeShifts = mappedAssignees.filter(a => !a.isOff).map(a => a.shift);
@@ -87,7 +92,11 @@
                                 {#if ma.isOff}
                                     <span class="text-[9px] text-red-500 font-bold border border-red-500 bg-red-50 px-1 rounded shadow-sm">OFF</span>
                                 {/if}
-                                
+
+                                {#if ma.isGH}
+                                    <span class="text-[9px] text-blue-600 font-bold border border-blue-500 bg-blue-50 px-1 rounded shadow-sm" title="Ca giao hàng - không cần thực hiện">GH</span>
+                                {/if}
+
                                 {#if ma.isLate}
                                     <span class="text-[9px] text-white font-black bg-gradient-to-r from-red-500 to-rose-600 px-1.5 py-0.5 rounded shadow-sm border border-red-700 animate-pulse flex items-center whitespace-nowrap">
                                         Đã trễ

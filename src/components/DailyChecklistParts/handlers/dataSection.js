@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, query, where, updateDoc, serverTimestamp, addDoc } from 'firebase/firestore';
 import { db } from '../../../lib/firebase.js';
 import { getTodayStr } from '../../../lib/utils.js';
+import { ROLE_MAP } from '../../../lib/shiftConstants.js';
 
 // --- LOGIC TIỆN ÍCH ---
 async function writeDebugLog(action, reason, activeStoreId, dateStr, currentUser) { 
@@ -243,6 +244,18 @@ export async function getMonthlyStats(activeStoreId, dateStr, allStaff) {
         return '';
     };
 
+    const getRole = (userId, username, dayNum) => {
+        const normId = String(userId || '').normalize('NFC').trim().toLowerCase();
+        const normName = String(username || '').normalize('NFC').trim().toLowerCase();
+
+        const dayAssignments = staffScheduleData[String(dayNum)] || staffScheduleData[dayNum] || [];
+        const assign = dayAssignments.find(a =>
+            String(a.staffId || '').normalize('NFC').trim().toLowerCase() === normId ||
+            String(a.username || '').normalize('NFC').trim().toLowerCase() === normName
+        );
+        return assign ? assign.role : '';
+    };
+
     const fetchPromises = [];
     for(let i = 1; i <= daysInMonth; i++) {
         const paddedMonth = month.toString().padStart(2, '0');
@@ -294,13 +307,15 @@ export async function getMonthlyStats(activeStoreId, dateStr, allStaff) {
                         if(!usersStats[uname]) usersStats[uname] = { name: uname, total: 0, days: {}, lateTotal: 0, dayStatuses: {} };
                         
                         const shift = getShift(a.id, a.username, day, fullDateStrForDay);
-                        
+                        const roleRaw = String(getRole(a.id, a.username, day) || '').trim();
+                        const isGH = ROLE_MAP[roleRaw] === 'gh';
+
                         if (shift.toUpperCase() === 'OFF') {
                             usersStats[uname].dayStatuses[day] = 'OFF';
                         } else {
                             let isLate = false;
-                            
-                            if (!item.completed && shift) {
+
+                            if (!item.completed && shift && !isGH) {
                                 if (targetDateObj < todayObj) {
                                     isLate = true;
                                 } else if (targetDateObj.getTime() === todayObj.getTime()) {
@@ -467,10 +482,13 @@ export function subscribeToScheduleMaps(activeStoreId, dateStr, allStaff, onUpda
 
     function compileAndEmit() {
         const finalMap = {};
+        const roleMap = {};
         const dayAssignments = staffMapData[String(day)] || staffMapData[day] || [];
         dayAssignments.forEach(assign => {
             if (assign && assign.staffId) finalMap[String(assign.staffId).normalize('NFC').trim().toLowerCase()] = assign.shift;
             if (assign && assign.username) finalMap[String(assign.username).normalize('NFC').trim().toLowerCase()] = assign.shift;
+            if (assign && assign.staffId) roleMap[String(assign.staffId).normalize('NFC').trim().toLowerCase()] = assign.role;
+            if (assign && assign.username) roleMap[String(assign.username).normalize('NFC').trim().toLowerCase()] = assign.role;
         });
 
         for (const [pgId, shifts] of Object.entries(pgMapData)) {
@@ -478,7 +496,7 @@ export function subscribeToScheduleMaps(activeStoreId, dateStr, allStaff, onUpda
                 const shiftVal = shifts[dayStr];
                 const normId = String(pgId).normalize('NFC').trim().toLowerCase();
                 finalMap[normId] = shiftVal;
-                
+
                 if (allStaff && allStaff.length > 0) {
                     const pgInfo = allStaff.find(s => String(s.id).normalize('NFC').trim().toLowerCase() === normId);
                     if (pgInfo && pgInfo.username) {
@@ -487,7 +505,7 @@ export function subscribeToScheduleMaps(activeStoreId, dateStr, allStaff, onUpda
                 }
             }
         }
-        onUpdate(finalMap);
+        onUpdate(finalMap, roleMap);
     }
 
     const unsubStaffPadded = onSnapshot(doc(db, 'stores', activeStoreId, 'schedules', monthStrPadded), (snap) => {
