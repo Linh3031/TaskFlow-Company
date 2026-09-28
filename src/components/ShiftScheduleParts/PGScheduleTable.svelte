@@ -49,12 +49,12 @@
     };
     
     const CATEGORY_COLORS = [
-        'bg-blue-100 text-blue-800 border-blue-200',
-        'bg-green-100 text-green-800 border-green-200',
-        'bg-purple-100 text-purple-800 border-purple-200',
-        'bg-amber-100 text-amber-800 border-amber-200',
-        'bg-teal-100 text-teal-800 border-teal-200',
-        'bg-rose-100 text-rose-800 border-rose-200'
+        'bg-blue-600 text-white border-blue-700',
+        'bg-green-600 text-white border-green-700',
+        'bg-purple-600 text-white border-purple-700',
+        'bg-amber-600 text-white border-amber-700',
+        'bg-teal-600 text-white border-teal-700',
+        'bg-rose-600 text-white border-rose-700'
     ];
     
     const DAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
@@ -383,74 +383,73 @@
                 <span class="text-sm font-bold">Chưa có PG nào thuộc Kho {selectedViewStore}</span>
             </div>
         {:else}
-            <div class="space-y-4 sm:space-y-6">
-                {#each Object.entries(groupedPGs) as [category, pgs], index}
-                    {@const headerColorClass = CATEGORY_COLORS[index % CATEGORY_COLORS.length]}
-                    
-                    <div class="w-full bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden relative">
-                        <div class="p-2 border-b text-[11px] sm:text-xs flex justify-between items-center font-bold {headerColorClass}">
-                            <span>NHÓM: {category.toUpperCase()}</span>
-                            <span class="text-[9px] sm:text-[10px] bg-white/70 px-2 py-0.5 rounded-full border border-white/50">{pgs.length} NV</span>
-                        </div>
-  
-                        <div class="overflow-x-auto relative scroll-smooth pb-1.5 sm:pb-2">
-                            <table class="w-full text-center text-xs border-collapse">
-                                <thead class="bg-slate-50 text-slate-500">
-                                    <tr>
-                                        <th class="p-1.5 sm:p-2 text-[10px] sm:text-xs text-left font-bold border-r border-b z-20 sticky left-0 bg-slate-50 min-w-[95px] max-w-[95px] sm:min-w-[140px] sm:max-w-[140px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">Nhân sự</th>
+            <div class="w-full bg-white border border-slate-200 rounded-lg shadow-sm relative">
+                <table class="w-full text-center text-xs border-collapse">
+                    <thead class="bg-slate-700 text-white">
+                        <tr>
+                            <th class="p-1.5 sm:p-2 text-[10px] sm:text-xs text-left font-bold border-r border-b border-slate-600 rounded-tl-lg z-30 sticky top-0 left-0 bg-slate-700 min-w-[95px] max-w-[95px] sm:min-w-[140px] sm:max-w-[140px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.2)]">Nhân sự</th>
+                            {#each DAYS as d, dIdx}
+                                <th class="p-1 min-w-[55px] sm:min-w-[70px] text-[10px] sm:text-xs font-bold border-r border-b border-slate-600 last:border-0 {dIdx === DAYS.length - 1 ? 'rounded-tr-lg' : ''} z-20 sticky top-0 bg-slate-700 cursor-pointer hover:bg-slate-600 transition-colors group" title="Xem thống kê ca ngày {d}" on:click={() => selectedDayForStats = d}>
+                                    <div class="flex items-center justify-center gap-1 {['T7','CN'].includes(d) ? 'text-pink-300' : ''}">
+                                        {d} <span class="material-icons-round text-[10px] text-indigo-200 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">pie_chart</span>
+                                    </div>
+                                </th>
+                            {/each}
+                        </tr>
+                    </thead>
+
+                    {#each Object.entries(groupedPGs) as [category, pgs], index}
+                            {@const headerColorClass = CATEGORY_COLORS[index % CATEGORY_COLORS.length]}
+
+                            <tbody class="divide-y divide-slate-100">
+                                <tr>
+                                    <td colspan={DAYS.length + 1} class="p-2 text-[11px] sm:text-xs font-bold border-b {headerColorClass}">
+                                        <div class="flex justify-between items-center">
+                                            <span>NHÓM: {category.toUpperCase()}</span>
+                                            <span class="text-[9px] sm:text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full border border-white/40">{pgs.length} NV</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {#each pgs as pg}
+                                    {@const isOwner = $currentUser?.username === pg.username}
+
+                                    <tr id="pg-row-{pg.username}" class="transition-colors {isOwner ? 'bg-indigo-50/40' : 'hover:bg-slate-50/50'}">
+                                        <td class="p-1.5 sm:p-2 text-left border-r z-10 sticky left-0 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] min-w-[95px] max-w-[95px] sm:min-w-[140px] sm:max-w-[140px] cursor-pointer transition-colors {isOwner ? 'bg-indigo-50 hover:bg-indigo-100' : 'bg-white hover:bg-pink-50'}" title="Xem SĐT {pg.username}" on:click={() => selectedPGForModal = pg}>
+                                            <div class="flex justify-between items-center w-full">
+                                                <div class="font-bold text-[11px] sm:text-sm text-indigo-700 truncate">{pg.username}</div>
+
+                                                {#if isOwner}
+                                                    <span class="text-[8px] sm:text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded shadow-sm shrink-0 ml-1">BẠN</span>
+                                                {/if}
+                                            </div>
+                                        </td>
+
                                         {#each DAYS as d}
-                                            <th class="p-1 min-w-[55px] sm:min-w-[70px] text-[10px] sm:text-xs font-bold border-r border-b last:border-0 cursor-pointer hover:bg-indigo-50 transition-colors group" title="Xem thống kê ca ngày {d}" on:click={() => selectedDayForStats = d}>
-                                                <div class="flex items-center justify-center gap-1 {['T7','CN'].includes(d) ? 'text-pink-600' : ''}">
-                                                    {d} <span class="material-icons-round text-[10px] text-indigo-300 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:inline">pie_chart</span>
-                                                </div>
-                                            </th>
+                                            {@const currentShift = pgScheduleData[pg.id]?.[d] || ''}
+                                            {@const canEdit = isAdmin || (isOwner && (isFutureWeek || isScheduleUnlocked))}
+
+                                            <td class="p-0.5 sm:p-1 border-r last:border-0 align-middle">
+                                                <!-- [Surgical Fix]: Pass 'e' event vào updateShift -->
+                                                <select
+                                                    class="w-full h-7 sm:h-8 rounded border text-[10px] sm:text-[11px] font-semibold outline-none text-center cursor-pointer transition-colors shadow-sm appearance-none {SHIFT_COLORS[currentShift]} {!canEdit ? 'pointer-events-none opacity-80' : 'hover:border-indigo-300'}"
+                                                    value={currentShift}
+                                                    disabled={!canEdit}
+                                                    on:change={(e) => updateShift(e, pg.id, pg.username, d, e.target.value)}
+                                                >
+                                                    <option value="" class="bg-white text-gray-500">—</option>
+                                                    <option value="OFF" class="bg-white text-red-600 font-bold">OFF</option>
+                                                    <option value="Sáng" class="bg-white text-blue-700 font-bold">Sáng</option>
+                                                    <option value="Chiều" class="bg-white text-orange-700 font-bold">Chiều</option>
+                                                    <option value="Gãy" class="bg-white text-purple-700 font-bold">Gãy</option>
+                                                    <option value="Full" class="bg-white text-teal-700 font-bold">Full</option>
+                                                </select>
+                                            </td>
                                         {/each}
                                     </tr>
-                                </thead>
-                                
-                                <tbody class="divide-y divide-slate-100">
-                                    {#each pgs as pg}
-                                        {@const isOwner = $currentUser?.username === pg.username}
-                                        
-                                        <tr id="pg-row-{pg.username}" class="transition-colors {isOwner ? 'bg-indigo-50/40' : 'hover:bg-slate-50/50'}">
-                                            <td class="p-1.5 sm:p-2 text-left border-r z-10 sticky left-0 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] min-w-[95px] max-w-[95px] sm:min-w-[140px] sm:max-w-[140px] cursor-pointer transition-colors {isOwner ? 'bg-indigo-50 hover:bg-indigo-100' : 'bg-white hover:bg-pink-50'}" title="Xem SĐT {pg.username}" on:click={() => selectedPGForModal = pg}>
-                                                <div class="flex justify-between items-center w-full">
-                                                    <div class="font-bold text-[11px] sm:text-sm text-indigo-700 truncate">{pg.username}</div>
-                                                    
-                                                    {#if isOwner}
-                                                        <span class="text-[8px] sm:text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded shadow-sm shrink-0 ml-1">BẠN</span>
-                                                    {/if}
-                                                </div>
-                                            </td>
-                                            
-                                            {#each DAYS as d}
-                                                {@const currentShift = pgScheduleData[pg.id]?.[d] || ''}
-                                                {@const canEdit = isAdmin || (isOwner && (isFutureWeek || isScheduleUnlocked))}
-                                                
-                                                <td class="p-0.5 sm:p-1 border-r last:border-0 align-middle">
-                                                    <!-- [Surgical Fix]: Pass 'e' event vào updateShift -->
-                                                    <select 
-                                                        class="w-full h-7 sm:h-8 rounded border text-[10px] sm:text-[11px] font-semibold outline-none text-center cursor-pointer transition-colors shadow-sm appearance-none {SHIFT_COLORS[currentShift]} {!canEdit ? 'pointer-events-none opacity-80' : 'hover:border-indigo-300'}"
-                                                        value={currentShift}
-                                                        disabled={!canEdit}
-                                                        on:change={(e) => updateShift(e, pg.id, pg.username, d, e.target.value)}
-                                                    >
-                                                        <option value="" class="bg-white text-gray-500">—</option>
-                                                        <option value="OFF" class="bg-white text-red-600 font-bold">OFF</option>
-                                                        <option value="Sáng" class="bg-white text-blue-700 font-bold">Sáng</option>
-                                                        <option value="Chiều" class="bg-white text-orange-700 font-bold">Chiều</option>
-                                                        <option value="Gãy" class="bg-white text-purple-700 font-bold">Gãy</option>
-                                                        <option value="Full" class="bg-white text-teal-700 font-bold">Full</option>
-                                                    </select>
-                                                </td>
-                                            {/each}
-                                        </tr>
-                                    {/each}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                {/each}
+                                {/each}
+                            </tbody>
+                        {/each}
+                </table>
             </div>
         {/if}
     </div>
