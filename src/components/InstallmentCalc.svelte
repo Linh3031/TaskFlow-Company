@@ -5,6 +5,7 @@
     import { parseNumber, formatFull, calculateBH11, calculateBHMR } from '../lib/installmentUtils.js';
     import InstallmentHistory from './InstallmentCalcParts/InstallmentHistory.svelte';
     import InstallmentFooter from './InstallmentCalcParts/InstallmentFooter.svelte';
+    import AppFooter from './AppFooter.svelte';
 
     // --- STATE ---
     let productPrice = 0;
@@ -291,6 +292,7 @@
     {:else}
         <InstallmentHistory {history} />
     {/if}
+    <AppFooter />
 </div>
 
 <style>

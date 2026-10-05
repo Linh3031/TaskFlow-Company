@@ -16,6 +16,7 @@
     import LightboxModal from './DailyChecklistParts/LightboxModal.svelte';
     import CameraCaptureModal from './DailyChecklistParts/CameraCaptureModal.svelte';
     import ChecklistStatsModal from './DailyChecklistParts/ChecklistStatsModal.svelte';
+    import AppFooter from './AppFooter.svelte';
 
     export let activeStoreId;
     export let dateStr;
@@ -323,6 +324,7 @@
                 </div>
             {/each}
         {/if}
+        <AppFooter />
     </div>
 </div>
 

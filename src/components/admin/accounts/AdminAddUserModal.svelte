@@ -253,7 +253,7 @@
 
 {#if show}
   <div class="fixed inset-0 z-[70] bg-slate-900/50 flex items-center justify-center p-4 backdrop-blur-sm" on:mousedown={() => dispatch('close')}>
-      <div class="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl animate-popIn" on:mousedown|stopPropagation>
+      <div class="bg-white w-full max-w-sm max-h-full overflow-y-auto rounded-xl p-6 shadow-2xl animate-popIn" on:mousedown|stopPropagation>
           <h3 class="font-bold text-lg text-slate-800 mb-1">{editUser ? 'Chỉnh Sửa Nhân Sự' : 'Thêm Nhân Sự'}</h3>
           
           {#if isSuperAdmin}

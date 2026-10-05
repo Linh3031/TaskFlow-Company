@@ -26,35 +26,35 @@
 </script>
 
 <div class="fixed inset-0 z-50 bg-slate-100 flex flex-col animate-fadeIn">
-    <div class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-sm z-20">
-        <div class="flex items-center gap-4 lg:gap-6">
-            <button class="w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all text-slate-500 hover:text-indigo-600" on:click={() => dispatch('close')} aria-label="Đóng"><span class="material-icons-round">arrow_back</span></button>
+    <div class="min-h-16 py-2 bg-white border-b border-slate-200 flex items-center justify-between px-3 lg:px-6 shrink-0 shadow-sm z-20">
+        <div class="flex items-center gap-2 lg:gap-6 min-w-0">
+            <button class="shrink-0 w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all text-slate-500 hover:text-indigo-600" on:click={() => dispatch('close')} aria-label="Đóng"><span class="material-icons-round">arrow_back</span></button>
             <h2 class="text-xl font-bold text-slate-800 tracking-tight hidden lg:block">Quản Trị</h2>
             
-            <div class="flex items-center gap-2">
-                <div id="store-select-container" class="relative">
+            <div class="flex items-center gap-2 min-w-0">
+                <div id="store-select-container" class="relative shrink-0">
                     <select bind:value={targetStore} class="pl-3 pr-8 py-1.5 bg-indigo-50 border-indigo-100 text-indigo-700 font-bold rounded-lg text-sm outline-none appearance-none cursor-pointer hover:bg-indigo-100 transition-colors">
                         {#each myStores as s}<option value={s}>{s}</option>{/each}
                     </select>
                     <span class="material-icons-round absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">expand_more</span>
                 </div>
 
-                <div class="flex flex-wrap bg-slate-100 p-1 rounded-lg ml-2 gap-1">
-                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>Phân Ca</button>
+                <div class="flex flex-wrap bg-slate-100 p-1 rounded-lg lg:ml-2 gap-1 min-w-0">
+                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>Phân Ca</button>
                     
-                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>Nhân Sự</button>
+                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>Nhân Sự</button>
 
-                    <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Mẫu Việc</button>
+                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Mẫu Việc</button>
 
                     {#if isSuperAdmin}
-                        <button class="px-4 py-1.5 rounded-md text-sm font-bold transition-all {activeSection==='installment'?'bg-white text-purple-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'installment'}>Khai Báo Trả Góp</button>
+                        <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='installment'?'bg-white text-purple-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'installment'}>Khai Báo Trả Góp</button>
                     {/if}
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="flex-1 overflow-auto p-4 lg:p-6 relative">
+    <div class="flex-1 overflow-auto p-3 lg:p-6 relative">
         {#if activeSection === 'schedule'}
             <AdminSchedule {targetStore} on:switchTab={handleSwitchTab} />
         {/if}

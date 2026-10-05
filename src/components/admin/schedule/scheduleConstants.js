@@ -1,12 +1,3 @@
-export const tourSteps = [
-    { target: '#toolbar-actions', title: '1. Công Cụ Đầu Vào', content: 'Nơi tải danh sách nhân viên từ Excel và Cấu hình khung giờ hoạt động.' },
-    { target: '#month-navigator', title: '2. Chọn Tháng & Chế Độ', content: 'Chọn tháng cần làm lịch. Chuyển đổi qua lại giữa <b>Thứ 2-6</b> và <b>T7-CN</b> để nhập định mức riêng.' },
-    { target: '#matrix-header-target', title: '3. Nhập Định Mức', content: 'Nhập số lượng nhân viên cần thiết cho từng bộ phận (Kho, Thu Ngân...) tại các khung giờ bên dưới.' },
-    { target: '#btn-calculate', title: '4. Tính Toán Tự Động', content: 'Bấm nút này để hệ thống quy đổi nhu cầu lẻ thành các Combo ca làm việc.' },
-    { target: '#combo-header-target', title: '5. Tinh Chỉnh Combo', content: 'Xem kết quả quy đổi bên dưới. Bạn có thể sửa trực tiếp số lượng hoặc Thêm cột ca mới.' },
-    { target: '#btn-preview-schedule', title: '6. Tạo & Xem Trước', content: 'Bước cuối: Tạo bảng phân ca chi tiết để kiểm tra và áp dụng.' }
-];
-
 export const defaultMatrix = { c1: { kho: 0, tn: 0, tv: 0, gh: 0 }, c2: { kho: 0, tn: 0, tv: 0, gh: 0 }, c3: { kho: 0, tn: 0, tv: 0, gh: 0 }, c4: { kho: 0, tn: 0, tv: 0, gh: 0 }, c5: { kho: 0, tn: 0, tv: 0, gh: 0 }, c6: { kho: 0, tn: 0, tv: 0, gh: 0 } };
 
 export const DEFAULT_COLS = ['123', '456', '23', '45', '2-5', '2345', '123456', '12-56'];

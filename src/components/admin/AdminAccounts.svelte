@@ -11,7 +11,6 @@
   import ExcelManager from './accounts/ExcelManager.svelte';
   import AccountTable from './accounts/AccountTable.svelte';
   import AdminAddUserModal from './accounts/AdminAddUserModal.svelte';
-  import TourGuide from '../TourGuide.svelte';
   
   export let targetStore = '';
   export let isSuperAdmin = false;
@@ -39,8 +38,6 @@
       return acc.username.toLowerCase().includes(q) || (acc.name && acc.name.toLowerCase().includes(q));
   });
 
-  let showTour = false;
-  const tourSteps = [ { target: '#btn-add-user', title: '1. Tạo Admin Kho Mới', content: 'Thêm tài khoản.' } ];
   $: isDemoMode = (selectedStoreId || targetStore)?.includes('DEMO');
 
   let hasInitialized = false;
@@ -245,10 +242,12 @@
 <div class="h-full flex flex-col md:flex-row gap-4 animate-fadeIn overflow-hidden" style="height: calc(100vh - 140px);">
   
   {#if activeSuperAdmin && systemMode === 'STORE'}
-      <StoreSidebar {storeList} {selectedStoreId} {storeCountMap} on:select={(e) => selectStore(e.detail)} on:deleteStore={(e) => handleDeleteStore(e.detail)} on:deleteStores={(e) => handleDeleteStores(e.detail)} />
+      <div class="h-56 md:h-full shrink-0 flex">
+          <StoreSidebar {storeList} {selectedStoreId} {storeCountMap} on:select={(e) => selectStore(e.detail)} on:deleteStore={(e) => handleDeleteStore(e.detail)} on:deleteStores={(e) => handleDeleteStores(e.detail)} />
+      </div>
   {/if}
 
-  <div class="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative">
+  <div class="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative">
       
       {#if activeSuperAdmin}
       <div class="flex bg-slate-100 p-1 shrink-0 border-b border-slate-200 z-20">
@@ -257,24 +256,23 @@
       </div>
       {/if}
 
-      <div class="p-3 border-b border-slate-100 flex justify-between items-center bg-white z-10 shrink-0">
-          <div class="flex items-center gap-2">
-              <div class="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+      <div class="p-3 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2 bg-white z-10 shrink-0">
+          <div class="flex items-center gap-2 min-w-0">
+              <div class="w-10 h-10 shrink-0 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
                   {systemMode === 'ALL' ? 'ALL' : (selectedStoreId ? selectedStoreId.substring(0,2).toUpperCase() : '?')}
               </div>
-              <div>
-                  <h3 class="font-bold text-slate-800">{systemMode === 'ALL' ? 'Danh Sách Tổng' : `Nhân sự Kho ${selectedStoreId || '...'}`}</h3>
+              <div class="min-w-0">
+                  <h3 class="font-bold text-slate-800 truncate">{systemMode === 'ALL' ? 'Danh Sách Tổng' : `Nhân sự Kho ${selectedStoreId || '...'}`}</h3>
                   <p class="text-xs text-gray-500">Đang hiển thị: {filteredAccounts.length} tài khoản</p>
               </div>
           </div>
-          <div class="flex gap-2 items-center">
+          <div class="flex gap-2 items-center whitespace-nowrap">
               <button id="btn-import" class="text-xs font-bold px-3 py-2.5 rounded-lg border flex items-center gap-1 transition-colors {showImportExport ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-inner' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}" on:click={() => showImportExport = !showImportExport}>
                   <span class="material-icons-round text-sm">swap_vert</span> Dữ Liệu Excel
               </button>
               <button id="btn-add-user" class="text-xs font-bold text-green-600 bg-green-50 px-3 py-2.5 rounded-lg border border-green-100 flex items-center gap-1 hover:bg-green-100 transition-colors shadow-sm" on:click={(e) => checkDemoAndBlock(e) || (userToEdit = null, showAddUserModal = true)}>
                   <span class="material-icons-round text-sm">person_add</span> Thêm Mới
               </button>
-              <button class="text-gray-400 hover:text-indigo-600 ml-1 flex items-center" on:click={() => showTour = true}><span class="material-icons-round">help_outline</span></button>
           </div>
       </div>
 
@@ -306,8 +304,6 @@
         else loadAccountList(selectedStoreId); 
     }}
 />
-
-{#if showTour} <TourGuide steps={tourSteps} on:complete={() => showTour = false} /> {/if}
 
 {#if isLoading}
   <div class="absolute inset-0 bg-white/60 backdrop-blur-[2px] flex items-center justify-center z-[60]">

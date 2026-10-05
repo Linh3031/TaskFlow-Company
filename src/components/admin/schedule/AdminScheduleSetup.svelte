@@ -8,9 +8,8 @@
     import AdminScheduleToolbar from './AdminScheduleToolbar.svelte';
     import ScheduleMatrix from './ScheduleMatrix.svelte';
     import StoreConfig from '../../StoreConfig.svelte';
-    import TourGuide from '../../TourGuide.svelte'; 
     import ManualScheduleUpload from './ManualScheduleUpload.svelte';
-    import { defaultMatrix, tourSteps, shiftCols, roleRows } from './scheduleConstants.js';
+    import { defaultMatrix, shiftCols, roleRows } from './scheduleConstants.js';
     import RosterManager from './RosterManager.svelte';
 
     const dispatch = createEventDispatcher();
@@ -30,7 +29,6 @@
     export let customComboCols;
 
     let showStoreConfig = false;
-    let showTour = false;
     let showShortageAlert = false;
     let shortageCount = 0;
     
@@ -218,7 +216,6 @@
     {isDemoMode} 
     bind:setupMode 
     on:openConfig={() => showStoreConfig = true} 
-    on:openHelp={() => showTour = true} 
     on:openRoster={() => showRosterManager = true} 
 />
 
@@ -247,7 +244,6 @@
 {/if}
 
 {#if showStoreConfig} <StoreConfig storeId={targetStore} on:close={()=>showStoreConfig=false} /> {/if}
-{#if showTour} <TourGuide steps={tourSteps} on:complete={() => showTour = false} /> {/if}
 
 {#if showRosterManager} 
     <RosterManager 

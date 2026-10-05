@@ -22,7 +22,7 @@
     }
 </script>
 
-<div class="relative w-40 shrink-0">
+<div class="relative flex-1 min-w-0">
     <div class="flex items-center bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5 focus-within:border-emerald-400">
         <span class="material-icons-round text-[16px] text-emerald-500 mr-1 shrink-0">search</span>
         <input
@@ -30,7 +30,7 @@
             bind:value={tuKhoa}
             on:focus={() => mo = true}
             on:blur={() => mo = false}
-            placeholder={dangChon ? dangChon.hoTen : 'Tìm tên hoặc MSNV'}
+            placeholder={dangChon ? `${dangChon.hoTen} · ${String(dangChon.maNV ?? '').trim()}` : 'Tìm tên hoặc MSNV'}
             class="bg-transparent outline-none text-xs font-bold text-emerald-700 placeholder:text-emerald-700 w-full min-w-0 truncate"
         >
     </div>

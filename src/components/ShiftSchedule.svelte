@@ -19,6 +19,7 @@
   import SmartSwapModal from './admin/schedule/SmartSwapModal.svelte';
   import LegacySyncManager from './ShiftScheduleParts/LegacySyncManager.svelte';
   import StaffReorderModal from './admin/schedule/StaffReorderModal.svelte'; // [NEW] Import Modal Sắp xếp
+  import AppFooter from './AppFooter.svelte';
 
   import {
       getShiftColor, getRoleBadge, getWeekday, getWeekendHardRoleCount,
@@ -384,6 +385,7 @@
             on:openReorder={() => showReorderModal = true}
         />
     {/if}
+    <AppFooter />
 
 {:else if currentMode === 'PG'}
     <PGScheduleTable selectedViewStore={$activeStoreId} {isAdmin} />

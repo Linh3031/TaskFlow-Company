@@ -7,6 +7,7 @@
   import { db } from '../lib/firebase';
   import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
   import LightboxModal from './DailyChecklistParts/LightboxModal.svelte';
+  import AppFooter from './AppFooter.svelte';
   
   export let activeTab = 'warehouse';
   const dispatch = createEventDispatcher();
@@ -296,6 +297,7 @@
   {#if groupedTasks.length === 0}
     <div class="text-center py-10 text-gray-400 flex flex-col items-center"><span class="material-icons-round text-4xl mb-2 opacity-30">assignment_turned_in</span><p class="text-sm">Chưa có công việc nào</p></div>
   {/if}
+  <AppFooter />
 </div>
 
 <LightboxModal 

@@ -186,14 +186,6 @@
       </button>
     {/if}
 
-    <button 
-      id="btn-help"
-      class="w-8 h-8 flex items-center justify-center text-purple-500 bg-purple-50 hover:bg-purple-100 rounded-full transition-colors" 
-      on:click={() => dispatch('openTour')} title="Xem hướng dẫn"
-    >
-      <span class="material-icons-round text-xl">help_outline</span>
-    </button>
-
     <div class="relative" bind:this={notifContainer}>
         <button 
             id="btn-notif"

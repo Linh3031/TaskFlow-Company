@@ -155,7 +155,7 @@
                           {/each}
                       </div>
                   </div>
-                  <div class="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2">
+                  <div class="flex flex-col gap-2 md:opacity-0 md:group-hover:opacity-100 transition-opacity absolute right-2 top-2">
                       <button class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 flex items-center justify-center" on:click={() => editTemplate(i, item)}><span class="material-icons-round text-sm">edit</span></button>
                       <button class="w-8 h-8 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center" on:click={() => deleteTemplate(i)}><span class="material-icons-round text-sm">delete</span></button>
                   </div>

@@ -35,7 +35,7 @@
 </script>
 
 <div id="accounts-table" class="flex-1 overflow-auto relative bg-slate-50/50">
-    <table class="w-full text-sm text-left border-collapse">
+    <table class="w-full min-w-[640px] text-sm text-left border-collapse">
         <thead class="bg-white text-slate-500 font-bold sticky top-0 z-10 shadow-sm border-b border-slate-200">
             <tr>
                 <th class="p-3 border-b border-slate-200 w-1/3 cursor-pointer hover:bg-slate-50 transition-colors" on:click={() => toggleSort('username')}>
@@ -94,7 +94,7 @@
                         </select>
                     </td>
                     <td class="p-3 text-center align-middle">
-                        <div class="flex justify-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
+                        <div class="flex justify-center gap-1 md:opacity-40 md:group-hover:opacity-100 transition-opacity">
                             <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-slate-200 hover:bg-blue-50 text-slate-500 hover:text-blue-600 shadow-sm" on:click={() => dispatch('edit', acc)} title="Sửa tài khoản"><span class="material-icons-round text-sm">edit</span></button>
                             <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-slate-200 hover:bg-yellow-50 text-slate-500 hover:text-yellow-600 shadow-sm" on:click={() => dispatch('resetPass', acc.id)} title="Reset Mật khẩu"><span class="material-icons-round text-sm">lock_reset</span></button>
                             <button class="w-8 h-8 flex items-center justify-center rounded-lg bg-white border border-slate-200 hover:bg-red-50 text-slate-500 hover:text-red-600 shadow-sm" on:click={() => dispatch('delete', acc.id)} title="Xóa tài khoản"><span class="material-icons-round text-sm">delete</span></button>

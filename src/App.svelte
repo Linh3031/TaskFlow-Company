@@ -11,7 +11,6 @@
   import InstallmentCalc from './components/InstallmentCalc.svelte'; 
   import AdminModal from './components/AdminModal.svelte';
   import TaskModal from './components/TaskModal.svelte';
-  import TourGuide from './components/TourGuide.svelte';
   import ShiftSchedule from './components/ShiftSchedule.svelte';
   import DailyChecklist from './components/DailyChecklist.svelte'; 
   import HandoverInput from './components/HandoverInput.svelte';
@@ -19,7 +18,7 @@
   import SknvDashboard from './components/SknvDashboard.svelte';
   import GroupTaskList from './components/GroupTaskList.svelte';
 
-  const APP_VERSION = 42; 
+  const APP_VERSION = 43; 
   let showUpdatePrompt = false;
 
   $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {
@@ -34,16 +33,6 @@
   let selectedDate = getTodayStr();
   let unsubmittedGroupTaskCount = 0; 
   
-  let showTour = false;
-  const tourKey = 'taskflow_v6_general_tour_seen';
-  const tourSteps = [
-      { target: '.app-header', title: '1. Xin chào!', content: 'Chào mừng bạn đến với TaskFlow. Giao diện đã được nâng cấp.' },
-      { target: '#store-selector-tour', title: '2. Chọn Kho', content: 'Chuyển đổi dữ liệu giữa các siêu thị.' },
-      { target: '#tab-nav-container', title: '3. Chức Năng', content: 'Chuyển đổi cực nhanh giữa các bộ phận.' },
-      { target: '#date-navigator', title: '4. Ngày tháng', content: 'Bấm mũi tên hoặc chọn ngày để xem quá khứ/tương lai.' },
-      { target: '#btn-notif', title: '5. Thông Báo', content: 'Nhắc nhở, tag tên sẽ báo đỏ tại đây.' },
-      { target: '#btn-help', title: '6. Hướng Dẫn', content: 'Xem lại hướng dẫn bất cứ lúc nào.' }
-  ];
 
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
@@ -128,7 +117,6 @@
         }
     });
 
-    if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
 
   onDestroy(() => { unsubTemplate(); unsubTasks(); unsubHandover(); document.removeEventListener('visibilitychange', handleVisibilityChange); });
@@ -305,7 +293,7 @@
 <main>
   {#if !$currentUser} <Login /> {:else}
     <div class="app-container">
-      <Header on:openAdmin={() => showAdminModal = true} on:openTour={() => showTour = true} on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ -> Chọn "Thêm vào MH chính"')} on:jumpToTask={handleJumpToTask} />
+      <Header on:openAdmin={() => showAdminModal = true} on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ -> Chọn "Thêm vào MH chính"')} on:jumpToTask={handleJumpToTask} />
       
      <nav id="tab-nav-container" class="tab-nav">
         {#each availableTabs as t}
@@ -321,7 +309,7 @@
         {/each}
       </nav>
 
-      <div id="main-content" class="content-area">
+      <div id="main-content" class="content-area" class:sknv-flush={activeTab === 'sknv'}>
         {#if activeTab !== 'sknv'}
         <div class="section-header theme-{activeTab} flex flex-col gap-2 items-start sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center justify-between w-full sm:w-auto">
@@ -370,7 +358,6 @@
             <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
         {/if}
       </div>
-      <footer>Design by 3031 | Kho đang xem: {$activeStoreId}</footer>
     </div>
   {/if}
   
@@ -378,7 +365,6 @@
   {#if showTaskModal && selectedTask} 
       <TaskModal taskTitle={selectedTask.title} taskId={selectedTask.id} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> 
   {/if}
-  {#if showTour} <TourGuide steps={tourSteps} on:complete={() => { showTour = false; localStorage.setItem(tourKey, 'true'); }} /> {/if}
   
   {#if showUpdatePrompt}
   <div class="fixed inset-0 z-[9999] bg-slate-900/80 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -407,10 +393,10 @@
   .tab-btn.active { color: var(--theme-color); }
   .tab-btn.active .icon-box { background: var(--theme-color); color: white; width: 45px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
   .content-area { flex-grow: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; padding: 10px; }
+  .content-area.sknv-flush { padding: 0; }
   .section-header { flex-shrink: 0; padding: 10px; border-radius: 10px; margin-bottom: 10px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
   .section-header h3 { font-size: 1rem; margin: 0; font-weight: 700; }
   .task-count { background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 800; color: #555; }
-  footer { flex-shrink: 0; text-align: center; padding: 10px; color: #999; font-size: 0.75rem; font-weight: 700; background: #f4f7fc; }
   .theme-8nttt h3 { color: #00bcd4; }
   .theme-handover h3 { color: #9c27b0; }
   .theme-group_task h3 { color: #f97316; }

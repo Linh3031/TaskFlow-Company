@@ -26,8 +26,6 @@
   let errorMsg = '';
   let isLoading = false;
 
-  const tourKey = 'taskflow_v6_general_tour_seen';
-
   onMount(() => {
       const savedCreds = localStorage.getItem('taskflow_saved_creds');
       if (savedCreds) {
@@ -110,7 +108,6 @@
     if (cleanU === 'demo' && cleanP === '123456') {
         try {
             await seedDemoData();
-            localStorage.removeItem(tourKey);
             setUser({ username: 'demo', name: 'Quản Lý Demo', role: 'admin', storeIds: ['DEMO_1'], storeId: 'DEMO_1' });
             return;
         } catch(e) { 

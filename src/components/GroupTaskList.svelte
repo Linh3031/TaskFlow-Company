@@ -10,6 +10,7 @@
   import GroupTaskCreateModal from './GroupTaskParts/GroupTaskCreateModal.svelte';
   import GroupTaskStatsModal from './GroupTaskParts/GroupTaskStatsModal.svelte';
   import LightboxModal from './DailyChecklistParts/LightboxModal.svelte';
+  import AppFooter from './AppFooter.svelte';
 
   export let selectedDate; 
 
@@ -280,6 +281,7 @@
         <p class="font-bold text-sm">Không có công việc tập thể nào đang cần điểm danh.</p>
       </div>
     {/if}
+    <AppFooter />
   </div>
 
   {#if undoData}

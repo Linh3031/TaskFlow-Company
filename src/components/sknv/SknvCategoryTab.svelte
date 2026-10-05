@@ -53,9 +53,6 @@
         <div class="bg-gradient-to-br from-sky-500 to-indigo-500 rounded-2xl p-4 text-white shadow-sm">
             <div class="flex items-center justify-between gap-2">
                 <span class="text-[11px] font-black uppercase tracking-wider">Tổng cộng</span>
-                {#if gio}
-                    <span class="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded-full truncate">Cập nhật {gio}</span>
-                {/if}
             </div>
             <div class="grid grid-cols-2 gap-2 mt-3">
                 <div class="bg-white/15 rounded-xl p-2 min-w-0">

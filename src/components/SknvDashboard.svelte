@@ -7,6 +7,7 @@
     import SknvCategoryTab from './sknv/SknvCategoryTab.svelte';
     import SknvCompetitionTab from './sknv/SknvCompetitionTab.svelte';
     import ChonNhanVien from './sknv/ChonNhanVien.svelte';
+    import AppFooter from './AppFooter.svelte';
 
     const TABS = [
         { id: 'bang_diem', label: 'Bảng điểm', icon: 'assignment', on: 'bg-indigo-500 text-white shadow-sm' },
@@ -66,6 +67,13 @@
     $: boPhanDangXem = goiPhieu?.boPhan || nvTrongDanhSach?.boPhan || '';
     $: gioCapNhat = sknvAppService.dinhDangGio(goiPhieu?.dongBoLuc);
     $: propsPhieu = sknvAppService.taoPropsPhieu(goiPhieu);
+
+    // Hiển thị phần đầu tab
+    $: dangTaiSoMoi = dangTaiPhieu || dangHoiLaiHoSo || trangThaiKho === 'dang_tai';
+    $: hienCapNhat = !!gioCapNhat && trangThaiPhieu === 'co';
+    $: coOTim = laQuanLy && dsNhanVien.length > 0;
+    $: hienNhanVien = !laPG && trangThaiKho === 'co' && (!!maNVDangXem || coOTim);
+    $: hienTabPhu = !laPG && trangThaiKho === 'co' && trangThaiPhieu === 'co' && !!goiPhieu;
 
     async function hoiLaiHoSo() {
         daHoiLaiHoSo = true;
@@ -206,45 +214,44 @@
 
 <div class="bg-slate-50 h-screen flex flex-col overflow-hidden">
 
-    <div class="bg-white px-4 pt-6 pb-3 shadow-sm border-b border-gray-200 z-30 shrink-0">
-        <div class="flex items-center justify-between mb-1">
-            <h2 class="text-xl font-black text-emerald-600 flex items-center gap-2">
-                <span class="material-icons-round">health_and_safety</span> Sức Khỏe NV
-            </h2>
+    {#if hienNhanVien || dangTaiSoMoi || hienCapNhat || hienTabPhu}
+    <div class="bg-white px-4 py-2 shadow-sm border-b border-gray-200 z-30 shrink-0 flex flex-col gap-2">
+        {#if hienNhanVien || dangTaiSoMoi || hienCapNhat}
+            <div class="flex items-center justify-between gap-2">
+                {#if hienNhanVien}
+                    {#if coOTim}
+                        <ChonNhanVien {dsNhanVien} value={maNVDangXem} on:chon={(e) => { maNVChon = e.detail; }} />
+                    {:else}
+                        <div class="min-w-0 flex-1 truncate text-[13px]">
+                            <span class="font-semibold text-slate-800">{hoTenDangXem || 'Nhân viên'}</span><span class="text-slate-500"> · {maNVDangXem}</span>
+                        </div>
+                    {/if}
+                {/if}
 
-            <div class="flex items-center">
-                {#if dangTaiPhieu || dangHoiLaiHoSo || trangThaiKho === 'dang_tai'}
-                    <span class="text-[11px] text-orange-600 flex items-center gap-1 font-bold bg-orange-50 px-2 py-1 rounded-full border border-orange-100">
+                {#if dangTaiSoMoi}
+                    <span class="ml-auto shrink-0 text-[11px] text-orange-600 flex items-center gap-1 font-bold bg-orange-50 px-2 py-1 rounded-full border border-orange-100">
                         <span class="material-icons-round text-[14px] animate-spin">sync</span> Đang tải số mới...
                     </span>
-                {:else if gioCapNhat && trangThaiPhieu === 'co'}
-                    <span class="text-[10px] text-emerald-700 flex items-center gap-1 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-full font-bold">
-                        <span class="material-icons-round text-[12px] text-emerald-500">check_circle</span>
-                        Cập nhật {gioCapNhat}
-                    </span>
-                {/if}
-            </div>
-        </div>
-
-        {#if !laPG && trangThaiKho === 'co' && (maNVDangXem || (laQuanLy && dsNhanVien.length > 0))}
-            <div class="mt-3 flex items-center justify-between gap-2">
-                <div class="min-w-0">
-                    {#if maNVDangXem}
-                        <div class="text-sm font-bold text-slate-800 truncate">{hoTenDangXem || 'Nhân viên'}</div>
-                        <div class="text-xs text-slate-500 truncate">MSNV: {maNVDangXem} | Kho: {khoDangXem}{boPhanDangXem ? ` | ${boPhanDangXem}` : ''}</div>
+                {:else if hienCapNhat}
+                    {#if hienNhanVien && coOTim}
+                        <div class="ml-auto shrink-0 text-[10px] text-emerald-700 font-bold leading-tight whitespace-nowrap">
+                            <div class="flex items-center gap-1">
+                                <span class="material-icons-round text-[12px] text-emerald-500">check_circle</span>Cập nhật
+                            </div>
+                            <div>{gioCapNhat}</div>
+                        </div>
                     {:else}
-                        <div class="text-sm font-bold text-slate-400">Chưa chọn nhân viên</div>
+                        <span class="ml-auto shrink-0 text-[10px] text-emerald-700 flex items-center gap-1 font-bold whitespace-nowrap">
+                            <span class="material-icons-round text-[12px] text-emerald-500">check_circle</span>
+                            Cập nhật {gioCapNhat}
+                        </span>
                     {/if}
-                </div>
-
-                {#if laQuanLy && dsNhanVien.length > 0}
-                    <ChonNhanVien {dsNhanVien} value={maNVDangXem} on:chon={(e) => { maNVChon = e.detail; }} />
                 {/if}
             </div>
         {/if}
 
-        {#if !laPG && trangThaiKho === 'co' && trangThaiPhieu === 'co' && goiPhieu}
-            <div class="flex gap-1 bg-gray-100 p-1 rounded-xl mt-3">
+        {#if hienTabPhu}
+            <div class="flex gap-1 bg-gray-100 p-1 rounded-xl">
                 {#each TABS as tab}
                     <button
                         class="flex-1 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1 {activeTab === tab.id ? tab.on : 'text-gray-500 hover:text-gray-700'}"
@@ -256,6 +263,7 @@
             </div>
         {/if}
     </div>
+    {/if}
 
     <div class="flex-1 overflow-y-auto overscroll-contain p-4 pb-24 relative">
         {#if laPG}
@@ -319,6 +327,7 @@
                 <span class="material-icons-round text-4xl mb-2 animate-spin">autorenew</span> Đang tải dữ liệu...
             </div>
         {/if}
+        <AppFooter />
     </div>
 </div>
 
