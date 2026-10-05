@@ -19,7 +19,7 @@
   import SknvDashboard from './components/SknvDashboard.svelte';
   import GroupTaskList from './components/GroupTaskList.svelte';
 
-  const APP_VERSION = 41; 
+  const APP_VERSION = 42; 
   let showUpdatePrompt = false;
 
   $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {
@@ -325,7 +325,7 @@
         <div class="section-header theme-{activeTab} flex flex-col gap-2 items-start sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
-                 {#if $currentUser.role === 'super_admin'}
+                 {#if $currentUser.role === 'super_admin' && activeTab !== 'sknv'}
                     🛡️ View: <span class="text-indigo-600 font-bold ml-1">{$activeStoreId}</span>
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
@@ -342,7 +342,7 @@
                {/if}
            </div>
            
-           {#if activeTab !== 'schedule' && activeTab !== 'installment'}
+           {#if activeTab !== 'schedule' && activeTab !== 'installment' && activeTab !== 'sknv'}
             <div id="date-navigator" class="flex items-center gap-1 w-full sm:w-auto bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-sm">
                 <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
                     <span class="material-icons-round text-lg">chevron_left</span>
