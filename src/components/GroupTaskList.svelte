@@ -114,7 +114,7 @@
   }
 
   async function handleCreateTask(e) {
-    const { title, deadline, targetRole, totalStaff, requireImage } = e.detail;
+    const { title, deadline, targetRole, totalStaff, excludedUids, requireImage } = e.detail;
     try {
       await addDoc(collection(db, 'group_tasks'), {
         storeId: String(currentStore),
@@ -122,6 +122,7 @@
         deadline,
         targetRole,
         totalStaff,
+        excludedUids: excludedUids || [],
         requireImage: requireImage,
         submittedCount: 0,
         submittedUids: [],
@@ -134,10 +135,10 @@
   }
 
   async function handleUpdateTask(e) {
-    const { id, title, deadline, targetRole, totalStaff, requireImage } = e.detail;
+    const { id, title, deadline, targetRole, totalStaff, excludedUids, requireImage } = e.detail;
     try {
       await updateDoc(doc(db, 'group_tasks', id), {
-        title, deadline, targetRole, totalStaff, requireImage
+        title, deadline, targetRole, totalStaff, excludedUids: excludedUids || [], requireImage
       });
       showCreateModal = false;
       editTaskData = null;
@@ -165,7 +166,7 @@
   }
 
   async function handleSubmitProof(e) {
-    const { taskId, imageUrl, username, name } = e.detail;
+    const { taskId, imageUrl, imageUrls, username, name } = e.detail;
     try {
       const uid = String(username).toLowerCase();
       const subRef = doc(db, 'group_tasks', taskId, 'submissions', uid);
@@ -178,6 +179,7 @@
           if (oldData.imageUrl || oldData.submittedAt) {
               history.push({
                   imageUrl: oldData.imageUrl || null,
+                  imageUrls: oldData.imageUrls || (oldData.imageUrl ? [oldData.imageUrl] : []),
                   submittedAt: oldData.submittedAt || new Date().toISOString()
               });
           }
@@ -185,6 +187,7 @@
 
       await setDoc(subRef, {
         imageUrl: imageUrl || null,
+        imageUrls: imageUrls || (imageUrl ? [imageUrl] : []),
         username,
         name,
         submittedAt: new Date().toISOString(),

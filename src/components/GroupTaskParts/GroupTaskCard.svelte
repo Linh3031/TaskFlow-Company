@@ -31,6 +31,9 @@
   })();
 
   // [CodeGenesis] Lấy chi tiết lịch sử nộp của chính mình để hiện giờ/ảnh
+  // Danh sách ảnh đã nộp (hỗ trợ cả dữ liệu cũ chỉ có 1 ảnh imageUrl)
+  $: myImages = mySubmission?.imageUrls?.length ? mySubmission.imageUrls : (mySubmission?.imageUrl ? [mySubmission.imageUrl] : []);
+
   $: if (hasSubmitted && !mySubmission) {
     fetchMySubmission();
   }
@@ -52,22 +55,25 @@
 
   async function handleFileSelect(e) {
     if (isExpired && !isAdmin) return alert("Công việc này đã hết hạn điểm danh!");
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
     isUploading = true;
     try {
-      const blob = await compressImage(file);
-      const url = await uploadTaskImage(blob, task.storeId || 'GROUP', `${task.id}_${currentUid}_${Date.now()}`);
+      const urls = await Promise.all(files.map(async (file, i) => {
+        const blob = await compressImage(file);
+        return uploadTaskImage(blob, task.storeId || 'GROUP', `${task.id}_${currentUid}_${Date.now()}_${i}`);
+      }));
       
       // Update UI lập tức để trải nghiệm mượt mà, không cần đợi Firebase fetch lại
       if (mySubmission) {
-        mySubmission.imageUrl = url;
+        mySubmission.imageUrl = urls[0];
+        mySubmission.imageUrls = urls;
         mySubmission.submittedAt = new Date().toISOString();
       } else {
-        mySubmission = { imageUrl: url, submittedAt: new Date().toISOString() };
+        mySubmission = { imageUrl: urls[0], imageUrls: urls, submittedAt: new Date().toISOString() };
       }
 
-      dispatch('submitProof', { taskId: task.id, imageUrl: url, username: currentUser.username || 'Unknown', name: currentUser.name || currentUser.username });
+      dispatch('submitProof', { taskId: task.id, imageUrl: urls[0], imageUrls: urls, username: currentUser.username || 'Unknown', name: currentUser.name || currentUser.username });
     } catch (err) {
       alert("Lỗi tải ảnh lên: " + err.message);
     } finally {
@@ -120,7 +126,7 @@
           <button type="button" class="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-600 font-bold text-[11px] rounded-lg border border-amber-200 transition-colors flex items-center gap-1" title="Mở lại công việc" on:click={() => dispatch('undoClose', task.id)}>
             <span class="material-icons-round text-sm">settings_backup_restore</span> Mở lại
           </button>
-        {:else}
+        {:else if !isExpired}
           <button type="button" class="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-[11px] rounded-lg border border-red-200 transition-colors flex items-center gap-1" title="Chốt & Kết Thúc sớm" on:click={() => dispatch('forceClose', task.id)}>
             <span class="material-icons-round text-sm">check_circle_outline</span> Chốt Sớm
           </button>
@@ -143,8 +149,13 @@
         <div class="flex items-center gap-2">
           <!-- [CodeGenesis] Giao diện nộp hoàn chỉnh với Thumbnail và Thời gian -->
           <div class="flex items-center gap-1.5 bg-green-50 px-2 py-1 rounded-lg border border-green-200 shadow-sm">
-            {#if mySubmission?.imageUrl}
-              <img src={mySubmission.imageUrl} alt="Proof" class="w-7 h-7 rounded object-cover cursor-pointer hover:scale-110 transition-transform shadow-[0_0_2px_rgba(0,0,0,0.2)]" on:click={() => dispatch('openLightbox', { images: [mySubmission.imageUrl], index: 0 })} title="Bấm để xem ảnh phóng to" />
+            {#if myImages.length}
+              <div class="relative shrink-0">
+                <img src={myImages[0]} alt="Proof" class="w-7 h-7 rounded object-cover cursor-pointer hover:scale-110 transition-transform shadow-[0_0_2px_rgba(0,0,0,0.2)]" on:click={() => dispatch('openLightbox', { images: myImages, index: 0 })} title="Bấm để xem ảnh phóng to" />
+                {#if myImages.length > 1}
+                  <span class="absolute -top-1.5 -right-1.5 bg-indigo-600 text-white text-[8px] font-black rounded-full min-w-[14px] h-[14px] px-0.5 flex items-center justify-center pointer-events-none">{myImages.length}</span>
+                {/if}
+              </div>
             {/if}
             <div class="flex flex-col">
               <span class="text-[10px] text-green-700 font-black leading-tight flex items-center gap-0.5"><span class="material-icons-round text-[12px]">check_circle</span> Đã điểm danh</span>
@@ -155,7 +166,7 @@
           </div>
 
           {#if !isClosed && !isExpired && requireImage}
-            <input type="file" hidden accept="image/*" bind:this={fileInput} on:change={handleFileSelect}>
+            <input type="file" hidden accept="image/*" multiple bind:this={fileInput} on:change={handleFileSelect}>
             <button type="button" class="text-[11px] px-2 py-1 bg-white border border-indigo-200 rounded-lg font-bold text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-50 flex items-center gap-1" disabled={isUploading} on:click={() => fileInput.click()}>
               {#if isUploading}
                 <span class="material-icons-round text-[12px] animate-spin">sync</span> Đang tải
@@ -177,7 +188,7 @@
           </span>
         {:else}
           {#if requireImage}
-            <input type="file" hidden accept="image/*" bind:this={fileInput} on:change={handleFileSelect}>
+            <input type="file" hidden accept="image/*" multiple bind:this={fileInput} on:change={handleFileSelect}>
             <button type="button" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-sm flex items-center gap-1 transition-all" disabled={isUploading} on:click={() => fileInput.click()}>
               {#if isUploading}
                 <span class="material-icons-round text-sm animate-spin">sync</span> Đang tải...

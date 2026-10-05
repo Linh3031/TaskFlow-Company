@@ -3,6 +3,7 @@
   import { db } from '../../lib/firebase';
   import { collection, getDocs } from 'firebase/firestore';
   import { formatDateTime } from '../../lib/utils';
+  import { scanOffUserIds, isUserOff } from './handlers/offScanner';
   
   export let show = false;
   export let task = null;
@@ -16,10 +17,15 @@
   // [CodeGenesis] Thêm biến quản lý thanh tìm kiếm
   let searchQuery = '';
 
+  // Danh sách người OFF trong thời hạn công việc (không tính vào danh sách cần làm)
+  let offSet = new Set();
+  let copied = false;
+
   // [CodeGenesis] Surgical Fix: Miễn nhiễm Admin khỏi danh sách cần rà soát
   $: targetUsers = storeUsers.filter(u => {
     if (!task) return false;
     if (u.role === 'admin' || u.role === 'super_admin') return false; 
+    if (isUserOff(u, offSet)) return false; // Người OFF không tính vào danh sách cần làm
     
     if (task.targetRole === 'PG') return u.role === 'pg';
     if (task.targetRole === 'STAFF') return u.role !== 'pg';
@@ -43,6 +49,40 @@
     return (u.name || u.username || '').toLowerCase().includes(q);
   });
 
+  // Ảnh của 1 lượt nộp (hỗ trợ cả dữ liệu cũ chỉ có 1 ảnh imageUrl)
+  const getSubImages = (sub) => sub.imageUrls?.length ? sub.imageUrls : (sub.imageUrl ? [sub.imageUrl] : []);
+  $: allImages = filteredSubmissions.flatMap(getSubImages);
+
+  function openSubLightbox(index) {
+    const start = filteredSubmissions.slice(0, index).reduce((n, s) => n + getSubImages(s).length, 0);
+    dispatch('openLightbox', { images: allImages, index: start });
+  }
+
+  // Ưu tiên danh sách OFF đã lưu lúc tạo việc; việc cũ chưa có thì quét lại lịch theo hạn chót
+  async function loadOffList() {
+    if (!task) return;
+    if (Array.isArray(task.excludedUids)) {
+      offSet = new Set(task.excludedUids.map(x => String(x).toLowerCase()));
+      return;
+    }
+    offSet = new Set();
+    const taskId = task.id;
+    try {
+      const refDate = task.deadline || task.createdAt?.toDate?.() || null;
+      const result = await scanOffUserIds(String(task.storeId || ''), refDate, task.targetRole || 'ALL');
+      if (task?.id === taskId) offSet = result;
+    } catch (e) { console.error("Lỗi quét lịch OFF:", e); }
+  }
+
+  function copyMissingMentions() {
+    const text = filteredMissingUsers.map(u => u.username).filter(Boolean).map(un => '@' + un).join('\n');
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      copied = true;
+      setTimeout(() => { copied = false; }, 1500);
+    }).catch(() => alert('Không copy được, vui lòng thử lại!'));
+  }
+
   async function loadSubmissions() {
     if (!task) return;
     loading = true;
@@ -53,7 +93,7 @@
     finally { loading = false; }
   }
 
-  $: if (show && task) { loadSubmissions(); }
+  $: if (show && task) { loadSubmissions(); loadOffList(); }
   $: if (!show) { searchQuery = ''; } // Reset ô tìm kiếm khi đóng modal
 </script>
 
@@ -111,11 +151,16 @@
             {#each filteredSubmissions as sub, index}
               <div class="bg-white p-2 border border-slate-200 rounded-xl shadow-sm flex flex-col gap-1.5">
                 <div class="w-full h-28 rounded-lg overflow-hidden bg-slate-100 relative group border border-slate-100">
-                  {#if sub.imageUrl}
-                    <img src={sub.imageUrl} alt="Proof" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer" on:click={() => dispatch('openLightbox', { images: submissions.map(s => s.imageUrl).filter(Boolean), index })} on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/200x200/e2e8f0/64748b?text=Loi+Anh'; }}>
+                  {#if getSubImages(sub).length}
+                    <img src={getSubImages(sub)[0]} alt="Proof" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer" on:click={() => openSubLightbox(index)} on:error={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/200x200/e2e8f0/64748b?text=Loi+Anh'; }}>
                     <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity pointer-events-none">
                       <span class="material-icons-round text-white text-xl">zoom_in</span>
                     </div>
+                    {#if getSubImages(sub).length > 1}
+                      <span class="absolute bottom-1 right-1 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-0.5 pointer-events-none">
+                        <span class="material-icons-round text-[12px]">photo_library</span>{getSubImages(sub).length}
+                      </span>
+                    {/if}
                   {:else}
                     <div class="flex flex-col items-center justify-center h-full text-slate-300 bg-slate-50">
                       <span class="material-icons-round text-3xl text-green-400">task_alt</span>
@@ -137,18 +182,23 @@
           </div>
         {:else}
           <div class="space-y-2">
-            {#each filteredMissingUsers as u}
-              <div class="p-2.5 bg-red-50/50 border border-red-100 rounded-xl flex justify-between items-center">
-                <div class="flex items-center gap-2">
-                  <div class="w-7 h-7 rounded-full bg-red-100 text-red-600 font-bold text-xs flex items-center justify-center">{String(u.name || u.username).charAt(0)}</div>
-                  <div>
-                    <p class="font-bold text-xs text-slate-800">{u.name || u.username}</p>
-                    <p class="text-[10px] text-slate-400 uppercase">@{u.username} • {u.role}</p>
-                  </div>
-                </div>
-                <span class="text-[10px] font-bold text-red-600 bg-white px-2 py-0.5 rounded border border-red-200 shadow-sm">Chưa điểm danh</span>
+            {#if filteredMissingUsers.length > 0}
+              <div class="flex justify-between items-center gap-2">
+                <span class="text-[11px] font-bold text-slate-500">Danh sách chưa điểm danh ({filteredMissingUsers.length})</span>
+                <button type="button" class="px-2.5 py-1 font-bold text-[11px] rounded-lg border transition-colors flex items-center gap-1 shrink-0 {copied ? 'bg-green-50 text-green-600 border-green-200' : 'bg-white hover:bg-indigo-50 text-indigo-600 border-indigo-200'}" on:click={copyMissingMentions} title="Copy dạng @username để dán vào chat">
+                  <span class="material-icons-round text-sm">{copied ? 'check' : 'content_copy'}</span> {copied ? 'Đã copy' : 'Copy @tag'}
+                </button>
               </div>
-            {/each}
+              <div class="bg-white border border-red-100 rounded-xl divide-y divide-red-50 overflow-hidden">
+                {#each filteredMissingUsers as u, i}
+                  <div class="px-3 py-2 flex items-center gap-2 text-xs">
+                    <span class="w-5 text-right text-[10px] font-bold text-slate-400 shrink-0">{i + 1}.</span>
+                    <span class="font-bold text-slate-800 truncate flex-1">{u.name || u.username}</span>
+                    <span class="font-mono text-[11px] text-red-600 truncate max-w-[40%]">@{u.username}</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
             {#if filteredMissingUsers.length === 0}
               <div class="text-center py-10 text-green-600 font-bold text-xs bg-green-50 rounded-xl border border-green-200">
                 {searchQuery ? 'Không tìm thấy nhân viên nào phù hợp với từ khóa.' : '🎉 Tất cả nhân viên thuộc nhóm này đều đã hoàn tất điểm danh!'}
