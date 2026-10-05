@@ -1,9 +1,11 @@
 <script>
     import { createEventDispatcher } from 'svelte';
+    import MaNVCell from './MaNVCell.svelte';
     const dispatch = createEventDispatcher();
     
     export let filteredAccounts = [];
     export let activeSuperAdmin = false;
+    export let isDemoMode = false;
 
     // [NEW] Logic Sort cho Bảng
     let sortField = null; // 'username', 'gender', 'role'
@@ -16,6 +18,13 @@
 
     $: sortedAccounts = [...filteredAccounts].sort((a, b) => {
         if (!sortField) return 0;
+        // MSNV xếp theo giá trị số, tài khoản thiếu MSNV luôn nằm cuối
+        if (sortField === 'maNV') {
+            if (!a.maNV && !b.maNV) return 0;
+            if (!a.maNV) return 1;
+            if (!b.maNV) return -1;
+            return sortAsc ? Number(a.maNV) - Number(b.maNV) : Number(b.maNV) - Number(a.maNV);
+        }
         let valA = String(a[sortField] || '').toLowerCase();
         let valB = String(b[sortField] || '').toLowerCase();
         
@@ -32,6 +41,9 @@
                 <th class="p-3 border-b border-slate-200 w-1/3 cursor-pointer hover:bg-slate-50 transition-colors" on:click={() => toggleSort('username')}>
                     <div class="flex items-center gap-1">Tài Khoản / Tên {sortField==='username'?(sortAsc?'▲':'▼'):'↕'}</div>
                 </th>
+                <th class="p-3 border-b border-slate-200 w-1/6 cursor-pointer hover:bg-slate-50 transition-colors" on:click={() => toggleSort('maNV')}>
+                    <div class="flex items-center gap-1">MSNV {sortField==='maNV'?(sortAsc?'▲':'▼'):'↕'}</div>
+                </th>
                 <th class="p-3 border-b border-slate-200 w-1/6 cursor-pointer hover:bg-slate-50 transition-colors" on:click={() => toggleSort('gender')}>
                     <div class="flex items-center gap-1">Giới Tính {sortField==='gender'?(sortAsc?'▲':'▼'):'↕'}</div>
                 </th>
@@ -42,7 +54,7 @@
             </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-            {#each sortedAccounts as acc}
+            {#each sortedAccounts as acc (acc)}
                 <tr class="hover:bg-indigo-50/40 transition-colors group bg-white">
                     <td class="p-3">
                         <div class="font-bold text-slate-800">{acc.username}</div>
@@ -57,6 +69,13 @@
                         {/if}
                         {#if acc.storeIds && acc.storeIds.length > 1}
                             <div class="text-[10px] text-indigo-600 font-semibold mt-0.5 bg-indigo-50 inline-block px-1.5 py-0.5 rounded border border-indigo-100" title={acc.storeIds.join(', ')}>Đa kho: {acc.storeIds.length} kho</div>
+                        {/if}
+                    </td>
+                    <td class="p-3">
+                        {#if acc.role === 'pg' || acc.role === 'super_admin'}
+                            <span class="text-slate-400 font-bold">—</span>
+                        {:else}
+                            <MaNVCell account={acc} disabled={isDemoMode} />
                         {/if}
                     </td>
                     <td class="p-3">
@@ -85,7 +104,7 @@
             {/each}
             {#if sortedAccounts.length === 0}
                 <tr>
-                    <td colspan="4" class="p-12 text-center">
+                    <td colspan="5" class="p-12 text-center">
                         <span class="material-icons-round text-4xl text-slate-200 mb-2 block">person_off</span>
                         <span class="text-slate-400 font-bold text-sm">Không có dữ liệu phù hợp với bộ lọc.</span>
                     </td>

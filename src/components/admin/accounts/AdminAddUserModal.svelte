@@ -1,9 +1,10 @@
 <script>
   import { db } from '../../../lib/firebase';
-  import { doc, writeBatch, serverTimestamp, updateDoc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
+  import { doc, writeBatch, serverTimestamp, updateDoc, setDoc, deleteDoc, getDoc, deleteField } from 'firebase/firestore';
   import { safeString, getTodayStr } from '../../../lib/utils';
   import { createEventDispatcher } from 'svelte';
   import { currentUser } from '../../../lib/stores';
+  import { accountService } from '../../../services/accountService';
 
   export let show = false;
   export let isSuperAdmin = false;
@@ -18,6 +19,7 @@
   
   let singleName = '';
   let singleGender = 'Nữ';
+  let singleMaNV = '';
   
   let singleBrand = '';
   let singleCategory = '';
@@ -33,6 +35,7 @@
           
           singleName = editUser.name || '';
           singleGender = editUser.gender || 'Nữ';
+          singleMaNV = editUser.maNV || '';
           
           singleBrand = editUser.brand || '';
           singleCategory = editUser.category || '';
@@ -48,6 +51,7 @@
           singleRole = 'staff';
           singleName = '';
           singleGender = 'Nữ';
+          singleMaNV = '';
           singleBrand = '';
           singleCategory = '';
           if (!isSuperAdmin) { selectedStoreIdsForAdmin = [selectedStoreId]; }
@@ -62,9 +66,17 @@
       if (isSuperAdmin) {
           finalStoreIds = targetStoreInput.split(/[,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
           if (finalStoreIds.length === 0) return alert("Chưa nhập Mã Kho!");
+          const badStore = finalStoreIds.find(s => !/^\d+$/.test(s));
+          if (badStore) return alert(`Mã kho chỉ được nhập SỐ! Mã sai: ${badStore}`);
       } else {
           finalStoreIds = selectedStoreIdsForAdmin;
           if (finalStoreIds.length === 0) return alert("Phải chọn ít nhất 1 kho!");
+      }
+
+      const cleanMaNV = String(singleMaNV || '').trim();
+      if (singleRole !== 'pg') {
+          if (!editUser && !cleanMaNV) return alert("Thiếu MSNV!");
+          if (cleanMaNV && !/^\d+$/.test(cleanMaNV)) return alert("MSNV chỉ được nhập SỐ (VD: 12345)!");
       }
 
       const exactUsername = singleUsername.trim();
@@ -72,6 +84,11 @@
       
       isLoading = true;
       try {
+          if (singleRole !== 'pg' && cleanMaNV) {
+              const conflict = await accountService.findMaNVConflict(cleanMaNV, finalStoreIds, editUser ? [editUser.id] : []);
+              if (conflict) return alert(`MSNV ${cleanMaNV} đã được dùng cho tài khoản [${conflict.username}${conflict.name ? ' - ' + conflict.name : ''}] ở kho ${conflict.commonStore}!`);
+          }
+
           if (editUser) {
               // [PHẪU THUẬT LOGIC]: Bắt buộc lấy ID tuyệt đối của object cũ, không tự suy luận lại từ username
               const oldUid = editUser.id; 
@@ -94,10 +111,12 @@
 
               if (singlePass.trim()) updateData.pass = singlePass.trim();
               if (singleRole === 'pg') { updateData.brand = singleBrand.trim(); updateData.category = singleCategory.trim(); }
+              if (singleRole !== 'pg') updateData.maNV = cleanMaNV;
 
               if (newUid !== oldUid) {
                   const fullNewData = { ...editUser, ...updateData };
                   delete fullNewData.id; // [QUAN TRỌNG NHẤT]: Xóa key id để không lưu bóng ma vào Firebase
+                  if (fullNewData.maNV === '') delete fullNewData.maNV;
                   fullNewData.username_idx = newUid;
 
                   const batch = writeBatch(db);
@@ -188,6 +207,7 @@
                   // Cập nhật Document giữ nguyên ID
                   const updatePayload = { ...updateData };
                   delete updatePayload.id; // An toàn trên hết
+                  if (updatePayload.maNV === '') updatePayload.maNV = deleteField();
                   await updateDoc(doc(db, 'users', oldUid), updatePayload);
                   
                   if (isSuperAdmin) {
@@ -217,6 +237,7 @@
               };
 
               if (singleRole === 'pg') { payload.brand = singleBrand.trim(); payload.category = singleCategory.trim(); }
+              if (singleRole !== 'pg' && cleanMaNV) payload.maNV = cleanMaNV;
 
               batch.set(doc(db, 'users', newUid), payload);
               if (isSuperAdmin) { finalStoreIds.forEach(s => { batch.set(doc(db, 'stores', s), { id: s, name: `Kho ${s}`, createdAt: serverTimestamp() }, { merge: true }); }); }
@@ -238,7 +259,7 @@
           {#if isSuperAdmin}
               <div class="mb-4">
                   <label for="store-input" class="text-[10px] font-bold text-slate-400 uppercase">Danh Sách Kho</label>
-                  <input id="store-input" type="text" bind:value={targetStoreInput} class="w-full mt-1 p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-bold text-indigo-700 outline-none uppercase" placeholder="VD: KHO_01, KHO_02">
+                  <input id="store-input" type="text" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" bind:value={targetStoreInput} class="w-full mt-1 p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg text-sm font-bold text-indigo-700 outline-none uppercase" placeholder="VD: 908 hoặc 908, 1234">
               </div>
           {:else}
               <div class="mb-4">
@@ -264,20 +285,26 @@
                   </select>
                </div>
               
-              <div class="grid grid-cols-2 gap-3">
-                  <div class="col-span-2">
+              <div class="grid grid-cols-3 gap-3">
+                  <div class={singleRole === 'pg' ? 'col-span-3' : 'col-span-2'}>
                       <label for="single-user" class="text-[10px] font-bold text-slate-400 uppercase">Tên đăng nhập (Username)</label>
                       <div class="relative mt-1">
                           <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">person</span>
-                          <input id="single-user" type="text" bind:value={singleUsername} class="w-full pl-9 p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500" placeholder="VD: quoc-pana">
+                          <input id="single-user" type="text" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" bind:value={singleUsername} class="w-full pl-9 p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500" placeholder="VD: quoc-pana">
                       </div>
                   </div>
+                  {#if singleRole !== 'pg'}
+                      <div>
+                          <label for="single-manv" class="text-[10px] font-bold text-slate-400 uppercase">MSNV</label>
+                          <input id="single-manv" type="text" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" inputmode="numeric" bind:value={singleMaNV} class="w-full mt-1 p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500" placeholder={editUser && !editUser.maNV ? "Chưa có" : "VD: 12345"}>
+                      </div>
+                  {/if}
               </div>
 
               <div class="grid grid-cols-3 gap-3">
                   <div class="col-span-2">
                       <label for="single-name" class="text-[10px] font-bold text-slate-400 uppercase">Tên hiển thị</label>
-                      <input id="single-name" type="text" bind:value={singleName} class="w-full mt-1 p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500" placeholder="VD: Trần Quốc">
+                      <input id="single-name" type="text" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" bind:value={singleName} class="w-full mt-1 p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500" placeholder="VD: Trần Quốc">
                   </div>
                   <div>
                       <label for="single-gender" class="text-[10px] font-bold text-slate-400 uppercase">Giới tính</label>
@@ -292,7 +319,7 @@
                   <label for="single-pass" class="text-[10px] font-bold text-slate-400 uppercase">Mật khẩu</label>
                   <div class="relative mt-1">
                       <span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">lock</span>
-                      <input id="single-pass" type="text" bind:value={singlePass} class="w-full pl-9 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-gray-500 outline-none focus:border-indigo-500" placeholder={editUser ? "Bỏ trống để giữ nguyên" : "123456"}>
+                      <input id="single-pass" type="text" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" bind:value={singlePass} class="w-full pl-9 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-gray-500 outline-none focus:border-indigo-500" placeholder={editUser ? "Bỏ trống để giữ nguyên" : "123456"}>
                   </div>
               </div>
 
@@ -302,11 +329,11 @@
                       <div class="grid grid-cols-2 gap-3">
                           <div>
                               <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Hãng (Brand)</label>
-                              <input type="text" bind:value={singleBrand} class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-pink-500" placeholder="VD: Oppo">
+                              <input type="text" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" bind:value={singleBrand} class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-pink-500" placeholder="VD: Oppo">
                           </div>
                           <div>
                               <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nhóm (Category)</label>
-                              <input type="text" bind:value={singleCategory} class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-pink-500" placeholder="VD: ICT">
+                              <input type="text" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" bind:value={singleCategory} class="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-pink-500" placeholder="VD: ICT">
                           </div>
                       </div>
                   </div>

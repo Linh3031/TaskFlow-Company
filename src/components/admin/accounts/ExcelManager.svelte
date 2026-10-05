@@ -4,6 +4,7 @@
     import { doc, writeBatch, serverTimestamp } from 'firebase/firestore';
     import { read, utils, writeFile } from 'xlsx';
     import { safeString } from '../../../lib/utils';
+    import { accountService } from '../../../services/accountService';
 
     const dispatch = createEventDispatcher();
 
@@ -20,11 +21,11 @@
     function downloadAccountSample() {
         const wb = utils.book_new();
         const wsData = [
-            ["Username", "Mật_Khẩu", "Tên_Hiển_Thị", "Giới_Tính", "Quyền_Hạn(admin/staff/pg)", "Mã_Kho"], 
-            [`Tam-12234`, "123456", "Nguyễn Tâm", "Nữ", "staff", selectedStoreId||'kho']
+            ["Username", "Mật_Khẩu", "Tên_Hiển_Thị", "MSNV(chỉ số)", "Giới_Tính", "Quyền_Hạn(admin/staff/pg)", "Mã_Kho(chỉ số, VD: 908)"], 
+            [`Tam-12234`, "123456", "Nguyễn Tâm", "12234", "Nữ", "staff", /^\d+$/.test(selectedStoreId) ? selectedStoreId : '908']
         ];
         const ws = utils.aoa_to_sheet(wsData);
-        ws['!cols'] = [{wch: 15}, {wch: 10}, {wch: 25}, {wch: 10}, {wch: 25}, {wch: 15}];
+        ws['!cols'] = [{wch: 15}, {wch: 10}, {wch: 25}, {wch: 14}, {wch: 10}, {wch: 25}, {wch: 24}];
         utils.book_append_sheet(wb, ws, "Mau_Moi");
         writeFile(wb, `Mau_Tai_Khoan_${selectedStoreId}.xlsx`);
     }
@@ -32,17 +33,17 @@
     function downloadCurrentAccounts() {
         const wb = utils.book_new();
         const wsData = [
-            ["Username", "Mật_Khẩu", "Tên_Hiển_Thị", "Giới_Tính", "Quyền_Hạn(admin/staff/pg)", "Mã_Kho"]
+            ["Username", "Mật_Khẩu", "Tên_Hiển_Thị", "MSNV(chỉ số)", "Giới_Tính", "Quyền_Hạn(admin/staff/pg)", "Mã_Kho(chỉ số, VD: 908)"]
         ];
         accountList.forEach(acc => {
             if (acc.role === 'pg') return; 
             let displayName = acc.name || '';
             let gender = acc.gender || '';
             let stores = acc.storeIds ? acc.storeIds.join(', ') : (acc.storeId || selectedStoreId);
-            wsData.push([ acc.username, "*** (Giữ nguyên)", displayName, gender, acc.role, stores ]);
+            wsData.push([ acc.username, "*** (Giữ nguyên)", displayName, acc.maNV || '', gender, acc.role, stores ]);
         });
         const ws = utils.aoa_to_sheet(wsData);
-        ws['!cols'] = [{wch: 15}, {wch: 18}, {wch: 25}, {wch: 10}, {wch: 25}, {wch: 15}];
+        ws['!cols'] = [{wch: 15}, {wch: 18}, {wch: 25}, {wch: 14}, {wch: 10}, {wch: 25}, {wch: 24}];
         utils.book_append_sheet(wb, ws, "DS_Hien_Tai");
         writeFile(wb, `Cap_Nhat_Nhan_Su_${selectedStoreId}.xlsx`);
     }
@@ -77,8 +78,9 @@
                 const batch = writeBatch(db);
                 
                 let c = 0;
+                const pending = [];
                 json.forEach((row, index) => {
-                    let u = '', p = '', n = '', g = '', s = '', r = '';
+                    let u = '', p = '', n = '', g = '', s = '', r = '', m = '';
                     Object.keys(row).forEach(key => {
                         const k = key.normalize('NFC').toLowerCase().replace(/\s+/g, '_');
                         if (k.includes('user') || k.includes('tai_khoan')) u = row[key];
@@ -87,6 +89,7 @@
                         if (k.includes('gender') || k.includes('gioi_tinh') || k.includes('giới_tính')) g = row[key];
                         if (k.includes('kho') || k.includes('store')) s = row[key];
                         if (k.includes('role') || k.includes('quyen') || k.includes('quyền') || k.includes('quyen_han')) r = row[key];
+                        if (k.includes('msnv') || k.includes('ma_nv') || k.includes('mã_nv')) m = row[key];
                     });
                     if (u && s) {
                         const uid = safeString(u).toLowerCase();
@@ -103,11 +106,58 @@
                         if (passStr && passStr !== '*** (Giữ nguyên)' && passStr !== '***') { updatePayload.pass = passStr; }
                         if (n && String(n).trim() !== '') { updatePayload.name = String(n).trim(); }
                         if (g && String(g).trim() !== '') { updatePayload.gender = String(g).toLowerCase().includes('nam') ? 'Nam' : 'Nữ'; }
+                        const maNVStr = String(m).trim();
+                        if (maNVStr !== '') { updatePayload.maNV = maNVStr; }
 
-                        batch.set(doc(db, 'users', uid), updatePayload, { merge: true });
-                        if (activeSuperAdmin) { storeArray.forEach(k => { batch.set(doc(db, 'stores', k), { id: k, name: `Kho ${k}` }, { merge: true }); }); }
-                        c++;
+                        pending.push({ rowNum: index + 2, uid, storeArray, maNV: maNVStr, payload: updatePayload });
                     }
+                });
+
+                // Kiểm tra toàn bộ file trước khi ghi: có lỗi là không ghi gì
+                const errors = [];
+                pending.forEach(item => {
+                    item.storeArray.forEach(k => { if (!/^\d+$/.test(k)) errors.push(`Dòng ${item.rowNum}: Mã kho "${k}" chỉ được nhập số`); });
+                    if (item.maNV && !/^\d+$/.test(item.maNV)) errors.push(`Dòng ${item.rowNum}: MSNV "${item.maNV}" chỉ được nhập số`);
+                });
+
+                const rowsWithMaNV = pending.filter(item => /^\d+$/.test(item.maNV));
+                rowsWithMaNV.forEach((item, i) => {
+                    const prev = rowsWithMaNV.slice(0, i).find(o => o.maNV === item.maNV && o.uid !== item.uid && o.storeArray.some(k => item.storeArray.includes(k)));
+                    if (prev) {
+                        const common = prev.storeArray.find(k => item.storeArray.includes(k));
+                        errors.push(`Dòng ${item.rowNum}: MSNV ${item.maNV} trùng với dòng ${prev.rowNum} (cùng kho ${common})`);
+                    }
+                });
+
+                if (rowsWithMaNV.length > 0) {
+                    const existing = await accountService.getAccountsByMaNVs(rowsWithMaNV.map(item => item.maNV));
+                    rowsWithMaNV.forEach(item => {
+                        for (const acc of existing) {
+                            if (acc.maNV !== item.maNV) continue;
+                            if (acc.id === item.uid || acc.username_idx === item.uid) continue;
+                            // Tài khoản này cũng có trong file: nếu file ghi MSNV mới thì đã xét ở bước trùng trong file
+                            const inFile = pending.find(x => x.uid === acc.id || x.uid === acc.username_idx);
+                            if (inFile && inFile.maNV) continue;
+                            const accStores = inFile ? inFile.storeArray : (acc.storeIds || (acc.storeId ? [acc.storeId] : [])).map(k => String(k).trim().toUpperCase());
+                            const common = accStores.find(k => item.storeArray.includes(k));
+                            if (common) {
+                                errors.push(`Dòng ${item.rowNum}: MSNV ${item.maNV} đã thuộc tài khoản [${acc.username}] ở kho ${common}`);
+                                break;
+                            }
+                        }
+                    });
+                }
+
+                if (errors.length > 0) {
+                    const more = errors.length > 15 ? `\n...và ${errors.length - 15} lỗi khác` : '';
+                    alert(`Không nạp file vì có ${errors.length} lỗi:\n${errors.slice(0, 15).join('\n')}${more}\nSửa file rồi nạp lại.`);
+                    return;
+                }
+
+                pending.forEach(item => {
+                    batch.set(doc(db, 'users', item.uid), item.payload, { merge: true });
+                    if (activeSuperAdmin) { item.storeArray.forEach(k => { batch.set(doc(db, 'stores', k), { id: k, name: `Kho ${k}` }, { merge: true }); }); }
+                    c++;
                 });
                 if (c > 0) { 
                     await batch.commit();

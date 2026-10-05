@@ -5,6 +5,7 @@
   import { collection, getDocs, query, where, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
   import { setUser, DEFAULT_TEMPLATE } from '../lib/stores.js';
   import { safeString, getTodayStr } from '../lib/utils.js';
+  import { accountService } from '../services/accountService';
   
   // --- STATE ĐĂNG NHẬP ---
   let username = '';
@@ -19,6 +20,7 @@
   let regPassword = '';
   let regName = '';
   let regStoreId = '';
+  let regMaNV = '';
   let regRole = 'staff';
 
   let errorMsg = '';
@@ -163,8 +165,9 @@
       const cleanP = safeString(regPassword).trim();
       const cleanStore = String(regStoreId).trim();
       const cleanName = String(regName).trim();
+      const cleanMaNV = String(regMaNV).trim();
 
-      if (!cleanU || !cleanP || !cleanStore || !cleanName) {
+      if (!cleanU || !cleanP || !cleanStore || !cleanName || !cleanMaNV) {
           errorMsg = 'Vui lòng điền đầy đủ thông tin!';
           isLoading = false; return;
       }
@@ -175,12 +178,24 @@
           isLoading = false; return;
       }
 
+      if (!/^\d+$/.test(cleanMaNV)) {
+          errorMsg = 'MSNV chỉ được phép nhập SỐ!';
+          isLoading = false; return;
+      }
+
       try {
           // 1. Kiểm tra tài khoản đã tồn tại chưa
           const qUser = query(collection(db, 'users'), where('username_idx', '==', cleanU));
           const snapUser = await getDocs(qUser);
           if (!snapUser.empty) {
               errorMsg = 'Tên đăng nhập này đã có người sử dụng!';
+              isLoading = false; return;
+          }
+
+          // Kiểm tra trùng MSNV trong cùng kho
+          const conflict = await accountService.findMaNVConflict(cleanMaNV, [cleanStore]);
+          if (conflict) {
+              errorMsg = `MSNV ${cleanMaNV} đã có tài khoản ở kho ${cleanStore}. Vui lòng kiểm tra lại hoặc liên hệ Quản lý!`;
               isLoading = false; return;
           }
 
@@ -203,6 +218,7 @@
               username_idx: cleanU,
               pass: cleanP,
               name: cleanName,
+              maNV: cleanMaNV,
               role: regRole,
               storeId: cleanStore,
               storeIds: [cleanStore],
@@ -290,6 +306,11 @@
             <div class="input-wrapper">
                 <span class="material-icons-round input-icon" aria-hidden="true">storefront</span>
                 <input class="input-field" type="text" bind:value={regStoreId} placeholder="Mã Kho (Chỉ ghi số, VD: 908)" required>
+            </div>
+
+            <div class="input-wrapper">
+                <span class="material-icons-round input-icon" aria-hidden="true">pin</span>
+                <input class="input-field" type="text" inputmode="numeric" bind:value={regMaNV} placeholder="Mã số nhân viên (Chỉ ghi số, VD: 12345)" required>
             </div>
 
             <div class="input-wrapper">

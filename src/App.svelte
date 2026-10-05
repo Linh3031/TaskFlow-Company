@@ -3,7 +3,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { db } from './lib/firebase';
   import { collection, onSnapshot, query, where, doc, updateDoc, arrayUnion, writeBatch, serverTimestamp, getDocs } from 'firebase/firestore';
-  import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList, activeStoreId } from './lib/stores.js';
+  import { currentUser, currentTasks, taskTemplate, DEFAULT_TEMPLATE, storeList, activeStoreId, refreshCurrentUser } from './lib/stores.js';
   import { getTodayStr, getCurrentTimeShort } from './lib/utils.js';
   import Login from './components/Login.svelte';
   import Header from './components/Header.svelte';
@@ -98,7 +98,15 @@
       isTasksLoaded = false; 
   }
 
+  // Quay lại app từ nền thì tải lại hồ sơ (giới hạn 10 phút nằm trong refreshCurrentUser)
+  function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') refreshCurrentUser();
+  }
+
   onMount(async () => {
+    refreshCurrentUser(true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     const cachedStores = localStorage.getItem('taskflow_stores_list');
     if (cachedStores) {
         storeList.set(JSON.parse(cachedStores));
@@ -123,7 +131,7 @@
     if ($currentUser && !localStorage.getItem(tourKey)) showTour = true;
   });
 
-  onDestroy(() => { unsubTemplate(); unsubTasks(); unsubHandover(); });
+  onDestroy(() => { unsubTemplate(); unsubTasks(); unsubHandover(); document.removeEventListener('visibilitychange', handleVisibilityChange); });
 
   $: if ($currentUser && !$activeStoreId) {
       if ($currentUser.storeIds && $currentUser.storeIds.length > 0) {

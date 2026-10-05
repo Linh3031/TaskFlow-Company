@@ -247,7 +247,7 @@
       
       <AccountControlBar bind:roleTab bind:searchQuery />
 
-      <AccountTable {filteredAccounts} {activeSuperAdmin} 
+      <AccountTable {filteredAccounts} {activeSuperAdmin} {isDemoMode} 
           on:edit={(e) => { userToEdit = e.detail; showAddUserModal = true; }} 
           on:resetPass={(e) => resetPassword(e.detail)} 
           on:delete={(e) => deleteAccount(e.detail)} 
