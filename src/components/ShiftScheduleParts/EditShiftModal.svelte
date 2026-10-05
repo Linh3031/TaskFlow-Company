@@ -52,6 +52,7 @@
     let searchSwap = '';
     let swapTarget = null;
     let swapNotFound = false;
+    let swapBackupA = null;
 
     $: filteredSwapCandidates = staffList.filter(s => s.id !== editingShift.staffId && s.name.toLowerCase().includes(searchSwap.toLowerCase()));
 
@@ -64,21 +65,34 @@
     function selectSwapTarget(s) {
         const assign = dayAssignments.find(a => a.staffId === s.id);
         if (!assign) { swapNotFound = true; return; }
+        // [ĐỔI CA 1-1]: Chọn người đổi là đảo sẵn ca + vai trò của 2 bên, bấm Lưu là đổi luôn (vẫn sửa tay được)
+        swapBackupA = { shift: editingShift.shift, role: editingShift.role, isOFF: editingShift.isOFF };
         swapTarget = {
             staffId: s.id,
             name: s.name,
-            shift: assign.shift,
-            role: assign.role || 'TV',
-            isOFF: assign.shift === 'OFF',
+            shift: editingShift.isOFF ? 'OFF' : editingShift.shift,
+            role: editingShift.role || 'TV',
+            isOFF: editingShift.isOFF,
             originalShift: assign.shift,
             originalRole: assign.role || 'TV'
         };
+        editingShift.shift = assign.shift;
+        editingShift.role = assign.role || 'TV';
+        editingShift.isOFF = assign.shift === 'OFF';
         showSwapSearch = false;
         searchSwap = '';
         swapNotFound = false;
     }
 
-    function clearSwapTarget() { swapTarget = null; }
+    function clearSwapTarget() {
+        if (swapBackupA) {
+            editingShift.shift = swapBackupA.shift;
+            editingShift.role = swapBackupA.role;
+            editingShift.isOFF = swapBackupA.isOFF;
+            swapBackupA = null;
+        }
+        swapTarget = null;
+    }
 
     function selectQuickShiftA(value) {
         if (value === 'CUSTOM') { editingShift.isOFF = false; if (QUICK_SHIFTS.includes(editingShift.shift)) editingShift.shift = ''; }
