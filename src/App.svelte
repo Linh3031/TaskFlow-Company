@@ -322,6 +322,7 @@
       </nav>
 
       <div id="main-content" class="content-area">
+        {#if activeTab !== 'sknv'}
         <div class="section-header theme-{activeTab} flex flex-col gap-2 items-start sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center justify-between w-full sm:w-auto">
               <h3>
@@ -330,7 +331,6 @@
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
-                    {#if activeTab==='sknv'}⚕️ Sức Khỏe Nhân Viên{/if}
                     {#if activeTab==='8nttt'}📋 Kiểm tra 8NTTT{/if}
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                     {#if activeTab==='handover'}🤝 Bàn Giao{/if}
@@ -358,6 +358,7 @@
              </div>
           {/if}
         </div>
+        {/if}
 
         {#if activeTab === 'installment'} <InstallmentCalc /> 
         {:else if activeTab === 'schedule'} <ShiftSchedule {activeTab} /> 

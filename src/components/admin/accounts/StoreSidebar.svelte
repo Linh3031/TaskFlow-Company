@@ -9,6 +9,14 @@
     let storeSearchQuery = '';
     let sortField = 'id'; // 'id' hoặc 'count'
     let sortAsc = true;
+    let checkedStoreIds = [];
+
+    // Bỏ các mã kho không còn trong danh sách (sau khi xóa / tải lại)
+    $: checkedStoreIds = checkedStoreIds.filter(id => storeList.some(s => s.id === id));
+
+    function toggleCheck(id) {
+        checkedStoreIds = checkedStoreIds.includes(id) ? checkedStoreIds.filter(x => x !== id) : [...checkedStoreIds, id];
+    }
 
     function toggleSort(field) {
         if (sortField === field) sortAsc = !sortAsc;
@@ -46,11 +54,24 @@
                 Số lượng {sortField==='count'?(sortAsc?'▲':'▼'):''}
             </button>
         </div>
+        {#if checkedStoreIds.length > 0}
+            <div class="flex gap-1 mt-2">
+                <button class="flex-1 bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold py-1.5 rounded flex items-center justify-center gap-1 shadow-sm" on:click={() => dispatch('deleteStores', checkedStoreIds)}>
+                    <span class="material-icons-round text-[14px]">delete_forever</span> Xóa {checkedStoreIds.length} kho đã chọn
+                </button>
+                <button class="bg-white border border-slate-200 text-[10px] font-bold px-2 py-1.5 rounded text-slate-500 hover:bg-slate-100" on:click={() => checkedStoreIds = []}>Bỏ chọn</button>
+            </div>
+        {/if}
     </div>
     <div class="flex-1 overflow-y-auto p-2 space-y-1">
         {#each filteredStores as store}
             <button class="w-full text-left px-3 py-2 rounded-lg text-sm font-bold transition-all flex justify-between items-center group {selectedStoreId === store.id ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}" on:click={() => dispatch('select', store.id)}>
-                <span>{store.id}</span>
+                <span class="flex items-center gap-1.5 min-w-0">
+                    <div class="w-5 h-5 shrink-0 flex items-center justify-center" title="Chọn kho" on:click|stopPropagation={() => toggleCheck(store.id)}>
+                        <span class="material-icons-round text-[18px] {checkedStoreIds.includes(store.id) ? (selectedStoreId === store.id ? 'text-white' : 'text-red-500') : (selectedStoreId === store.id ? 'text-indigo-200' : 'text-slate-300')}">{checkedStoreIds.includes(store.id) ? 'check_box' : 'check_box_outline_blank'}</span>
+                    </div>
+                    <span class="truncate">{store.id}</span>
+                </span>
                 <div class="flex items-center gap-1.5">
                     <span class="text-[10px] px-1.5 py-0.5 rounded shadow-sm {selectedStoreId === store.id ? 'bg-indigo-500 text-white' : 'bg-white border border-slate-200 text-slate-500 group-hover:bg-slate-200'}">{storeCountMap[store.id] || 0}</span>
                     <div class="w-5 h-5 rounded hover:bg-red-500 hover:text-white flex items-center justify-center {selectedStoreId === store.id ? 'text-indigo-200' : 'text-transparent group-hover:text-slate-400'} transition-colors" title="Xóa toàn bộ kho và nhân sự" on:click|stopPropagation={() => dispatch('deleteStore', store.id)}>

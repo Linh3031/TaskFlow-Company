@@ -82,7 +82,7 @@
                 <span class="material-icons-round text-lg mb-0.5">lock_clock</span>
                 <span class="text-[7px] font-bold uppercase text-center leading-tight px-1">Đã Khóa</span>
             </div>
-        {:else}
+        {:else if isAdmin}
             <label class="w-14 h-14 sm:w-16 sm:h-16 border-2 border-dashed border-orange-300 rounded-lg flex flex-col items-center justify-center text-orange-500 cursor-pointer hover:bg-orange-50 transition-colors bg-orange-50/30 relative shadow-inner {uploadingId === item.id ? 'pointer-events-none opacity-50' : ''}">
                 <input type="file" multiple accept="image/*" class="absolute w-0 h-0 opacity-0" on:change={(e) => dispatch('upload', { event: e, itemId: item.id })} disabled={uploadingId === item.id}>
                 {#if uploadingId === item.id}
@@ -92,6 +92,16 @@
                     <span class="text-[8px] font-bold uppercase tracking-tighter text-orange-500 leading-none">Thêm</span>
                 {/if}
             </label>
+        {:else}
+            <!-- Nhân viên: bắt buộc chụp thực tế bằng camera trong app -->
+            <button class="w-14 h-14 sm:w-16 sm:h-16 border-2 border-dashed border-orange-300 rounded-lg flex flex-col items-center justify-center text-orange-500 cursor-pointer hover:bg-orange-50 transition-colors bg-orange-50/30 relative shadow-inner {uploadingId === item.id ? 'pointer-events-none opacity-50' : ''}" on:click={() => dispatch('openCamera', { itemId: item.id })} disabled={uploadingId === item.id}>
+                {#if uploadingId === item.id}
+                    <span class="material-icons-round text-lg animate-spin">sync</span>
+                {:else}
+                    <span class="material-icons-round text-lg mb-0.5">photo_camera</span>
+                    <span class="text-[8px] font-bold uppercase tracking-tighter text-orange-500 leading-none">Chụp</span>
+                {/if}
+            </button>
         {/if}
     {/if}
 </div>

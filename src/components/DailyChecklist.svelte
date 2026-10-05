@@ -14,6 +14,7 @@
     import ChecklistItem from './DailyChecklistParts/ChecklistItem.svelte';
     import AreaAdminModal from './DailyChecklistParts/AreaAdminModal.svelte';
     import LightboxModal from './DailyChecklistParts/LightboxModal.svelte';
+    import CameraCaptureModal from './DailyChecklistParts/CameraCaptureModal.svelte';
     import ChecklistStatsModal from './DailyChecklistParts/ChecklistStatsModal.svelte';
 
     export let activeStoreId;
@@ -39,6 +40,11 @@
     let showLightbox = false;
     let lightboxImages = [];
     let lightboxIndex = 0;
+
+    let showCamera = false;
+    let cameraItemId = null;
+    $: cameraItem = checklistData.find(i => i.id === cameraItemId);
+    $: cameraRequiredShots = Math.max(4 - ((cameraItem && cameraItem.imageUrls) ? cameraItem.imageUrls.length : 0), 0);
     
     let showStatsModal = false;
     let statsData = { matrix: [], days: [], month: '' };
@@ -229,6 +235,22 @@
         }
     }
 
+    function openCamera(event) { cameraItemId = event.detail.itemId; showCamera = true; }
+
+    async function handleCameraConfirm(event) {
+        const shots = event.detail.shots || [];
+        const itemId = cameraItemId;
+        showCamera = false;
+        if (!itemId || shots.length === 0) return;
+
+        uploadingId = itemId;
+        try {
+            const currentUserUsername = $currentUser.username || 'unknown';
+            await processAndUploadImages(shots.slice(0, cameraRequiredShots), activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId);
+        } catch (error) { alert("Lỗi tải ảnh lên: " + error.message); } 
+        finally { uploadingId = null; }
+    }
+
     function openLightbox(event) { lightboxImages = event.detail.images; lightboxIndex = event.detail.index; showLightbox = true; }
     
     // [PHẪU THUẬT LOGIC]: Hủy lắng nghe 2 đường để dọn rác bộ nhớ
@@ -295,6 +317,7 @@
                         on:edit={openAdminModal} 
                         on:delete={deleteArea} 
                         on:upload={handleUploadImage} 
+                        on:openCamera={openCamera}
                         on:openLightbox={openLightbox} 
                     />
                 </div>
@@ -302,6 +325,8 @@
         {/if}
     </div>
 </div>
+
+<CameraCaptureModal show={showCamera} requiredShots={cameraRequiredShots} areaName={cameraItem ? cameraItem.areaName : ''} on:close={() => showCamera = false} on:confirm={handleCameraConfirm} />
 
 <LightboxModal show={showLightbox} images={lightboxImages} currentIndex={lightboxIndex} on:close={() => showLightbox = false} on:updateIndex={(e) => lightboxIndex = e.detail} />
 

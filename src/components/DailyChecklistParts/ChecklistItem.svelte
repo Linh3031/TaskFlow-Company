@@ -143,7 +143,8 @@
         {isAllOff}
         {isAdmin}
         {dateStr}
-        on:upload 
-        on:openLightbox 
+        on:upload
+        on:openCamera
+        on:openLightbox
     />
 </div>

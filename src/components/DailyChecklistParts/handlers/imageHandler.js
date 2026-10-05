@@ -3,7 +3,7 @@ import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db, storage } from '../../../lib/firebase.js';
 import { getCurrentTimeShort } from '../../../lib/utils.js';
 
-export function compressImage(file, maxEdge = 800, quality = 0.5) {
+export function compressImage(file, maxEdge = 800, quality = 0.5, stampText = '') {
     return new Promise((resolve, reject) => {
         const reader = new FileReader(); 
         reader.readAsDataURL(file);
@@ -25,6 +25,17 @@ export function compressImage(file, maxEdge = 800, quality = 0.5) {
                 ctx.fillStyle = '#FFFFFF'; 
                 ctx.fillRect(0, 0, width, height); 
                 ctx.drawImage(img, 0, 0, width, height);
+                if (stampText) {
+                    // In thời gian chụp + người chụp lên góc dưới ảnh
+                    const fontSize = Math.max(14, Math.round(width / 32));
+                    const pad = Math.round(fontSize / 2);
+                    ctx.font = `bold ${fontSize}px sans-serif`;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+                    ctx.fillRect(0, height - fontSize - pad * 2, width, fontSize + pad * 2);
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(stampText, pad, height - pad, width - pad * 2);
+                }
                 canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
             };
             img.onerror = (err) => reject(err);
@@ -35,14 +46,22 @@ export function compressImage(file, maxEdge = 800, quality = 0.5) {
 
 export async function processAndUploadImages(filesToProcess, activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId) {
     // 1. Nén và Tải ảnh lên Storage
-    const uploadPromises = filesToProcess.map(async (file) => {
-        const compressedBlob = await compressImage(file);
+    // Ảnh chụp từ camera trong app có dạng { blob, capturedAt }; ảnh admin tải từ máy là File
+    const uploadPromises = filesToProcess.map(async (entry) => {
+        const source = entry.blob || entry;
+        const capturedAt = entry.capturedAt || null;
+        const stampText = capturedAt ? `${capturedAt.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric', hour12: false })} · ${currentUserUsername}` : '';
+        const compressedBlob = await compressImage(source, 800, 0.5, stampText);
         const fileName = `8nttt_${activeStoreId}_${dateStr}_${itemId}_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
         const imageRef = ref(storage, `8nttt_images/${activeStoreId}/${dateStr}/${fileName}`);
-        await uploadBytes(imageRef, compressedBlob);
-        return await getDownloadURL(imageRef);
+        const uploadResult = await uploadBytes(imageRef, compressedBlob);
+        const url = await getDownloadURL(imageRef);
+        // uploadedAt lấy giờ server của Storage để đối chiếu với giờ máy lúc chụp
+        return { url, time: { capturedAt: capturedAt ? capturedAt.toISOString() : null, uploadedAt: uploadResult?.metadata?.timeCreated || null, by: currentUserUsername } };
     });
-    const newUploadedUrls = await Promise.all(uploadPromises);
+    const uploadedResults = await Promise.all(uploadPromises);
+    const newUploadedUrls = uploadedResults.map(r => r.url);
+    const newImageTimes = uploadedResults.map(r => r.time);
     const newUploaders = newUploadedUrls.map(() => currentUserUsername);
 
     // 2. Định tuyến DB
@@ -62,11 +81,15 @@ export async function processAndUploadImages(filesToProcess, activeStoreId, date
             if (i.id === itemId) {
                 const mergedUrls = [...(i.imageUrls || []), ...newUploadedUrls];
                 const mergedUploaders = [...(i.uploaders || []), ...newUploaders];
+                // Căn imageTimes theo đúng vị trí imageUrls (ảnh cũ chưa có thông tin giờ thì để null)
+                const oldTimes = i.imageTimes || [];
+                const mergedTimes = [...(i.imageUrls || []).map((_, idx) => oldTimes[idx] || null), ...newImageTimes];
                 const isNowCompleted = mergedUrls.length >= 4;
                 return { 
                     ...i, 
                     imageUrls: mergedUrls, 
                     uploaders: mergedUploaders, 
+                    imageTimes: mergedTimes, 
                     completed: isNowCompleted, 
                     completedBy: isNowCompleted ? currentUserUsername : i.completedBy, 
                     completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt 

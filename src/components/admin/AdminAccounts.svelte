@@ -191,6 +191,43 @@
       isLoading = false;
   }
 
+  async function handleDeleteStores(storeIds) {
+      if (checkDemoAndBlock() || !storeIds || storeIds.length === 0) return;
+
+      isLoading = true;
+      let usersToDelete = [];
+      try {
+          const userMap = {};
+          for (const sid of storeIds) {
+              const snap = await getDocs(query(collection(db, 'users'), where('storeIds', 'array-contains', sid)));
+              snap.docs.forEach(d => { userMap[d.id] = { ...d.data(), id: d.id }; });
+          }
+          usersToDelete = Object.values(userMap);
+      } catch(e) {
+          alert("Lỗi quét dữ liệu: " + e.message); isLoading = false; return;
+      }
+      isLoading = false;
+
+      if (!confirm(`⚠️ CẢNH BÁO ĐỎ: BẠN ĐANG XÓA ${storeIds.length} MÃ KHO:\n[${storeIds.join(', ')}]\n\nHành động này sẽ XÓA VĨNH VIỄN các mã kho trên và TOÀN BỘ ${usersToDelete.length} NHÂN SỰ trực thuộc khỏi hệ thống.\n\nKhông thể khôi phục. Bạn có chắc chắn muốn tiếp tục?`)) return;
+
+      isLoading = true;
+      try {
+          for (const u of usersToDelete) {
+              await deleteAccount(u.id, true);
+          }
+          for (const sid of storeIds) {
+              await deleteDoc(doc(db, 'stores', sid));
+          }
+
+          alert(`✅ Đã xóa thành công ${storeIds.length} kho và ${usersToDelete.length} tài khoản.`);
+          await fetchAllStores();
+          if (storeIds.includes(selectedStoreId)) setSystemMode('ALL');
+      } catch(e) {
+          alert("Lỗi quá trình xóa: " + e.message);
+      }
+      isLoading = false;
+  }
+
   async function changeRole(uid, newRole) {
       if (checkDemoAndBlock() || !confirm(`Đổi quyền tài khoản ${uid} thành ${newRole}?`)) return;
       await accountService.changeRole(uid, newRole);
@@ -208,7 +245,7 @@
 <div class="h-full flex flex-col md:flex-row gap-4 animate-fadeIn overflow-hidden" style="height: calc(100vh - 140px);">
   
   {#if activeSuperAdmin && systemMode === 'STORE'}
-      <StoreSidebar {storeList} {selectedStoreId} {storeCountMap} on:select={(e) => selectStore(e.detail)} on:deleteStore={(e) => handleDeleteStore(e.detail)} />
+      <StoreSidebar {storeList} {selectedStoreId} {storeCountMap} on:select={(e) => selectStore(e.detail)} on:deleteStore={(e) => handleDeleteStore(e.detail)} on:deleteStores={(e) => handleDeleteStores(e.detail)} />
   {/if}
 
   <div class="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden relative">
