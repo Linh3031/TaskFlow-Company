@@ -79,7 +79,7 @@
 
       changePassLoading = true;
       try {
-          await updateDoc(doc(db, 'users', $currentUser.username), { pass: newPass });
+          await updateDoc(doc(db, 'users', $currentUser.username_idx || String($currentUser.username).toLowerCase()), { pass: newPass });
           const updatedUser = { ...$currentUser, pass: newPass };
           setUser(updatedUser);
           alert("✅ Đổi mật khẩu thành công!");
