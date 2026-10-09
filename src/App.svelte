@@ -18,7 +18,7 @@
   import SknvDashboard from './components/SknvDashboard.svelte';
   import GroupTaskList from './components/GroupTaskList.svelte';
 
-  const APP_VERSION = 44; 
+  const APP_VERSION = 45; 
   let showUpdatePrompt = false;
 
   $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {
@@ -99,14 +99,14 @@
     const cachedStores = localStorage.getItem('taskflow_stores_list');
     if (cachedStores) {
         storeList.set(JSON.parse(cachedStores));
-    } else {
-        try {
-            const snap = await getDocs(collection(db, 'stores'));
-            const stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
-            storeList.set(stores);
-            localStorage.setItem('taskflow_stores_list', JSON.stringify(stores));
-        } catch (e) { console.error("Lỗi tải danh sách cửa hàng", e); }
     }
+    // Luôn tải lại từ server để kho mới tạo hiện ra (cache chỉ để hiển thị nhanh)
+    try {
+        const snap = await getDocs(collection(db, 'stores'));
+        const stores = snap.docs.map(d => ({id:d.id, ...d.data()}));
+        storeList.set(stores);
+        localStorage.setItem('taskflow_stores_list', JSON.stringify(stores));
+    } catch (e) { console.error("Lỗi tải danh sách cửa hàng", e); }
 
     onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
         if (docSnap.exists()) {

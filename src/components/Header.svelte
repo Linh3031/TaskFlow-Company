@@ -98,6 +98,27 @@
   
   function handleWindowClick(event) {
       if (showNotifDropdown && notifContainer && !notifContainer.contains(event.target)) showNotifDropdown = false;
+      if (showStoreDropdown && storeBox && !storeBox.contains(event.target)) { showStoreDropdown = false; storeQuery = ''; }
+  }
+
+  // --- LOGIC CHỌN KHO (SUPER ADMIN, GÕ ĐỂ TÌM) ---
+  let storeQuery = '';
+  let showStoreDropdown = false;
+  let storeBox;
+
+  // Gộp kho trong hệ thống + kho được gán cho chính user, bỏ trùng
+  $: allStoreIds = [...new Set(['908', ...$storeList.map(s => String(s.id)), ...($currentUser?.storeIds || []).map(String)])];
+  $: filteredStoreIds = allStoreIds.filter(id => id.toLowerCase().includes(storeQuery.trim().toLowerCase()));
+
+  function pickStore(id) {
+      $activeStoreId = id;
+      storeQuery = '';
+      showStoreDropdown = false;
+  }
+
+  function handleStoreKeydown(e) {
+      if (e.key === 'Enter' && filteredStoreIds.length > 0) pickStore(filteredStoreIds[0]);
+      else if (e.key === 'Escape') { showStoreDropdown = false; storeQuery = ''; }
   }
 
   function forwardJump(event) {
@@ -156,14 +177,31 @@
   <div class="flex items-center gap-2 relative">
     
     {#if $currentUser?.role === 'super_admin'}
-        <div id="store-selector-tour" class="relative mr-1">
-            <select bind:value={$activeStoreId} class="appearance-none bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold py-1.5 pl-3 pr-7 rounded-lg text-sm outline-none cursor-pointer shadow-sm">
-                <option value="908">Kho 908</option>
-                {#each $storeList as s}
-                    {#if s.id !== '908'} <option value={s.id}>{s.id}</option> {/if}
-                {/each}
-            </select>
-            <span class="material-icons-round absolute right-1.5 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">expand_more</span>
+        <div id="store-selector-tour" class="relative mr-1" bind:this={storeBox}>
+            <input
+                type="text"
+                inputmode="numeric"
+                bind:value={storeQuery}
+                on:focus={() => showStoreDropdown = true}
+                on:input={() => showStoreDropdown = true}
+                on:keydown={handleStoreKeydown}
+                placeholder={$activeStoreId === '908' ? 'Kho 908' : $activeStoreId}
+                class="w-24 bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold py-1.5 pl-3 pr-7 rounded-lg text-sm outline-none cursor-pointer shadow-sm placeholder:text-indigo-700 focus:placeholder:text-indigo-300"
+            />
+            <span class="material-icons-round absolute right-1.5 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">{showStoreDropdown ? 'search' : 'expand_more'}</span>
+            {#if showStoreDropdown}
+                <div class="absolute right-0 top-full mt-1 w-32 max-h-60 overflow-y-auto overflow-x-hidden bg-white border border-indigo-100 rounded-lg shadow-lg z-50">
+                    {#each filteredStoreIds as id (id)}
+                        <button
+                            type="button"
+                            on:click={() => pickStore(id)}
+                            class="w-full text-left px-3 py-1.5 text-sm truncate hover:bg-indigo-50 {id === $activeStoreId ? 'text-indigo-700 font-bold bg-indigo-50' : 'text-slate-700'}"
+                        >{id === '908' ? 'Kho 908' : id}</button>
+                    {:else}
+                        <div class="px-3 py-2 text-xs text-slate-400">Không tìm thấy kho</div>
+                    {/each}
+                </div>
+            {/if}
         </div>
     {:else if ($currentUser?.storeIds || []).length > 1}
         <div id="store-selector-tour" class="relative mr-1">

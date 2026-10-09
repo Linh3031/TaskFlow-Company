@@ -51,7 +51,7 @@
     function downloadCurrentPGs() {
         const wb = utils.book_new();
         const wsData = [
-            ["username", "pass", "name", "gender", "brand", "category", "ma_kho"]
+            ["Tên đăng nhập", "Mật khẩu", "Tên hiển thị", "Giới tính", "Hãng", "Ngành hàng", "Mã kho"]
         ];
         accountList.forEach(acc => {
             if (acc.role !== 'pg') return; 
@@ -172,7 +172,7 @@
     function downloadPGSample() {
         const wb = utils.book_new();
         const wsData = [
-            ["username", "pass", "name", "gender", "brand", "category", "ma_kho"], 
+            ["Tên đăng nhập", "Mật khẩu", "Tên hiển thị", "Giới tính", "Hãng", "Ngành hàng", "Mã kho"], 
             [`Nghĩa-Oppo`, "123456", "Nguyễn Trọng Nghĩa", "Nam", "Oppo", "ICT", selectedStoreId||'kho']
         ];
         const ws = utils.aoa_to_sheet(wsData);
@@ -197,13 +197,13 @@
                     let u = '', p = '', n = '', g = '', s = '', brand = '', category = '';
                     Object.keys(row).forEach(key => {
                         const k = key.normalize('NFC').toLowerCase().replace(/\s+/g, '_');
-                        if (k.includes('user') || k.includes('tai_khoan')) u = row[key];
+                        if (k.includes('user') || k.includes('tai_khoan') || k.includes('đăng_nhập')) u = row[key];
                         if (k.includes('pass') || k.includes('mat_khau') || k.includes('mật_khẩu')) p = row[key];
                         if (k.includes('name') || k.includes('hien_thi') || k.includes('hiển_thị')) n = row[key];
                         if (k.includes('gender') || k.includes('gioi_tinh') || k.includes('giới_tính')) g = row[key];
                         if (k.includes('kho') || k.includes('store')) s = row[key];
-                        if (k.includes('brand') || k.includes('hang')) brand = row[key];
-                        if (k.includes('category') || k.includes('nganh')) category = row[key];
+                        if (k.includes('brand') || k.includes('hang') || k.includes('hãng')) brand = row[key];
+                        if (k.includes('category') || k.includes('nganh') || k.includes('ngành')) category = row[key];
                     });
 
                     if (u && s) {
@@ -247,6 +247,7 @@
     <div class="flex-1 bg-pink-50/50 p-3 rounded-lg border border-pink-200 shadow-sm">
         <h4 class="text-xs font-bold text-pink-700 mb-3 flex items-center gap-1"><span class="material-icons-round text-pink-500 text-sm">face_retouching_natural</span> Danh Sách PG</h4>
         <div class="flex gap-2">
+            <button class="flex-1 bg-white text-pink-600 py-2 rounded-lg text-xs font-bold border border-pink-200 hover:bg-pink-50 transition-colors" on:click={(e) => checkDemoAndBlock(e) || downloadPGSample()}>Tải Mẫu Trắng</button>
             <button class="flex-1 bg-pink-100 text-pink-700 py-2 rounded-lg text-xs font-bold border border-pink-200 hover:bg-pink-200 transition-colors flex justify-center items-center gap-1" on:click={(e) => checkDemoAndBlock(e) || downloadCurrentPGs()}>
                 <span class="material-icons-round text-[14px]">download</span> Tải DS Hiện Tại
             </button>

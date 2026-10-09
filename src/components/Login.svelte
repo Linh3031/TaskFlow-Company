@@ -169,9 +169,12 @@
           isLoading = false; return;
       }
 
+      // Cho phép đăng ký nhiều kho, cách nhau bằng dấu phẩy (VD: 908,909)
+      const cleanStores = [...new Set(cleanStore.split(',').map(s => s.trim()).filter(Boolean))];
+
       // Kiểm tra chỉ cho phép nhập SỐ ở mã kho
-      if (!/^\d+$/.test(cleanStore)) {
-          errorMsg = 'Mã kho chỉ được phép nhập SỐ!';
+      if (cleanStores.length === 0 || !cleanStores.every(s => /^\d+$/.test(s))) {
+          errorMsg = 'Mã kho chỉ được phép nhập SỐ, nhiều kho cách nhau bằng dấu phẩy!';
           isLoading = false; return;
       }
 
@@ -190,19 +193,21 @@
           }
 
           // Kiểm tra trùng MSNV trong cùng kho
-          const conflict = await accountService.findMaNVConflict(cleanMaNV, [cleanStore]);
+          const conflict = await accountService.findMaNVConflict(cleanMaNV, cleanStores);
           if (conflict) {
-              errorMsg = `MSNV ${cleanMaNV} đã có tài khoản ở kho ${cleanStore}. Vui lòng kiểm tra lại hoặc liên hệ Quản lý!`;
+              errorMsg = `MSNV ${cleanMaNV} đã có tài khoản ở kho ${conflict.commonStore}. Vui lòng kiểm tra lại hoặc liên hệ Quản lý!`;
               isLoading = false; return;
           }
 
           // 2. Logic "Chủ quyền": Kiểm tra xem Kho đã có Admin chưa (Nếu chọn quyền Admin)
           if (regRole === 'admin') {
-              const qAdmin = query(collection(db, 'users'), where('storeIds', 'array-contains', cleanStore), where('role', '==', 'admin'));
-              const snapAdmin = await getDocs(qAdmin);
-              if (!snapAdmin.empty) {
-                  errorMsg = `Kho ${cleanStore} đã có Quản lý. Vui lòng chọn quyền Nhân viên hoặc liên hệ Quản lý của bạn!`;
-                  isLoading = false; return;
+              for (const sId of cleanStores) {
+                  const qAdmin = query(collection(db, 'users'), where('storeIds', 'array-contains', sId), where('role', '==', 'admin'));
+                  const snapAdmin = await getDocs(qAdmin);
+                  if (!snapAdmin.empty) {
+                      errorMsg = `Kho ${sId} đã có Quản lý. Vui lòng chọn quyền Nhân viên hoặc liên hệ Quản lý của bạn!`;
+                      isLoading = false; return;
+                  }
               }
           }
 
@@ -217,18 +222,20 @@
               name: cleanName,
               maNV: cleanMaNV,
               role: regRole,
-              storeId: cleanStore,
-              storeIds: [cleanStore],
+              storeId: cleanStores[0],
+              storeIds: cleanStores,
               orderIndex: 9999, // Đẩy xuống cuối danh sách cho an toàn
               createdAt: serverTimestamp()
           });
 
           // Ghi nhận Kho vào hệ thống để Super Admin thấy
-          batch.set(doc(db, 'stores', cleanStore), {
-              id: cleanStore,
-              name: `Kho ${cleanStore}`,
-              createdAt: serverTimestamp()
-          }, { merge: true });
+          cleanStores.forEach(sId => {
+              batch.set(doc(db, 'stores', sId), {
+                  id: sId,
+                  name: `Kho ${sId}`,
+                  createdAt: serverTimestamp()
+              }, { merge: true });
+          });
 
           await batch.commit();
 
@@ -302,12 +309,12 @@
             
             <div class="input-wrapper">
                 <span class="material-icons-round input-icon" aria-hidden="true">storefront</span>
-                <input class="input-field" type="text" bind:value={regStoreId} placeholder="Mã Kho (Chỉ ghi số, VD: 908)" required>
+                <input class="input-field" type="text" bind:value={regStoreId} placeholder="Mã Kho (VD: 908,909)" required>
             </div>
 
             <div class="input-wrapper">
                 <span class="material-icons-round input-icon" aria-hidden="true">pin</span>
-                <input class="input-field" type="text" inputmode="numeric" bind:value={regMaNV} placeholder="Mã số nhân viên (Chỉ ghi số, VD: 12345)" required>
+                <input class="input-field" type="text" inputmode="numeric" bind:value={regMaNV} placeholder="MSNV (Chỉ ghi số, VD: 12345)" required>
             </div>
 
             <div class="input-wrapper">
@@ -317,7 +324,7 @@
 
             <div class="input-wrapper">
                 <span class="material-icons-round input-icon" aria-hidden="true">person_add</span>
-                <input class="input-field" type="text" bind:value={regUsername} placeholder="Tên đăng nhập (viết liền không dấu)" required>
+                <input class="input-field" type="text" bind:value={regUsername} placeholder="Tên đăng nhập (VD: Linh-3031)" required>
             </div>
       
             <div class="input-wrapper">
