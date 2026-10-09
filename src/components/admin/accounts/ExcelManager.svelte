@@ -21,7 +21,7 @@
     function downloadAccountSample() {
         const wb = utils.book_new();
         const wsData = [
-            ["Username", "Mật_Khẩu", "Tên_Hiển_Thị", "MSNV(chỉ số)", "Giới_Tính", "Quyền_Hạn(admin/staff/pg)", "Mã_Kho(chỉ số, VD: 908)"], 
+            ["Tên đăng nhập", "Mật khẩu", "Tên hiển thị", "MSNV (chỉ số)", "Giới tính", "Quyền hạn (admin/staff/pg)", "Mã kho (chỉ số, VD: 908)"], 
             [`Tam-12234`, "123456", "Nguyễn Tâm", "12234", "Nữ", "staff", /^\d+$/.test(selectedStoreId) ? selectedStoreId : '908']
         ];
         const ws = utils.aoa_to_sheet(wsData);
@@ -33,7 +33,7 @@
     function downloadCurrentAccounts() {
         const wb = utils.book_new();
         const wsData = [
-            ["Username", "Mật_Khẩu", "Tên_Hiển_Thị", "MSNV(chỉ số)", "Giới_Tính", "Quyền_Hạn(admin/staff/pg)", "Mã_Kho(chỉ số, VD: 908)"]
+            ["Tên đăng nhập", "Mật khẩu", "Tên hiển thị", "MSNV (chỉ số)", "Giới tính", "Quyền hạn (admin/staff/pg)", "Mã kho (chỉ số, VD: 908)"]
         ];
         accountList.forEach(acc => {
             if (acc.role === 'pg') return; 
@@ -83,7 +83,7 @@
                     let u = '', p = '', n = '', g = '', s = '', r = '', m = '';
                     Object.keys(row).forEach(key => {
                         const k = key.normalize('NFC').toLowerCase().replace(/\s+/g, '_');
-                        if (k.includes('user') || k.includes('tai_khoan')) u = row[key];
+                        if (k.includes('user') || k.includes('tai_khoan') || k.includes('đăng_nhập')) u = row[key];
                         if (k.includes('pass') || k.includes('mat_khau') || k.includes('mật_khẩu')) p = row[key];
                         if (k.includes('name') || k.includes('hien_thi') || k.includes('hiển_thị')) n = row[key];
                         if (k.includes('gender') || k.includes('gioi_tinh') || k.includes('giới_tính')) g = row[key];
