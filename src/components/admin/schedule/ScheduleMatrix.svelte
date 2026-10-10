@@ -166,9 +166,9 @@
                           {#each shiftCols as shift}
                               <td class="p-1 border-r border-slate-100 text-center h-12 box-border">
                                   {#if activeMatrixMode === 'weekday'}
-                                      <input type="number" min="0" bind:value={shiftMatrix[shift.id][role.id]} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-slate-700 bg-transparent transition-all border border-transparent focus:border-indigo-200">
+                                      <input type="number" min="0" bind:value={shiftMatrix[shift.id][role.id]} on:focus={handleQtyFocus} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-indigo-50 hover:bg-white text-slate-700 bg-transparent transition-all border border-transparent focus:border-indigo-200">
                                    {:else}
-                                      <input type="number" min="0" bind:value={weekendMatrix[shift.id][role.id]} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-orange-100 hover:bg-white text-orange-800 bg-transparent transition-all border border-transparent focus:border-orange-200">
+                                      <input type="number" min="0" bind:value={weekendMatrix[shift.id][role.id]} on:focus={handleQtyFocus} class="w-full h-8 text-center font-bold outline-none rounded focus:bg-orange-100 hover:bg-white text-orange-800 bg-transparent transition-all border border-transparent focus:border-orange-200">
                                   {/if}
                               </td>
                           {/each}

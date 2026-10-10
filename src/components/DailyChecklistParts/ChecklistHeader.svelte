@@ -6,11 +6,12 @@
 </script>
 
 <div class="p-3 bg-white border-b border-cyan-200 flex justify-between items-center shrink-0 shadow-sm z-10">
-    <div class="flex items-center gap-2">
-        <span class="material-icons-round text-cyan-600 text-xl">fact_check</span>
-        <div>
-            <h3 class="font-bold text-slate-800 text-sm">Kiểm tra kỹ trước khi báo cáo</h3>
-            <p class="text-[10px] text-slate-500">Yêu cầu 4 ảnh / khu vực</p>
+    <div class="flex items-center gap-2 flex-1 min-w-0 pr-2">
+        <span class="material-icons-round text-cyan-600 text-xl shrink-0">fact_check</span>
+        <div class="min-w-0 overflow-hidden">
+            <h3 class="font-bold text-slate-800 text-sm truncate">Hạn chót hoàn tất 8NTTT</h3>
+            <p class="text-[10px] text-slate-500 leading-tight"><span class="font-bold text-red-600">12:00</span> — Ca có số 2 (123, 23, 2-5, 2345, 123456…), hoặc PG ca Sáng / Full / Gãy</p>
+            <p class="text-[10px] text-slate-500 leading-tight"><span class="font-bold text-orange-600">17:00</span> — Ca 45, 456, hoặc PG ca Chiều</p>
         </div>
     </div>
     

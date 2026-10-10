@@ -372,6 +372,12 @@
                 <span class="material-icons-round text-[10px]">lock</span> Tuần này đã khóa, không thể sửa lịch!
             </div>
         {/if}
+
+        <div class="w-full overflow-hidden bg-white/70 border border-pink-100 rounded p-1.5 text-[9px] sm:text-[10px] text-slate-600 leading-snug">
+            <div><span class="font-bold text-pink-700">Luật 1:</span> PG được tối đa 4 ca Sáng và 4 ca Chiều mỗi tuần. Ca Gãy/Full không bị giới hạn.</div>
+            <div><span class="font-bold text-pink-700">Luật 2:</span> Trong một ngày, cùng một nhóm, số PG làm cùng một ca không quá 50% số PG (làm tròn lên). Luật này áp dụng cả cho Gãy và Full.</div>
+            <div><span class="font-bold text-pink-700">Luật 3:</span> Số người OFF trong một ngày không quá 30% tổng PG của nhóm (làm tròn lên, tính cả PG ca cố định).</div>
+        </div>
     </div>
 
     <div class="flex-1 overflow-auto relative p-1.5 sm:p-4 bg-slate-50">
