@@ -44,7 +44,7 @@ export function compressImage(file, maxEdge = 800, quality = 0.5, stampText = ''
     });
 }
 
-export async function processAndUploadImages(filesToProcess, activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId) {
+export async function processAndUploadImages(filesToProcess, activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId, lateUsernames = []) {
     // 1. Nén và Tải ảnh lên Storage
     // Ảnh chụp từ camera trong app có dạng { blob, capturedAt }; ảnh admin tải từ máy là File
     const uploadPromises = filesToProcess.map(async (entry) => {
@@ -85,11 +85,14 @@ export async function processAndUploadImages(filesToProcess, activeStoreId, date
                 const oldTimes = i.imageTimes || [];
                 const mergedTimes = [...(i.imageUrls || []).map((_, idx) => oldTimes[idx] || null), ...newImageTimes];
                 const isNowCompleted = mergedUrls.length >= 4;
+                // Lưu lại người đã trễ để tag "Đã trễ" + thống kê vẫn tính sau khi hoàn tất
+                const mergedLate = Array.from(new Set([...(i.lateAssignees || []), ...(lateUsernames || [])]));
                 return { 
                     ...i, 
                     imageUrls: mergedUrls, 
                     uploaders: mergedUploaders, 
                     imageTimes: mergedTimes, 
+                    lateAssignees: mergedLate, 
                     completed: isNowCompleted, 
                     completedBy: isNowCompleted ? currentUserUsername : i.completedBy, 
                     completedAt: isNowCompleted ? getCurrentTimeShort() : i.completedAt 

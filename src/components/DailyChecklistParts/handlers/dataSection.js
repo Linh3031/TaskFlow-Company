@@ -328,6 +328,9 @@ export async function getMonthlyStats(activeStoreId, dateStr, allStaff) {
                                 }
                             }
 
+                            // Đã ghi nhận trễ lúc up ảnh thì vẫn tính trễ dù khu vực đã hoàn tất
+                            if (!isLate && (item.lateAssignees || []).includes(uname)) isLate = true;
+
                             if (isLate) {
                                 if (usersStats[uname].dayStatuses[day] !== 'LATE') {
                                     usersStats[uname].dayStatuses[day] = 'LATE';

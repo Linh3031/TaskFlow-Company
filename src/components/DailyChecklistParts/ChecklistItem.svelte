@@ -1,5 +1,5 @@
 <script>
-    import { createEventDispatcher } from 'svelte';
+    import { createEventDispatcher, tick } from 'svelte';
     import ChecklistImageGrid from './ChecklistImageGrid.svelte';
     import { ROLE_MAP } from '../../lib/shiftConstants.js';
 
@@ -54,11 +54,22 @@
             }
         }
 
+        // Đã ghi nhận trễ lúc up ảnh thì giữ tag dù khu vực đã hoàn tất
+        if (!isLate && (item.lateAssignees || []).includes(a.username)) isLate = true;
+
         return { ...a, shift, isOff, isLate, isGH };
     });
     
     $: activeShifts = mappedAssignees.filter(a => !a.isOff).map(a => a.shift);
     $: isAllOff = mappedAssignees.length > 0 && mappedAssignees.every(a => a.isOff);
+
+    // Kèm danh sách người đang trễ (tính theo giờ lúc bấm) khi up ảnh
+    async function forwardWithLate(type, detail) {
+        item = item;
+        await tick();
+        const lateUsernames = mappedAssignees.filter(a => a.isLate).map(a => a.username).filter(Boolean);
+        dispatch(type, { ...detail, lateUsernames });
+    }
 </script>
 
 <div class="bg-white p-3 rounded-xl border-y border-r shadow-sm flex flex-col gap-2 transition-all duration-300 {item.completed ? 'bg-slate-50 border-l-4 border-l-green-500 border-y-slate-200 border-r-slate-200 opacity-70 hover:opacity-100' : 'border-l-4 border-l-orange-500 border-y-slate-200 border-r-slate-200 hover:border-cyan-400'}">
@@ -143,8 +154,8 @@
         {isAllOff}
         {isAdmin}
         {dateStr}
-        on:upload
-        on:openCamera
+        on:upload={(e) => forwardWithLate('upload', e.detail)}
+        on:openCamera={(e) => forwardWithLate('openCamera', e.detail)}
         on:openLightbox
     />
 </div>

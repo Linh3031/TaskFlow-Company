@@ -44,6 +44,7 @@
 
     let showCamera = false;
     let cameraItemId = null;
+    let cameraLateUsernames = [];
     $: cameraItem = checklistData.find(i => i.id === cameraItemId);
     $: cameraRequiredShots = Math.max(4 - ((cameraItem && cameraItem.imageUrls) ? cameraItem.imageUrls.length : 0), 0);
     
@@ -216,7 +217,7 @@
     }
 
     async function handleUploadImage(eventObj) {
-        const { event, itemId } = eventObj.detail;
+        const { event, itemId, lateUsernames } = eventObj.detail;
         const files = event.target.files;
         if (!files || files.length === 0) return;
 
@@ -228,7 +229,7 @@
         uploadingId = itemId;
         try {
             const currentUserUsername = $currentUser.username || 'unknown';
-            await processAndUploadImages(filesToProcess, activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId);
+            await processAndUploadImages(filesToProcess, activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId, lateUsernames);
         } catch (error) { alert("Lỗi tải ảnh lên: " + error.message); } 
         finally { 
             uploadingId = null;
@@ -236,7 +237,7 @@
         }
     }
 
-    function openCamera(event) { cameraItemId = event.detail.itemId; showCamera = true; }
+    function openCamera(event) { cameraItemId = event.detail.itemId; cameraLateUsernames = event.detail.lateUsernames || []; showCamera = true; }
 
     async function handleCameraConfirm(event) {
         const shots = event.detail.shots || [];
@@ -247,7 +248,7 @@
         uploadingId = itemId;
         try {
             const currentUserUsername = $currentUser.username || 'unknown';
-            await processAndUploadImages(shots.slice(0, cameraRequiredShots), activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId);
+            await processAndUploadImages(shots.slice(0, cameraRequiredShots), activeStoreId, dateStr, itemId, checklistData, currentUserUsername, activeRecordId, cameraLateUsernames);
         } catch (error) { alert("Lỗi tải ảnh lên: " + error.message); } 
         finally { uploadingId = null; }
     }

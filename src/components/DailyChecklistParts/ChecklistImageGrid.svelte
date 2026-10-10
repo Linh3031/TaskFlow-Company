@@ -23,38 +23,7 @@
             return { locked: true, reason: 'Nhân sự phụ trách khu vực này đang OFF.' };
         }
         
-        if (activeShifts.length === 0) {
-            return { locked: false, reason: '' }; 
-        }
-
-        const currentHour = new Date().getHours();
-        let needsNoonLock = false; 
-        let needsEveningLock = false; 
-
-        for (const shift of activeShifts) {
-            const s = String(shift).toLowerCase();
-            
-            // [PHẪU THUẬT LOGIC]: Ép khóa ca rỗng vào 17h để đồng bộ với thẻ báo Trễ
-            if (!s) {
-                 needsEveningLock = true;
-                 continue;
-            }
-
-            if (s.includes('2') || s === 'sáng' || s === 'full' || s === 'gãy') {
-                needsNoonLock = true;
-            }
-            else if ((s.includes('4') || s.includes('5')) && !s.includes('2') || s === 'chiều') {
-                needsEveningLock = true;
-            }
-        }
-
-        if (needsNoonLock) {
-            if (currentHour >= 12) return { locked: true, reason: 'Quá 12:00 (Nhân sự ca Sáng/Full/Gãy).' };
-        }
-        else if (needsEveningLock) {
-            if (currentHour >= 17) return { locked: true, reason: 'Quá 17:00 (Nhân sự ca Chiều hoặc Không có ca).' };
-        }
-
+        // Không khóa theo giờ 12:00/17:00 nữa: trễ vẫn cho up, tag "Đã trễ" được lưu lại ở khu vực
         return { locked: false, reason: '' };
     })();
 </script>
