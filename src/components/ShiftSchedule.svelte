@@ -280,7 +280,9 @@
       if (!isAdmin || !scheduleData) return;
       if (!confirm(`🔒 CHỐT LỊCH GỐC THÁNG ${viewMonth}/${viewYear}?`)) return;
       try {
-          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { baselineStats: JSON.parse(JSON.stringify(scheduleData.stats)) });
+          // Ghi đè số liệu gốc bằng lịch đang hiển thị, cập nhật lại cả số ca nghiệp vụ cuối tuần
+          const lockedStats = JSON.parse(JSON.stringify(scheduleData.stats)).map(s => ({ ...s, weekendHardRoles: getWeekendHardRoleCount(s.id, scheduleData, viewMonth, viewYear) }));
+          await updateDoc(doc(db, 'stores', $activeStoreId, 'schedules', currentMonthStr), { baselineStats: lockedStats });
           alert("✅ Đã CHỐT Lịch Gốc thành công!");
       } catch (e) { alert("Lỗi: " + e.message); }
   }

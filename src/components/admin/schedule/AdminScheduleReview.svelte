@@ -12,6 +12,7 @@
     import AdminDayStatsModal from './AdminDayStatsModal.svelte';
     import SmartSwapModal from './SmartSwapModal.svelte'; 
     import { INSPECTION_OPTIONS, getShiftColor, getRoleBadge, isHardRole } from './scheduleConstants.js';
+    import { healScheduleStats } from '../../../lib/shiftUtils.js';
 
     const dispatch = createEventDispatcher();
 
@@ -298,9 +299,12 @@
                 await setDoc(backupRef, currentSnap.data());
                 console.log("✅ Đã tạo backup bản lịch cũ.");
             }
-            await setDoc(mainRef, { 
-                config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig, comboCols: customComboCols }, 
-                data: previewScheduleData, stats: previewStats, systemStats: pureSystemStats, baselineStats: pureSystemStats, endOffset: originalResult?.endOffset || 0, updatedAt: serverTimestamp(), updatedBy: $currentUser.username 
+            // Số liệu gốc tính nợ ca = đúng lịch review đang áp dụng (gồm các lần đổi ca trong lúc review)
+            const appliedBaselineStats = healScheduleStats({ data: previewScheduleData, stats: previewStats })
+                .map(s => ({ ...s, weekendHardRoles: getWeekendHardRoleCount(s.id) }));
+            await setDoc(mainRef, {
+                config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig, comboCols: customComboCols },
+                data: previewScheduleData, stats: previewStats, systemStats: pureSystemStats, baselineStats: appliedBaselineStats, endOffset: originalResult?.endOffset || 0, updatedAt: serverTimestamp(), updatedBy: $currentUser.username 
             });
             alert("✅ Đã áp dụng lịch thành công!"); 
             dispatch('switchTab', 'schedule'); 

@@ -59,7 +59,7 @@ function interleaveShifts(shiftList) {
     return result;
 }
 
-export function generateMonthlySchedule(originalStaffList, comboData, month, year, pastSchedules = [], genderConfig = { kho: 'none', tn: 'none' }) {
+export function generateMonthlySchedule(originalStaffList, comboData, month, year, prevScheduleData = null, genderConfig = { kho: 'none', tn: 'none' }, pastThreeMonthsData = []) {
     const daysInMonth = new Date(year, month, 0).getDate();
     let warnings = [];
 
@@ -78,31 +78,23 @@ export function generateMonthlySchedule(originalStaffList, comboData, month, yea
         };
     });
 
-    if (pastSchedules && pastSchedules.length > 0) {
-        pastSchedules.forEach(pastMonth => {
-            const pData = pastMonth.data;
-            if (!pData || !pData.data) return;
-
-            const [pYear, pMonth] = pastMonth.monthStr.split('-').map(Number);
-            
-            Object.keys(pData.data).forEach(d => {
-                const prevDateObj = new Date(pYear, pMonth - 1, parseInt(d));
-                const isPrevWeekend = (prevDateObj.getDay() === 0 || prevDateObj.getDay() === 6);
-
-                pData.data[d].forEach(assign => {
-                    const staff = staffList.find(s => s.id === assign.staffId);
-                    if (staff && assign.originalShift && assign.originalShift !== 'OFF') {
-                        const rCode = ROLE_MAP[assign.originalRole || assign.role] || 'tv';
-                        if (HARD_ROLES.includes(rCode)) {
-                            staff.baseStats.roles[rCode]++;
-                            if (isPrevWeekend) staff.baseStats.weekendHardRoleCount++;
-                        }
-                    }
+    // Nợ ca 3 tháng trước: lấy từ bảng số liệu gốc (Áp dụng / Chốt Lịch Gốc), không tính đổi ca thực tế
+    if (pastThreeMonthsData && pastThreeMonthsData.length > 0) {
+        pastThreeMonthsData.forEach(pastMonth => {
+            (pastMonth.stats || []).forEach(st => {
+                const staff = staffList.find(s => s.id === st.id);
+                if (!staff) return;
+                HARD_ROLES.forEach(rCode => {
+                    staff.baseStats.roles[rCode] += parseInt(st[rCode]) || 0;
                 });
+                staff.baseStats.weekendHardRoleCount += parseInt(st.weekendHardRoles) || 0;
             });
         });
+    }
 
-        const prevMonthData = pastSchedules[0].data;
+    // Nối tiếp ngày cuối tháng trước (luật cấm nghiệp vụ 2 ngày liền, xoay ca)
+    if (prevScheduleData) {
+        const prevMonthData = prevScheduleData;
         if (prevMonthData && prevMonthData.data) {
             const days = Object.keys(prevMonthData.data).map(Number).sort((a,b)=>b-a);
             if (days.length > 0) {
