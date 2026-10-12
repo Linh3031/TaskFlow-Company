@@ -37,9 +37,26 @@ export function buildSmartCover(target, scheduleData) {
     let realAssignInDB = scheduleData.data[target.day].find(a => a.staffId === target.staffId);
     let offShift = realAssignInDB ? realAssignInDB.shift : target.originalShift;
 
-    if (offShift === 'OFF') return []; 
+    if (offShift === 'OFF') return [];
 
     const addSugg = (type, title, acts) => suggestions.push({ type, title, actions: acts });
+
+    // [LỊCH NAM/NỮ] Chỉ có ca 123 và 45 (không có 23): OFF ca 45 -> người ca 123 làm thêm thành 12345,
+    // OFF ca 123 -> người ca 45 làm thêm thành 12345. Bắt buộc CÙNG GIỚI để giữ định mức Nam/Nữ, ưu tiên ít giờ công (đã sort ở trên).
+    if (scheduleData.config?.byGender) {
+        const isMale = (g) => String(g || '').trim().toLowerCase() === 'nam';
+        const genderOf = (a) => stats.find(s => s.id === a.staffId)?.gender || a.gender;
+        const offIsMale = isMale(genderOf({ staffId: target.staffId, gender: target.gender }));
+        const takerShift = offShift === '45' ? '123' : (offShift === '123' ? '45' : null);
+        if (!takerShift) return [];
+
+        dayAssigns
+            .filter(a => a.shift === takerShift && isMale(genderOf(a)) === offIsMale)
+            .forEach(taker => addSugg('direct', `Ghép ca ${offShift} cho ${taker.name}`, [
+                { staffId: taker.staffId, name: taker.name, oldShift: taker.shift, newShift: '12345', role: taker.role }
+            ]));
+        return suggestions.slice(0, 5);
+    }
 
     // [YÊU CẦU 2 & 3] Bẻ ca 123
     if (offShift === '123') {

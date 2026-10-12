@@ -16,8 +16,10 @@
           } catch (e) { console.error(e); }
       }
       
-      // 2. Phát sự kiện nhảy tới Task (nếu có taskId)
-      if (notif.taskId) {
+      // 2. Thông báo đổi ca -> mở phiếu đổi ca; còn lại nhảy tới Task (nếu có taskId)
+      if (notif.requestId) {
+          dispatch('openSwapRequest', { requestId: notif.requestId });
+      } else if (notif.taskId) {
           dispatch('jumpToTask', { 
               taskId: notif.taskId,
               tab: notif.targetTab || 'handover'
@@ -32,9 +34,14 @@
     <div class="p-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
         <h4 class="font-bold text-slate-700 text-sm">Thông báo</h4>
         {#if notifications.length > 0}
-            <span class="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">
-                {notifications.filter(n => !n.isRead).length} mới
-            </span>
+            <div class="flex items-center gap-2">
+                <span class="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">
+                    {notifications.filter(n => !n.isRead).length} mới
+                </span>
+                {#if notifications.some(n => !n.isRead)}
+                    <button class="text-[10px] font-bold text-indigo-600 hover:underline" on:click={() => dispatch('markAllRead')}>Đọc tất cả</button>
+                {/if}
+            </div>
          {/if}
     </div>
     

@@ -5,7 +5,8 @@
   import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
   import { currentUser, storeUsersCache, activeStoreId } from '../lib/stores';
   import { getCurrentTimeShort } from '../lib/utils';
-  import { compressImage, uploadTaskImage } from '../lib/imageUtils.js'; 
+  import { compressImage, uploadTaskImage } from '../lib/imageUtils.js';
+  import { sendNotifications, extractMentionUsernames } from '../lib/notificationService.js';
   
   let note = '';
   let deadline = ''; 
@@ -99,7 +100,7 @@
       
       isCreating = true;
       try {
-          await addDoc(collection(db, 'tasks'), {
+          const docRef = await addDoc(collection(db, 'tasks'), {
               title: finalTitle, 
               storeId: $activeStoreId, 
               date: taskDate, 
@@ -113,6 +114,15 @@
               imageLinks: imageLinks,
               history: [{ action: 'create', user: user, time: getCurrentTimeShort(), fullTime: new Date().toISOString() }]
           });
+          // Báo cho người được @tag (lỗi gửi thông báo không làm hỏng việc tạo bàn giao)
+          try {
+              const shortTitle = finalTitle.length > 100 ? finalTitle.slice(0, 100) + '...' : finalTitle;
+              await sendNotifications(extractMentionUsernames(finalTitle, storeUsers), {
+                  type: 'mention', fromUser: user, storeId: $activeStoreId,
+                  content: `đã nhắc đến bạn trong bàn giao: "${shortTitle}"`,
+                  taskId: docRef.id, targetTab: 'handover'
+              });
+          } catch (e) { console.error('Lỗi gửi thông báo tag tên:', e); }
           note = ''; deadline = ""; imageLinks = []; 
           showModal = false;
       } catch (e) { alert("Lỗi tạo bàn giao: " + e.message); } 

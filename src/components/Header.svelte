@@ -5,7 +5,9 @@
   import { db } from '../lib/firebase';
   import { doc, updateDoc, collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
   import NotificationDropdown from './NotificationDropdown.svelte';
-  
+  import ShiftSwapReviewModal from './ShiftScheduleParts/ShiftSwapReviewModal.svelte';
+  import { markNotificationsRead } from '../lib/notificationService.js';
+
   const dispatch = createEventDispatcher();
   
   // --- LOGIC PWA ---
@@ -126,6 +128,48 @@
       showNotifDropdown = false;
   }
 
+  // --- PHIẾU ĐỔI CA (mở từ thông báo) ---
+  let swapRequestId = null;
+  function openSwapRequest(event) {
+      swapRequestId = event.detail.requestId;
+      showNotifDropdown = false;
+  }
+
+  async function handleMarkAllRead() {
+      const ids = [...notifications.filter(n => !n.isRead).map(n => n.id), ...unreadIds];
+      try { await markNotificationsRead(ids); } catch (e) { console.error(e); }
+  }
+
+  // Bấm chuông lần đầu thì xin quyền hiện thông báo hệ thống (trình duyệt bắt buộc phải do người dùng bấm)
+  function toggleNotifDropdown() {
+      showNotifDropdown = !showNotifDropdown;
+      if ('Notification' in window && Notification.permission === 'default') {
+          try { Notification.requestPermission(); } catch (e) { /* trình duyệt cũ */ }
+      }
+  }
+
+  // Chuông lắc 1 nhịp khi có thông báo MỚI (không lắc mãi)
+  let isRinging = false;
+  let ringTimer;
+  function ringBell() {
+      isRinging = true;
+      clearTimeout(ringTimer);
+      ringTimer = setTimeout(() => isRinging = false, 1500);
+  }
+
+  // App đang chạy nền (đổi tab/ẩn app) thì hiện thông báo hệ thống. Tắt hẳn app thì không nhận được.
+  async function showSystemNotification(notif) {
+      if (document.visibilityState !== 'hidden') return;
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      const title = 'TaskFlow - Thông báo mới';
+      const options = { body: `${notif.fromUser || ''} ${notif.content || ''}`.trim(), icon: '/logo.jpeg', tag: notif.id };
+      try {
+          const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+          if (reg) await reg.showNotification(title, options);
+          else new Notification(title, options);
+      } catch (e) { console.warn('Không hiện được thông báo hệ thống:', e); }
+  }
+
  // [CodeGenesis] Khiên bảo vệ Quota Firebase (Đã sửa lỗi Vòng lặp vô tận)
   let activeNotifUser = null; // Biến cờ hiệu để chặn Svelte chạy lại
 
@@ -134,10 +178,25 @@
       setupNotificationListener(activeNotifUser);
   }
 
+  // Đếm chưa đọc RIÊNG (không bị giới hạn 20 thông báo mới nhất). Lỗi thì quay về đếm trong danh sách.
+  let unsubUnread = null;
+  let unreadIds = [];
+  let unreadQueryOk = false;
+  $: unreadCount = unreadQueryOk ? unreadIds.length : notifications.filter(n => !n.isRead).length;
+
   function setupNotificationListener(username) {
       if (unsubNotif) { unsubNotif(); unsubNotif = null; }
+      if (unsubUnread) { unsubUnread(); unsubUnread = null; }
+      unreadQueryOk = false; unreadIds = [];
 
       const userVariants = [...new Set([username, username.toLowerCase()])];
+
+      unsubUnread = onSnapshot(
+          query(collection(db, 'notifications'), where('toUser', 'in', userVariants), where('isRead', '==', false), limit(50)),
+          (snapshot) => { unreadIds = snapshot.docs.map(d => d.id); unreadQueryOk = true; },
+          (error) => { console.error("⚠️ Firebase Error (đếm chưa đọc): ", error.message); unreadQueryOk = false; }
+      );
+      let isFirstSnapshot = true;
       const q = query(
           collection(db, 'notifications'), 
           where('toUser', 'in', userVariants),
@@ -150,13 +209,22 @@
       
       unsubNotif = onSnapshot(q, (snapshot) => {
           notifications = snapshot.docs.map(d => ({id: d.id, ...d.data()}));
-          unreadCount = notifications.filter(n => !n.isRead).length;
+
+          // Lần tải đầu là thông báo cũ -> bỏ qua. Sau đó có thông báo chưa đọc mới thì lắc chuông + báo hệ thống
+          if (!isFirstSnapshot) {
+              const fresh = snapshot.docChanges().filter(c => c.type === 'added' && !c.doc.data().isRead);
+              if (fresh.length > 0) {
+                  ringBell();
+                  fresh.forEach(c => showSystemNotification({ id: c.doc.id, ...c.doc.data() }));
+              }
+          }
+          isFirstSnapshot = false;
       }, (error) => {
           console.error("⚠️ Firebase Error: ", error.message);
       });
   }
 
-  onDestroy(() => { if (unsubNotif) unsubNotif(); });
+  onDestroy(() => { if (unsubNotif) unsubNotif(); if (unsubUnread) unsubUnread(); clearTimeout(ringTimer); });
 </script>
 
 <svelte:window on:click={handleWindowClick} />
@@ -227,8 +295,8 @@
     <div class="relative" bind:this={notifContainer}>
         <button 
             id="btn-notif"
-            class="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-slate-50 rounded-full transition-all {unreadCount > 0 ? 'animate-wiggle' : ''}" 
-            on:click={() => showNotifDropdown = !showNotifDropdown} title="Thông báo"
+            class="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-slate-50 rounded-full transition-all {isRinging ? 'animate-wiggle' : ''}"
+            on:click={toggleNotifDropdown} title="Thông báo"
         >
             <span class="material-icons-round text-xl">notifications</span>
             {#if unreadCount > 0}
@@ -238,7 +306,7 @@
             {/if}
         </button>
         {#if showNotifDropdown}
-            <NotificationDropdown {notifications} on:close={() => showNotifDropdown = false} on:jumpToTask={forwardJump} />
+            <NotificationDropdown {notifications} on:close={() => showNotifDropdown = false} on:jumpToTask={forwardJump} on:openSwapRequest={openSwapRequest} on:markAllRead={handleMarkAllRead} />
         {/if}
     </div>
 
@@ -253,6 +321,10 @@
     {/if}
   </div>
 </header>
+
+{#if swapRequestId}
+    <ShiftSwapReviewModal requestId={swapRequestId} on:close={() => swapRequestId = null} />
+{/if}
 
 {#if showProfileModal}
 <div class="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center p-4 backdrop-blur-sm" on:click={() => showProfileModal = false}>

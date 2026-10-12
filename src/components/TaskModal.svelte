@@ -4,6 +4,7 @@
   import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
   import { currentUser, storeUsersCache, activeStoreId } from '../lib/stores'; 
   import { compressImage, uploadTaskImage } from '../lib/imageUtils'; // [CodeGenesis]
+  import { sendNotifications, extractMentionUsernames } from '../lib/notificationService.js';
   
   export let taskTitle = '';
   export let note = ''; 
@@ -64,12 +65,22 @@
       finally { isUploading = false; e.target.value = null; }
   }
 
+  // Báo cho người được @tag trong ghi chú (không chặn việc xác nhận công việc nếu lỗi)
+  function notifyMentions() {
+      sendNotifications(extractMentionUsernames(note, storeUsers), {
+          type: 'mention', fromUser: $currentUser.name || $currentUser.username, storeId: $activeStoreId,
+          content: `đã nhắc đến bạn trong ghi chú: "${taskTitle}"`
+      }).catch(e => console.error('Lỗi gửi thông báo tag tên:', e));
+  }
+
   function submitComplete() {
+      notifyMentions();
       dispatch('confirm', { status: 'completed', imageLinks });
   }
 
   function submitFailed() {
       if (!note.trim()) return alert("BẮT BUỘC: Vui lòng ghi chú lý do không thể hoàn tất vào ô trống!");
+      notifyMentions();
       dispatch('confirm', { status: 'failed', imageLinks });
   }
 </script>

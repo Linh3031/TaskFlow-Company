@@ -1,5 +1,6 @@
 <script>
     import { createEventDispatcher } from 'svelte';
+    import { getSwapCandidatesFromDay } from '../../lib/shiftSwapRequest.js';
     const dispatch = createEventDispatcher();
     
     export let editingShift;
@@ -7,6 +8,7 @@
     export let suggestions = []; // [NEW] Nhận danh sách gợi ý trám ca từ cha
     export let staffList = [];
     export let dayAssignments = [];
+    export let byGender = false; // Lịch phân ca theo Nam/Nữ -> chỉ gợi ý đổi cùng giới
 
     const QUICK_SHIFTS = ['OFF', '123', '456', '23', '45', '2345', 'FULL'];
 
@@ -54,7 +56,10 @@
     let swapNotFound = false;
     let swapBackupA = null;
 
-    $: filteredSwapCandidates = staffList.filter(s => s.id !== editingShift.staffId && s.name.toLowerCase().includes(searchSwap.toLowerCase()));
+    // Tự lọc sẵn người đổi được: cùng ngày, khác ca đang giữ trên lịch. Admin được đổi cả với người OFF
+    // (bấm ô OFF = gợi ý chuyển ngày OFF đó sang ai). Lịch Nam/Nữ chỉ gợi ý cùng giới.
+    $: swapCandidates = getSwapCandidatesFromDay(dayAssignments, staffList, editingShift.staffId, { allowOff: true, sameGenderOnly: byGender }).map(c => ({ ...c, id: c.staffId }));
+    $: filteredSwapCandidates = swapCandidates.filter(s => s.name.toLowerCase().includes(searchSwap.toLowerCase()));
 
     function toggleSwapSearch() {
         showSwapSearch = !showSwapSearch;
@@ -130,7 +135,9 @@
                         <input type="text" bind:value={searchSwap} placeholder="Gõ tìm tên nhân viên..." class="w-full p-2 border rounded bg-white outline-none text-sm focus:ring-2 focus:ring-indigo-200" autofocus>
                         <div class="max-h-32 overflow-y-auto mt-1">
                             {#each filteredSwapCandidates as s}
-                                <div class="p-2 text-sm hover:bg-indigo-50 cursor-pointer rounded font-medium" on:click={() => selectSwapTarget(s)}>{s.name}</div>
+                                <div class="p-2 text-sm hover:bg-indigo-50 cursor-pointer rounded font-medium flex items-center justify-between gap-2" on:click={() => selectSwapTarget(s)}><span class="truncate">{s.name}</span><span class="text-[10px] font-bold shrink-0 {s.shift === 'OFF' ? 'text-red-600' : 'text-slate-500'}">{s.shift}{s.role ? ` · ${s.role}` : ''} · {s.totalHours}h</span></div>
+                            {:else}
+                                <p class="p-2 text-xs text-slate-400">{searchSwap ? 'Không tìm thấy người phù hợp.' : `Không có ai${byGender ? ' cùng giới' : ''} khác ca để đổi trong ngày này.`}</p>
                             {/each}
                         </div>
                         {#if swapNotFound}<p class="text-xs text-red-600 mt-1">Người này chưa có ca trong ngày {editingShift.day}.</p>{/if}

@@ -10,6 +10,8 @@
   import DayStatsModal from './ShiftScheduleParts/DayStatsModal.svelte';
   import EditShiftModal from './ShiftScheduleParts/EditShiftModal.svelte';
   import PersonalScheduleModal from './ShiftScheduleParts/PersonalScheduleModal.svelte';
+  import ShiftSwapRequestModal from './ShiftScheduleParts/ShiftSwapRequestModal.svelte';
+  import { findMyStaffId } from '../lib/shiftSwapRequest.js';
   import { exportScheduleToExcel } from '../utils/excelExport.js';
 
   import PGScheduleTable from './ShiftScheduleParts/PGScheduleTable.svelte';
@@ -42,6 +44,7 @@
   let tempEditingShift = null;
   let showSmartSwap = false; 
   let showReorderModal = false; // [NEW] Biến hiển thị Modal Sắp xếp
+  let swapRequest = null; // [ĐĂNG KÝ ĐỔI CA] { day, staffId } ô NV đang bấm
 
   let modalStaffId = null;
   let modalStaffName = '';
@@ -296,6 +299,15 @@
       tempEditingShift = { day, staffId, name: assign.name, shift: assign.shift, role: assign.role || 'TV', isOFF: assign.shift === 'OFF', gender: staffInfo?.gender || 'Nữ', originalRole: (assign.originalRole !== undefined ? assign.originalRole : (assign.role || 'TV')) || 'TV', originalShift: assign.originalShift !== undefined ? assign.originalShift : assign.shift, swapWithId: assign.swapWith || null };
       editingShift = JSON.parse(JSON.stringify(tempEditingShift));
   }
+
+  // Admin bấm ô = sửa ca như cũ. NV bấm ô CỦA MÌNH (hôm nay trở đi, không OFF) = đăng ký đổi ca
+  function handleCellClick(day, staffId, assign) {
+      if (isAdmin) return openEditShift(day, staffId, assign);
+      if (!scheduleData || !assign || staffId !== findMyStaffId($currentUser, scheduleData.stats)) return;
+      if (isPastDay(day)) return;
+      if (assign.shift === 'OFF') return alert('Ngày OFF không đăng ký đổi ca được.');
+      swapRequest = { day, staffId };
+  }
   
   async function saveShiftChange(event) {
       if (!editingShift || !scheduleData) return;
@@ -383,7 +395,7 @@
             on:clickHighlight={(e) => highlightedDay = highlightedDay === e.detail ? null : e.detail}
             on:clickDayStats={(e) => selectedDayStats = prepareDayStats(e.detail, scheduleData, viewMonth, viewYear)}
             on:clickStaff={(e) => { modalStaffId = e.detail.id; modalStaffName = e.detail.name; }}
-            on:clickCell={(e) => openEditShift(e.detail.day, e.detail.staffId, e.detail.assign)}
+            on:clickCell={(e) => handleCellClick(e.detail.day, e.detail.staffId, e.detail.assign)}
             on:openReorder={() => showReorderModal = true}
         />
     {/if}
@@ -408,7 +420,8 @@
     /> 
 {/if}
 
-{#if editingShift} <EditShiftModal bind:editingShift {tempEditingShift} suggestions={smartCoverSuggestions} staffList={scheduleData.stats} dayAssignments={scheduleData.data[String(editingShift.day)] || []} on:close={() => editingShift = null} on:save={saveShiftChange} on:applySmartCover={(e) => executeSmartCover(e.detail)} on:swapFlip={(e) => handleSwapFlip(e.detail.staffBId)} /> {/if}
+{#if editingShift} <EditShiftModal bind:editingShift {tempEditingShift} suggestions={smartCoverSuggestions} staffList={scheduleData.stats} dayAssignments={scheduleData.data[String(editingShift.day)] || []} byGender={!!scheduleData.config?.byGender} on:close={() => editingShift = null} on:save={saveShiftChange} on:applySmartCover={(e) => executeSmartCover(e.detail)} on:swapFlip={(e) => handleSwapFlip(e.detail.staffBId)} /> {/if}
+{#if swapRequest && scheduleData} <ShiftSwapRequestModal {scheduleData} day={swapRequest.day} myStaffId={swapRequest.staffId} storeId={$activeStoreId} monthStr={currentMonthStr} on:close={() => swapRequest = null} /> {/if}
 {#if selectedDayStats} <DayStatsModal {selectedDayStats} {isAdmin} on:close={() => selectedDayStats = null} on:assignFullToAll={(e) => handleAssignFullToAll(e.detail)} on:resetDayToOriginal={(e) => handleResetDayToOriginal(e.detail)} /> {/if}
 
 {#if showSmartSwap && scheduleData}

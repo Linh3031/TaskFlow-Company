@@ -1,6 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function existsOpenInventorySession(dotId) {
+      return exists(/databases/$(database)/documents/inventory_sessions/$(dotId))
+        && get(/databases/$(database)/documents/inventory_sessions/$(dotId)).data.status == 'open';
+    }
+
     match /users/{document=**} { allow read, write: if true; }
     match /tasks/{document=**} { allow read, write: if true; }
     match /stores/{document=**} { allow read, write: if true; }
@@ -10,9 +16,53 @@ service cloud.firestore {
     match /8nttt_daily_records/{document=**} { allow read, write: if true; }
     match /8nttt_monthly_stats/{document=**} { allow read, write: if true; }
     match /debug_8nttt_logs/{document=**} { allow read, write: if true; }
+
     // ĐÃ THÊM BẢNG NOTIFICATIONS ĐỂ SỬA LỖI THÔNG BÁO
     match /notifications/{document=**} { allow read, write: if true; }
 
+    // PHIẾU ĐĂNG KÝ ĐỔI CA (NV xin đổi -> NV được đổi đồng ý -> Quản lý duyệt)
+    match /shift_swap_requests/{document=**} { allow read, write: if true; }
+
+    // [CodeGenesis] - CẤP QUYỀN CHO BẢNG CẤU HÌNH TRẢ GÓP & BẢO HIỂM
+    match /system_configs/{document=**} { allow read, write: if true; }
+
+    // [CodeGenesis] - CẤP QUYỀN CHO TÍNH NĂNG ĐIỂM DANH CÔNG VIỆC TẬP THỂ
+    match /group_tasks/{document=**} { allow read, write: if true; }
+
+    // === APP KIỂM KÊ (kiem-ke) ===
+    match /inventory_sessions/{dotId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['dotId', 'maSieuThi', 'status'])
+        && request.resource.data.dotId == dotId
+        && request.resource.data.keys().size() <= 20;
+      allow delete: if true;
+    }
+
+    match /inventory_catalog/{docId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['dotId', 'products'])
+        && request.resource.data.products is list
+        && request.resource.data.products.size() <= 3000;
+      allow delete: if true;
+    }
+
+    match /inventory_costs/{docId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['dotId', 'costs'])
+        && request.resource.data.costs is map;
+      allow delete: if true;
+    }
+
+    match /inventory_counts/{countId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['dotId', 'username', 'entries'])
+        && request.resource.data.entries is list
+        && request.resource.data.entries.size() <= 6000
+        && existsOpenInventorySession(request.resource.data.dotId);
+      allow delete: if true;
+    }
+
+    // Ổ KHÓA CUỐI CÙNG (GIỮ NGUYÊN)
     match /{document=**} { allow read, write: if false; }
   }
 }
