@@ -3,7 +3,7 @@
     import { db } from '../../../lib/firebase';
     import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
     import { currentUser } from '../../../lib/stores';
-    import { generateMonthlySchedule } from '../../../lib/scheduleLogic';
+    import { generateMonthlySchedule, generateGenderSchedule, genderCombosToRoleCombos, countGenderDemand } from '../../../lib/scheduleLogic';
     import { optimizeSchedule, autoFixRotation, autoFixWeekendFairness, autoFixGenderBalance, manualBalanceGender, autoFixFatigue } from '../../../lib/optimization';
     
     import SchedulePreview from './SchedulePreview.svelte';
@@ -31,6 +31,10 @@
     export let activeMatrixMode;
     export let triggerPreview = 0;
     export let manualPreviewPayload = null; // [NEW] Nhận Payload từ Excel
+    export let byGender = false;
+    export let genderShiftMatrix = {};
+    export let genderCombos = [];
+    export let genderWeekendCombos = [];
 
     let previewScheduleData = null;
     let previewStats = [];
@@ -47,7 +51,9 @@
     let selectedDayStats = null;
     let showSmartSwap = false;
 
-    $: activeSuggestedCombos = activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos;
+    $: activeSuggestedCombos = byGender
+        ? (activeMatrixMode === 'weekday' ? genderCombos : genderWeekendCombos)
+        : (activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos);
     $: totalCombos = activeSuggestedCombos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
     
     $: if (triggerPreview > 0) { handleGeneratePreview(); }
@@ -76,7 +82,15 @@
             alert(`⛔ KHÔNG THỂ TẠO LỊCH!\n\nNhu cầu đang cần ${totalCombos} vị trí, nhưng chỉ có ${staffStats.total} nhân viên.`);
             return; 
         } 
-        if (suggestedCombos.length === 0 && suggestedWeekendCombos.length === 0) return alert("Chưa có combo nào!");
+        if (byGender) {
+            if (genderCombos.length === 0 && genderWeekendCombos.length === 0) return alert("Chưa có combo nào!");
+            const wd = countGenderDemand(genderCombos), we = countGenderDemand(genderWeekendCombos);
+            const needMale = Math.max(wd.male, we.male), needFemale = Math.max(wd.female, we.female);
+            if (needMale > staffStats.male || needFemale > staffStats.female) {
+                alert(`⛔ KHÔNG THỂ TẠO LỊCH!\n\nNam (gồm Giao Hàng): cần ${needMale}, có ${staffStats.male}.\nNữ: cần ${needFemale}, có ${staffStats.female}.`);
+                return;
+            }
+        } else if (suggestedCombos.length === 0 && suggestedWeekendCombos.length === 0) return alert("Chưa có combo nào!");
         isLoading = true;
         try { 
             pastThreeMonthsData = [];
@@ -98,8 +112,10 @@
             let prevScheduleData = null;
             const prevSnap = await getDoc(doc(db, 'stores', targetStore, 'schedules', `${prevYear}-${String(prevMonth).padStart(2,'0')}`)); 
             if(prevSnap.exists()) prevScheduleData = prevSnap.data();
-            const comboPayload = { weekday: suggestedCombos, weekend: suggestedWeekendCombos }; 
-            const result = generateMonthlySchedule(scheduleStaffList, comboPayload, scheduleMonth, scheduleYear, prevScheduleData, genderConfig, pastThreeMonthsData);
+            const comboPayload = byGender ? { weekday: genderCombos, weekend: genderWeekendCombos } : { weekday: suggestedCombos, weekend: suggestedWeekendCombos }; 
+            const result = byGender
+                ? generateGenderSchedule(scheduleStaffList, comboPayload, scheduleMonth, scheduleYear, prevScheduleData, pastThreeMonthsData)
+                : generateMonthlySchedule(scheduleStaffList, comboPayload, scheduleMonth, scheduleYear, prevScheduleData, genderConfig, pastThreeMonthsData);
             originalResult = JSON.parse(JSON.stringify(result)); 
             previewScheduleData = result.schedule; 
             previewStats = result.staffStats; 
@@ -303,7 +319,9 @@
             const appliedBaselineStats = healScheduleStats({ data: previewScheduleData, stats: previewStats })
                 .map(s => ({ ...s, weekendHardRoles: getWeekendHardRoleCount(s.id) }));
             await setDoc(mainRef, {
-                config: { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig, comboCols: customComboCols },
+                config: byGender
+                    ? { matrix: genderShiftMatrix, approvedCombos: genderCombosToRoleCombos(genderCombos), genderCombos, byGender: true, genderConfig, comboCols: customComboCols }
+                    : { matrix: shiftMatrix, approvedCombos: suggestedCombos, genderConfig, comboCols: customComboCols },
                 data: previewScheduleData, stats: previewStats, systemStats: pureSystemStats, baselineStats: appliedBaselineStats, endOffset: originalResult?.endOffset || 0, updatedAt: serverTimestamp(), updatedBy: $currentUser.username 
             });
             alert("✅ Đã áp dụng lịch thành công!"); 

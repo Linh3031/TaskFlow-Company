@@ -3,13 +3,13 @@
     import { db } from '../../../lib/firebase';
     import { collection, query, where, getDocs, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
     import { currentUser } from '../../../lib/stores';
-    import { calculateCombosFromMatrix } from '../../../lib/scheduleLogic';
+    import { calculateCombosFromMatrix, calculateGenderCombosFromMatrix } from '../../../lib/scheduleLogic';
     
     import AdminScheduleToolbar from './AdminScheduleToolbar.svelte';
     import ScheduleMatrix from './ScheduleMatrix.svelte';
     import StoreConfig from '../../StoreConfig.svelte';
     import ManualScheduleUpload from './ManualScheduleUpload.svelte';
-    import { defaultMatrix, shiftCols, roleRows } from './scheduleConstants.js';
+    import { defaultMatrix, shiftCols, roleRows, defaultGenderMatrix, genderRoleRows } from './scheduleConstants.js';
     import RosterManager from './RosterManager.svelte';
 
     const dispatch = createEventDispatcher();
@@ -27,6 +27,12 @@
     export let activeMatrixMode;
     export let genderConfig;
     export let customComboCols;
+    // Phân ca theo Nam/Nữ: định mức & combo lưu riêng, không đè lên bản theo nghiệp vụ
+    export let byGender = false;
+    export let genderShiftMatrix;
+    export let genderWeekendMatrix;
+    export let genderCombos;
+    export let genderWeekendCombos;
 
     let showStoreConfig = false;
     let showShortageAlert = false;
@@ -39,7 +45,9 @@
     let masterStoreUsers = [];
     
     $: isDemoMode = targetStore?.includes('DEMO');
-    $: activeSuggestedCombos = activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos;
+    $: activeSuggestedCombos = byGender
+        ? (activeMatrixMode === 'weekday' ? genderCombos : genderWeekendCombos)
+        : (activeMatrixMode === 'weekday' ? suggestedCombos : suggestedWeekendCombos);
     
     let comboTotalsMap = {};
     $: { 
@@ -73,6 +81,11 @@
         weekendMatrix = JSON.parse(JSON.stringify(defaultMatrix));
         suggestedCombos = []; 
         suggestedWeekendCombos = [];
+        genderShiftMatrix = JSON.parse(JSON.stringify(defaultGenderMatrix));
+        genderWeekendMatrix = JSON.parse(JSON.stringify(defaultGenderMatrix));
+        genderCombos = [];
+        genderWeekendCombos = [];
+        byGender = false;
 
         try { 
             // 1. LẤY TOÀN BỘ USER CỦA KHO NÀY
@@ -122,13 +135,20 @@
                 if (data.weekendCombos) suggestedWeekendCombos = data.weekendCombos; 
                 if (data.genderConfig) genderConfig = data.genderConfig;
                 if (data.comboCols && Array.isArray(data.comboCols)) { customComboCols = data.comboCols; } 
+                if (data.genderMatrix) genderShiftMatrix = { ...defaultGenderMatrix, ...data.genderMatrix };
+                if (data.genderWeekendMatrix) genderWeekendMatrix = { ...defaultGenderMatrix, ...data.genderWeekendMatrix };
+                if (data.genderCombos) genderCombos = data.genderCombos;
+                if (data.genderWeekendCombos) genderWeekendCombos = data.genderWeekendCombos;
+                if (data.byGender) byGender = true;
             } 
         } catch (e) { console.error(e); } 
     }
 
     function updateComboQty(roleLabel, comboCode, newQty) { 
         const qtyVal = parseInt(newQty) || 0;
-        let currentList = activeMatrixMode === 'weekday' ? [...suggestedCombos] : [...suggestedWeekendCombos]; 
+        let currentList = byGender
+            ? (activeMatrixMode === 'weekday' ? [...genderCombos] : [...genderWeekendCombos])
+            : (activeMatrixMode === 'weekday' ? [...suggestedCombos] : [...suggestedWeekendCombos]); 
         const targetRoles = [roleLabel];
         if (roleLabel === 'Thu Ngân') targetRoles.push('TN', 'tn');
         if (roleLabel === 'Giao Hàng') targetRoles.push('GH', 'gh');
@@ -145,8 +165,13 @@
             currentList.push({ code: comboCode, role: roleLabel, label: `${roleLabel} ${comboCode}`, qty: qtyVal });
         } 
         
-        if (activeMatrixMode === 'weekday') suggestedCombos = currentList;
-        else suggestedWeekendCombos = currentList;
+        if (byGender) {
+            if (activeMatrixMode === 'weekday') genderCombos = currentList;
+            else genderWeekendCombos = currentList;
+        } else {
+            if (activeMatrixMode === 'weekday') suggestedCombos = currentList;
+            else suggestedWeekendCombos = currentList;
+        }
     }
 
     async function saveGenderConfig(newConfig) { 
@@ -174,13 +199,26 @@
                 });
                 return c; 
             }; 
+            const cleanGender = (m) => { 
+                const c = JSON.parse(JSON.stringify(m));
+                Object.keys(c).forEach(key => { 
+                    if(c[key]) ['nam', 'nu', 'gh'].forEach(role => { 
+                        let val = parseInt(c[key][role]); 
+                        if (isNaN(val)) val = 0; 
+                        c[key][role] = val; 
+                    }); 
+                });
+                return c; 
+            }; 
             shiftMatrix = clean(shiftMatrix); 
             weekendMatrix = clean(weekendMatrix); 
+            genderShiftMatrix = cleanGender(genderShiftMatrix); 
+            genderWeekendMatrix = cleanGender(genderWeekendMatrix); 
             await tick(); 
             showShortageAlert = false; 
             shortageCount = 0;
-            let tempWeekday = calculateCombosFromMatrix(shiftMatrix); 
-            let tempWeekend = calculateCombosFromMatrix(weekendMatrix); 
+            let tempWeekday = byGender ? calculateGenderCombosFromMatrix(genderShiftMatrix) : calculateCombosFromMatrix(shiftMatrix); 
+            let tempWeekend = byGender ? calculateGenderCombosFromMatrix(genderWeekendMatrix) : calculateCombosFromMatrix(weekendMatrix); 
             const checkShortage = (combos) => { 
                 const totalDemand = combos.reduce((sum, c) => sum + (parseInt(c.qty)||0), 0);
                 return totalDemand > staffStats.total ? (totalDemand - staffStats.total) : 0; 
@@ -188,8 +226,13 @@
             
             const s1 = checkShortage(tempWeekday); 
             const s2 = checkShortage(tempWeekend);
-            suggestedCombos = tempWeekday; 
-            suggestedWeekendCombos = tempWeekend;
+            if (byGender) {
+                genderCombos = tempWeekday;
+                genderWeekendCombos = tempWeekend;
+            } else {
+                suggestedCombos = tempWeekday; 
+                suggestedWeekendCombos = tempWeekend;
+            }
             
             if (s1 > 0 || s2 > 0) { 
                 shortageCount = Math.max(s1, s2);
@@ -198,7 +241,9 @@
             
             if(save) { 
                 await setDoc(doc(db, 'settings', `shift_matrix_${targetStore}`), { 
-                    matrix: shiftMatrix, approvedCombos: suggestedCombos, weekendMatrix: weekendMatrix, weekendCombos: suggestedWeekendCombos, genderConfig, comboCols: customComboCols, updatedAt: serverTimestamp(), updatedBy: $currentUser.username 
+                    matrix: shiftMatrix, approvedCombos: suggestedCombos, weekendMatrix: weekendMatrix, weekendCombos: suggestedWeekendCombos, genderConfig, comboCols: customComboCols, 
+                    byGender, genderMatrix: genderShiftMatrix, genderWeekendMatrix, genderCombos, genderWeekendCombos,
+                    updatedAt: serverTimestamp(), updatedBy: $currentUser.username 
                 });
             } 
         } catch (e) { alert("Lỗi tính toán: " + e.message);
@@ -215,23 +260,38 @@
 <AdminScheduleToolbar 
     {isDemoMode} 
     bind:setupMode 
+    bind:byGender
     on:openConfig={() => showStoreConfig = true} 
     on:openRoster={() => showRosterManager = true} 
 />
 
 {#if setupMode === 'auto'}
     <div id="matrix-input-area" class="animate-fadeIn mt-2">
-        <ScheduleMatrix 
-            bind:staffStats bind:shiftMatrix bind:weekendMatrix bind:activeMatrixMode bind:scheduleMonth bind:scheduleYear {shiftCols} {roleRows} comboCols={customComboCols} {activeSuggestedCombos} {comboTotalsMap} {genderConfig}
-            on:modeChange={(e) => activeMatrixMode = e.detail}
-            on:monthChange={(e) => { if(e.detail === 1) { if(scheduleMonth==12){scheduleMonth=1;scheduleYear++}else{scheduleMonth++} } else { if(scheduleMonth==1){scheduleMonth=12;scheduleYear--}else{scheduleMonth--} } }}
-            on:calculate={() => handleCalculateCombos(true)}
-            on:updateCombo={(e) => updateComboQty(e.detail.role, e.detail.code, e.detail.qty)}
-            on:configChange={(e) => { const newConf = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
-            on:preview={() => dispatch('preview')}
-            on:addCol={handleAddColumn}
-            on:updateCols={(e) => handleUpdateColumns(e.detail)}
-        />
+        {#if byGender}
+            <ScheduleMatrix 
+                bind:staffStats bind:shiftMatrix={genderShiftMatrix} bind:weekendMatrix={genderWeekendMatrix} bind:activeMatrixMode bind:scheduleMonth bind:scheduleYear {shiftCols} roleRows={genderRoleRows} comboCols={customComboCols} {activeSuggestedCombos} {comboTotalsMap} {genderConfig}
+                on:modeChange={(e) => activeMatrixMode = e.detail}
+                on:monthChange={(e) => { if(e.detail === 1) { if(scheduleMonth==12){scheduleMonth=1;scheduleYear++}else{scheduleMonth++} } else { if(scheduleMonth==1){scheduleMonth=12;scheduleYear--}else{scheduleMonth--} } }}
+                on:calculate={() => handleCalculateCombos(true)}
+                on:updateCombo={(e) => updateComboQty(e.detail.role, e.detail.code, e.detail.qty)}
+                on:configChange={(e) => { const newConf = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
+                on:preview={() => dispatch('preview')}
+                on:addCol={handleAddColumn}
+                on:updateCols={(e) => handleUpdateColumns(e.detail)}
+            />
+        {:else}
+            <ScheduleMatrix 
+                bind:staffStats bind:shiftMatrix bind:weekendMatrix bind:activeMatrixMode bind:scheduleMonth bind:scheduleYear {shiftCols} {roleRows} comboCols={customComboCols} {activeSuggestedCombos} {comboTotalsMap} {genderConfig}
+                on:modeChange={(e) => activeMatrixMode = e.detail}
+                on:monthChange={(e) => { if(e.detail === 1) { if(scheduleMonth==12){scheduleMonth=1;scheduleYear++}else{scheduleMonth++} } else { if(scheduleMonth==1){scheduleMonth=12;scheduleYear--}else{scheduleMonth--} } }}
+                on:calculate={() => handleCalculateCombos(true)}
+                on:updateCombo={(e) => updateComboQty(e.detail.role, e.detail.code, e.detail.qty)}
+                on:configChange={(e) => { const newConf = {...genderConfig}; newConf[e.detail.type] = e.detail.val; saveGenderConfig(newConf); }}
+                on:preview={() => dispatch('preview')}
+                on:addCol={handleAddColumn}
+                on:updateCols={(e) => handleUpdateColumns(e.detail)}
+            />
+        {/if}
     </div>
 {:else}
     <ManualScheduleUpload 

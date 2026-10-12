@@ -2,7 +2,7 @@
   // Version 61.0 - Architectural Refactor (Hỗ trợ Data Flow cho Upload Excel thủ công)
   import AdminScheduleSetup from './schedule/AdminScheduleSetup.svelte';
   import AdminScheduleReview from './schedule/AdminScheduleReview.svelte';
-  import { defaultMatrix, DEFAULT_COLS } from './schedule/scheduleConstants.js';
+  import { defaultMatrix, DEFAULT_COLS, defaultGenderMatrix } from './schedule/scheduleConstants.js';
 
   export let targetStore = '';
   
@@ -19,6 +19,13 @@
   let activeMatrixMode = 'weekday';
   let genderConfig = { kho: 'none', tn: 'none' };
   let customComboCols = [...DEFAULT_COLS]; 
+
+  // Phân ca theo Nam/Nữ
+  let byGender = false;
+  let genderShiftMatrix = JSON.parse(JSON.stringify(defaultGenderMatrix));
+  let genderWeekendMatrix = JSON.parse(JSON.stringify(defaultGenderMatrix));
+  let genderCombos = [];
+  let genderWeekendCombos = [];
 
   let triggerPreview = 0; 
   // [NEW] Biến hứng dữ liệu dịch ngược từ file Excel
@@ -41,6 +48,11 @@
         bind:activeMatrixMode
         bind:genderConfig
         bind:customComboCols
+        bind:byGender
+        bind:genderShiftMatrix
+        bind:genderWeekendMatrix
+        bind:genderCombos
+        bind:genderWeekendCombos
         on:preview={() => triggerPreview++}
         on:manualPreview={(e) => manualPreviewPayload = e.detail} 
     />
@@ -56,6 +68,10 @@
         {suggestedWeekendCombos}
         {genderConfig}
         {customComboCols}
+        {byGender}
+        {genderShiftMatrix}
+        {genderCombos}
+        {genderWeekendCombos}
         {shiftMatrix}
         {weekendMatrix}
         {activeMatrixMode}

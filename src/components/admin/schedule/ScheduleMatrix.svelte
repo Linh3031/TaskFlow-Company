@@ -21,11 +21,13 @@
   
   const getRoleTotal = (roleId, matrix) => Object.values(matrix).reduce((sum, s) => sum + (parseInt(s[roleId])||0), 0);
   const getShiftTotal = (shiftId, matrix) => { const s = matrix[shiftId] || {};
-  return (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0); };
-  const getGrandTotal = (matrix) => Object.values(matrix).reduce((sum, s) => sum + (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0), 0);
+  return (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0) + (parseInt(s.nam)||0) + (parseInt(s.nu)||0); };
+  const getGrandTotal = (matrix) => Object.values(matrix).reduce((sum, s) => sum + (parseInt(s.kho)||0) + (parseInt(s.tn)||0) + (parseInt(s.tv)||0) + (parseInt(s.gh)||0) + (parseInt(s.nam)||0) + (parseInt(s.nu)||0), 0);
   
   function standardizeRole(val) {
       const s = String(val || '').toLowerCase().trim();
+      if (s === 'nam') return 'nam';
+      if (s === 'nữ' || s === 'nu') return 'nu';
       if (s === 'kho' || s === 'k') return 'kho';
       if (s.includes('thu ngân') || s.includes('tn')) return 'tn';
       if (s.includes('giao') || s.includes('gh')) return 'gh';

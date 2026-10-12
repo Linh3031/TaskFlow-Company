@@ -22,6 +22,14 @@
   $: isDemoMode = targetStore?.includes('DEMO');
   let activeSection = 'schedule';
 
+  const adminTabs = [
+      { id: 'schedule', label: 'Phân Ca', icon: 'calendar_month', color: '#378ADD', bg: '#E6F1FB', text: '#0C447C' },
+      { id: 'accounts', label: 'Nhân Sự', icon: 'groups', color: '#1D9E75', bg: '#E1F5EE', text: '#085041' },
+      { id: 'template', label: 'Mẫu Việc', icon: 'checklist', color: '#D85A30', bg: '#FAECE7', text: '#712B13' },
+      { id: 'ui', label: 'Giao Diện', icon: 'palette', color: '#D4537E', bg: '#FBEAF0', text: '#72243E' },
+      { id: 'installment', label: 'Khai Báo Trả Góp', icon: 'credit_card', color: '#BA7517', bg: '#FAEEDA', text: '#633806', superOnly: true }
+  ];
+
   function handleSwitchTab(e) {
       dispatch('switchTab', e.detail);
       dispatch('close');
@@ -29,32 +37,32 @@
 </script>
 
 <div class="fixed inset-0 z-50 bg-slate-100 flex flex-col animate-fadeIn">
-    <div class="min-h-16 py-2 bg-white border-b border-slate-200 flex items-center justify-between px-3 lg:px-6 shrink-0 shadow-sm z-20">
-        <div class="flex items-center gap-2 lg:gap-6 min-w-0">
-            <button class="shrink-0 w-10 h-10 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-all text-slate-500 hover:text-indigo-600" on:click={() => dispatch('close')} aria-label="Đóng"><span class="material-icons-round">arrow_back</span></button>
-            <h2 class="text-xl font-bold text-slate-800 tracking-tight hidden lg:block">Quản Trị</h2>
-            
-            <div class="flex items-center gap-2 min-w-0">
-                <div id="store-select-container" class="relative shrink-0">
-                    <select bind:value={targetStore} class="pl-3 pr-8 py-1.5 bg-indigo-50 border-indigo-100 text-indigo-700 font-bold rounded-lg text-sm outline-none appearance-none cursor-pointer hover:bg-indigo-100 transition-colors">
-                        {#each myStores as s}<option value={s}>{s}</option>{/each}
-                    </select>
-                    <span class="material-icons-round absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 text-sm pointer-events-none">expand_more</span>
-                </div>
+    <div class="shrink-0 z-20 px-3 lg:px-6 pt-3 lg:pt-4">
+        <div class="w-full bg-white border border-slate-200 rounded-[12px] px-2 py-1.5 flex items-center gap-2 min-w-0">
+            <button class="shrink-0 w-[38px] h-[38px] rounded-[10px] hover:bg-slate-100 flex items-center justify-center transition-all text-slate-500 hover:text-slate-800" on:click={() => dispatch('close')} aria-label="Đóng"><span class="material-icons-round">arrow_back</span></button>
+            <h2 class="text-lg font-bold text-slate-800 tracking-tight hidden lg:block shrink-0 pr-1">Quản Trị</h2>
 
-                <div class="flex flex-wrap bg-slate-100 p-1 rounded-lg lg:ml-2 gap-1 min-w-0">
-                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='schedule'?'bg-white text-indigo-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'schedule'}>Phân Ca</button>
-                    
-                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='accounts'?'bg-white text-blue-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'accounts'}>Nhân Sự</button>
+            <div id="store-select-container" class="relative shrink-0">
+                <select bind:value={targetStore} class="h-[38px] pl-3 pr-8 bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-[10px] text-[14px] outline-none appearance-none cursor-pointer hover:bg-slate-100 transition-colors">
+                    {#each myStores as s}<option value={s}>{s}</option>{/each}
+                </select>
+                <span class="material-icons-round absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">expand_more</span>
+            </div>
 
-                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Mẫu Việc</button>
+            <div class="w-px h-6 bg-slate-200 shrink-0 mx-1"></div>
 
-                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='ui'?'bg-white text-emerald-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'ui'}>Giao Diện</button>
-
-                    {#if isSuperAdmin}
-                        <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='installment'?'bg-white text-purple-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'installment'}>Khai Báo Trả Góp</button>
+            <div class="flex flex-wrap items-center gap-1 min-w-0">
+                {#each adminTabs as tab (tab.id)}
+                    {#if !tab.superOnly || isSuperAdmin}
+                        <button
+                            class="h-[38px] px-3 rounded-[10px] text-[14px] font-bold whitespace-nowrap transition-colors flex items-center gap-1.5 {activeSection === tab.id ? '' : 'bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-700'}"
+                            style={activeSection === tab.id ? `background:${tab.bg};color:${tab.text};box-shadow:inset 0 -2px 0 ${tab.color};` : ''}
+                            on:click={() => activeSection = tab.id}
+                        >
+                            <span class="material-icons-round text-[18px]" style="color:{tab.color}">{tab.icon}</span>{tab.label}
+                        </button>
                     {/if}
-                </div>
+                {/each}
             </div>
         </div>
     </div>

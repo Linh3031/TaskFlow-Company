@@ -6,6 +6,11 @@ export const shiftCols = [ { id: 'c1', label: 'C1 (08-09h)' }, { id: 'c2', label
 
 export const roleRows = [ { id: 'kho', label: 'Kho', color: 'text-orange-600 bg-orange-50 border-orange-100' }, { id: 'tn', label: 'Thu Ngân', color: 'text-purple-600 bg-purple-50 border-purple-100' }, { id: 'gh', label: 'Giao Hàng', color: 'text-blue-600 bg-blue-50 border-blue-100' }, { id: 'tv', label: 'Tư Vấn', color: 'text-gray-600 bg-gray-50 border-gray-200' } ];
 
+// Chế độ phân ca theo Nam/Nữ: 3 dòng Nam, Nữ, Giao Hàng (Giao Hàng mặc định là Nam)
+export const defaultGenderMatrix = { c1: { nam: 0, nu: 0, gh: 0 }, c2: { nam: 0, nu: 0, gh: 0 }, c3: { nam: 0, nu: 0, gh: 0 }, c4: { nam: 0, nu: 0, gh: 0 }, c5: { nam: 0, nu: 0, gh: 0 }, c6: { nam: 0, nu: 0, gh: 0 } };
+
+export const genderRoleRows = [ { id: 'nam', label: 'Nam', color: 'text-sky-700 bg-sky-50 border-sky-100' }, { id: 'nu', label: 'Nữ', color: 'text-pink-600 bg-pink-50 border-pink-100' }, { id: 'gh', label: 'Giao Hàng', color: 'text-blue-600 bg-blue-50 border-blue-100' } ];
+
 export const INSPECTION_OPTIONS = [ { val: 'none', label: 'Tắt soi lỗi', icon: 'visibility_off', color: 'text-gray-400' }, { val: 'gender', label: 'Soi Giới Tính', icon: 'wc', color: 'text-pink-500' }, { val: 'weekend', label: 'Công Bằng Cuối Tuần', icon: 'balance', color: 'text-indigo-600' }, { val: 'rotation', label: 'Soi Nhịp Sáng/Chiều', icon: 'sync_problem', color: 'text-orange-500' }, { val: 'fatigue', label: 'Soi Trùng Nghiệp Vụ', icon: 'battery_alert', color: 'text-red-600' } ];
 
 export function getShiftColor(code) { 
