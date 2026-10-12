@@ -4,6 +4,8 @@
     // Field `thiDua` của document sknv_app/{kho}/phieu/{maNV} — nhóm Đạt / Gần đạt / Cần cố gắng / Chưa có số bán
     // do dashboard phân sẵn, app KHÔNG phân nhóm lại. Giao diện chép theo CompetitionDetailView.svelte (dashboard-svelte).
     export let thiDua = null;
+    // Hạng so cả siêu thị (field `xepHang` của phiếu) — thẻ Tỷ lệ hoàn thành dùng xepHang.thiDua / xepHang.tongNV
+    export let xepHang = null;
 
     let viewMode = 'rut_gon';
 
@@ -15,7 +17,9 @@
         { id: 'ganDat', title: 'Nhóm Gần Đạt', data: thiDua?.ganDat || [], color: 'amber', icon: 'trending_up' },
         { id: 'canCoGang', title: 'Nhóm Cần Cố Gắng', data: thiDua?.canCoGang || [], color: 'red', icon: 'warning' }
     ];
-    $: coDuLieu = (summary.total || 0) > 0 || compactList.length > 0 || chuaCoSoBan.length > 0 || nhom.some(g => g.data.length > 0);
+    // Dữ liệu cũ chưa có hạng thì không hiện dòng hạng.
+    $: hangThiDua = xepHang && xepHang.thiDua >= 1 && xepHang.tongNV >= 1 ? `Hạng ${xepHang.thiDua}/${xepHang.tongNV}` : '';
+    $: coDuLieu =(summary.total || 0) > 0 || compactList.length > 0 || chuaCoSoBan.length > 0 || nhom.some(g => g.data.length > 0);
 
     // Class viết đầy đủ để Tailwind giữ lại (không ghép động kiểu bg-{color}-50)
     const MAU = {
@@ -63,7 +67,10 @@
                         <span class="text-[10px] font-bold uppercase text-rose-50 leading-tight">Tỷ lệ Hoàn thành</span>
                     </div>
                     <div class="flex items-end justify-between mt-2">
-                        <div class="text-[10px] font-semibold text-rose-100 leading-tight">Dựa trên tiến độ dự kiến</div>
+                        <div class="min-w-0">
+                            {#if hangThiDua}<div class="text-[11px] font-black text-white leading-tight truncate mb-0.5">{hangThiDua}</div>{/if}
+                            <div class="text-[10px] font-semibold text-rose-100 leading-tight">Dựa trên tiến độ dự kiến</div>
+                        </div>
                         <span class="text-3xl font-black text-yellow-200 leading-none">{formatters.formatNumber(summary.rate, 0)}%</span>
                     </div>
                 </div>

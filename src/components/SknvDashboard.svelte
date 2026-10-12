@@ -309,9 +309,9 @@
                         </div>
                     {/key}
                 {:else if activeTab === 'chi_tiet'}
-                    <SknvCategoryTab chiTiet={goiChiTiet} trangThai={trangThaiChiTiet} tyLeQD={goiPhieu.phieu?.tyLeQD} tyLeTC={goiPhieu.phieu?.tyLeTC} />
+                    <SknvCategoryTab chiTiet={goiChiTiet} trangThai={trangThaiChiTiet} tyLeQD={goiPhieu.phieu?.tyLeQD} tyLeTC={goiPhieu.phieu?.tyLeTC} xepHang={goiPhieu.xepHang} />
                 {:else if activeTab === 'thi_dua'}
-                    <SknvCompetitionTab thiDua={goiPhieu.thiDua} />
+                    <SknvCompetitionTab thiDua={goiPhieu.thiDua} xepHang={goiPhieu.xepHang} />
                 {/if}
             </div>
         {:else if trangThaiPhieu === 'khong_co'}

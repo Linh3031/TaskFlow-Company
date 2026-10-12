@@ -8,6 +8,8 @@
     // Tỷ lệ QĐ / tỷ lệ trả chậm lấy từ bảng điểm (phieu.tyLeQD, phieu.tyLeTC) — document chi tiết không có số trả chậm
     export let tyLeQD = null;
     export let tyLeTC = null;
+    // Hạng từng chỉ số so cả siêu thị (field `xepHang` của phiếu): { tongNV, dtThuc, dtQD, pctQD, pctTraCham }
+    export let xepHang = null;
 
     $: tong = chiTiet?.tong || {};
     $: nganh = chiTiet?.nganh || [];
@@ -24,6 +26,8 @@
     // Số lượng giữ nguyên; tiền tính theo nghìn đồng. Số lỗi (null) hiện "—".
     const sl = (v) => (v === null || v === undefined ? '—' : formatters.formatNumber(v));
     const k = (v) => (v === null || v === undefined ? '—' : formatters.formatNumber(Math.round(v / 1000)));
+    // "Hạng x/y" — dữ liệu cũ chưa có hạng hoặc NV không có số thì trả về '' (không hiện dòng hạng).
+    const chuoiHang = (xh, key) => (xh && xh[key] >= 1 && xh.tongNV >= 1 ? `Hạng ${xh[key]}/${xh.tongNV}` : '');
 
     const MAU_NGANH = [
         { vien: 'border-l-blue-500', nen: 'bg-blue-50', chu: 'text-blue-600' },
@@ -58,18 +62,22 @@
                 <div class="bg-white/15 rounded-xl p-2 min-w-0">
                     <div class="text-[10px] uppercase font-bold text-sky-100">DT thực</div>
                     <div class="text-lg font-black text-yellow-200 truncate">{k(tong.dt)}</div>
+                    {#if chuoiHang(xepHang, 'dtThuc')}<div class="text-[10px] font-bold text-white truncate">{chuoiHang(xepHang, 'dtThuc')}</div>{/if}
                 </div>
                 <div class="bg-white/15 rounded-xl p-2 min-w-0">
                     <div class="text-[10px] uppercase font-bold text-sky-100">DTQĐ</div>
                     <div class="text-lg font-black text-pink-200 truncate">{k(tong.dtqd)}</div>
+                    {#if chuoiHang(xepHang, 'dtQD')}<div class="text-[10px] font-bold text-white truncate">{chuoiHang(xepHang, 'dtQD')}</div>{/if}
                 </div>
                 <div class="bg-white/15 rounded-xl p-2 min-w-0">
                     <div class="text-[10px] uppercase font-bold text-sky-100">Tỷ lệ QĐ</div>
                     <div class="text-lg font-black text-emerald-200 truncate">{tyLeQD?.value ?? '—'}</div>
+                    {#if chuoiHang(xepHang, 'pctQD')}<div class="text-[10px] font-bold text-white truncate">{chuoiHang(xepHang, 'pctQD')}</div>{/if}
                 </div>
                 <div class="bg-white/15 rounded-xl p-2 min-w-0">
                     <div class="text-[10px] uppercase font-bold text-sky-100">Tỷ lệ trả chậm</div>
                     <div class="text-lg font-black text-orange-200 truncate">{tyLeTC?.value ?? '—'}</div>
+                    {#if chuoiHang(xepHang, 'pctTraCham')}<div class="text-[10px] font-bold text-white truncate">{chuoiHang(xepHang, 'pctTraCham')}</div>{/if}
                 </div>
             </div>
             <div class="text-[10px] text-sky-100 mt-2">Tiền tính theo nghìn đồng · chạm vào ngành hàng để xem nhóm và sản phẩm</div>
