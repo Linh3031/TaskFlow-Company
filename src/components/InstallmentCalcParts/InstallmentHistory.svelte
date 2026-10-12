@@ -47,7 +47,7 @@
 </div>
 
 {#if selectedItems.length > 0}
-<div class="fixed bottom-0 left-0 w-full border-t border-indigo-200 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] z-[60] rounded-t-xl animate-slideUp pb-6 bg-indigo-50">
+<div class="fixed bottom-0 left-0 w-full border-t border-indigo-200 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] z-40 rounded-t-xl animate-slideUp pb-6 bg-indigo-50">
     <div class="p-3 max-w-md mx-auto">
         <div class="flex justify-between items-center mb-2">
             <span class="text-[10px] font-bold text-indigo-400 uppercase">Đang chọn: {selectedItems.length} đơn</span>

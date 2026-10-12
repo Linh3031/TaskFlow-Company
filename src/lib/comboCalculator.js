@@ -1,5 +1,26 @@
 // src/lib/comboCalculator.js
 
+// Giao Hàng: ghép ca theo đúng khung giờ người dùng khai báo (VD: khai C1→C5 thì ra 12345, C2→C5 thì ra 2345).
+// Ưu tiên đoạn ca liên tục dài nhất, phần dư còn lại ghép tiếp thành ca ngắn hơn.
+const GH_COLS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+function pushGhCombos(combos, findMaxCap, subtract) {
+    while (true) {
+        let best = null;
+        for (let i = 0; i < GH_COLS.length - 1; i++) {
+            for (let j = GH_COLS.length - 1; j > i; j--) {
+                const seg = GH_COLS.slice(i, j + 1);
+                const cap = findMaxCap(seg, 'gh');
+                if (cap > 0 && cap < 999) { if (!best || seg.length > best.seg.length) best = { seg, cap }; break; }
+            }
+        }
+        if (!best) break;
+        const code = best.seg.map(c => c.slice(1)).join('');
+        const existing = combos.find(c => c.code === code && c.role === 'GH');
+        if (existing) existing.qty += best.cap; else combos.push({ code, role: 'GH', qty: best.cap });
+        subtract(best.seg, 'gh', best.cap);
+    }
+}
+
 export function calculateCombosFromMatrix(matrix) {
     let remain = JSON.parse(JSON.stringify(matrix));
     let combos = [];
@@ -12,12 +33,7 @@ export function calculateCombosFromMatrix(matrix) {
         return min;
     };
 
-    let ghFullQty = findMaxCap(['c2', 'c3', 'c4', 'c5'], 'gh');
-    if (ghFullQty > 0) { combos.push({ code: '2345', role: 'GH', qty: ghFullQty }); subtract(['c2', 'c3', 'c4', 'c5'], 'gh', ghFullQty); }
-    let gh23 = findMaxCap(['c2', 'c3'], 'gh');
-    if (gh23 > 0) { combos.push({ code: '23', role: 'GH', qty: gh23 }); subtract(['c2', 'c3'], 'gh', gh23); }
-    let gh45 = findMaxCap(['c4', 'c5'], 'gh');
-    if (gh45 > 0) { combos.push({ code: '45', role: 'GH', qty: gh45 }); subtract(['c4', 'c5'], 'gh', gh45); }
+    pushGhCombos(combos, findMaxCap, subtract);
 
     ['kho', 'tn', 'tv'].forEach(role => {
         let labelRole = role === 'kho' ? 'Kho' : (role === 'tn' ? 'Thu Ngân' : 'TV');
@@ -48,12 +64,7 @@ export function calculateGenderCombosFromMatrix(matrix) {
         return min;
     };
 
-    let ghFullQty = findMaxCap(['c2', 'c3', 'c4', 'c5'], 'gh');
-    if (ghFullQty > 0) { combos.push({ code: '2345', role: 'GH', qty: ghFullQty }); subtract(['c2', 'c3', 'c4', 'c5'], 'gh', ghFullQty); }
-    let gh23 = findMaxCap(['c2', 'c3'], 'gh');
-    if (gh23 > 0) { combos.push({ code: '23', role: 'GH', qty: gh23 }); subtract(['c2', 'c3'], 'gh', gh23); }
-    let gh45 = findMaxCap(['c4', 'c5'], 'gh');
-    if (gh45 > 0) { combos.push({ code: '45', role: 'GH', qty: gh45 }); subtract(['c4', 'c5'], 'gh', gh45); }
+    pushGhCombos(combos, findMaxCap, subtract);
 
     ['nam', 'nu'].forEach(role => {
         let labelRole = role === 'nam' ? 'Nam' : 'Nữ';
