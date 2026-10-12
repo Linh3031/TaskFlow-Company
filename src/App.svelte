@@ -37,6 +37,7 @@
   let unsubTemplate = () => {};
   let unsubTasks = () => {};
   let unsubHandover = () => {}; 
+  let unsubUiConfig = () => {};
   
   let hasCheckedInit = false; 
   let isTasksLoaded = false;
@@ -48,12 +49,29 @@
       {id:'schedule', icon:'calendar_month', label:'Lịch Ca', color:'#e91e63'},
       {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'}, 
       {id:'handover', icon:'assignment_ind', label:'Bàn Giao', color:'#9c27b0'},
-      {id:'group_task', icon:'groups', label:'Điểm Danh', color:'#f97316'}
+      {id:'group_task', icon:'groups', label:'Điểm Danh', color:'#f97316'},
+      {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50', defaultHidden: true},
+      {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7', defaultHidden: true}
   ];
 
   $: availableTabs = $currentUser?.role === 'pg' 
-      ? ALL_TABS.filter(t => ['8nttt', 'schedule', 'group_task'].includes(t.id))
+      ? ALL_TABS.filter(t => ['8nttt', 'schedule', 'group_task', 'installment'].includes(t.id))
       : ALL_TABS;
+
+  // Bật/tắt Tab cho cả kho (stores/{storeId}/settings/uiConfig), chưa cài thì theo defaultHidden
+  let tabVisibility = {};
+  const isTabOn = (t, cfg) => cfg[t.id] ?? !t.defaultHidden;
+  $: visibleTabs = availableTabs.filter(t => isTabOn(t, tabVisibility));
+  $: if (ALL_TABS.some(t => t.id === activeTab && !isTabOn(t, tabVisibility)) && visibleTabs.length > 0) activeTab = visibleTabs[0].id;
+
+  function listenUiConfig(storeId) {
+      unsubUiConfig();
+      unsubUiConfig = onSnapshot(doc(db, 'stores', storeId, 'settings', 'uiConfig'), (snap) => {
+          tabVisibility = snap.exists() ? (snap.data().tabVisibility || {}) : {};
+      });
+  }
+
+  $: if ($activeStoreId) listenUiConfig($activeStoreId);
 
   $: displayDateLabel = (() => {
       if (!selectedDate) return '';
@@ -119,7 +137,7 @@
 
   });
 
-  onDestroy(() => { unsubTemplate(); unsubTasks(); unsubHandover(); document.removeEventListener('visibilitychange', handleVisibilityChange); });
+  onDestroy(() => { unsubTemplate(); unsubTasks(); unsubHandover(); unsubUiConfig(); document.removeEventListener('visibilitychange', handleVisibilityChange); });
 
   $: if ($currentUser && !$activeStoreId) {
       if ($currentUser.storeIds && $currentUser.storeIds.length > 0) {
@@ -296,7 +314,7 @@
       <Header on:openAdmin={() => showAdminModal = true} on:openIosGuide={() => alert('Trên iPhone: Bấm nút Chia sẻ -> Chọn "Thêm vào MH chính"')} on:jumpToTask={handleJumpToTask} />
       
      <nav id="tab-nav-container" class="tab-nav">
-        {#each availableTabs as t}
+        {#each visibleTabs as t}
             <button class="tab-btn {activeTab===t.id?'active':''}" on:click={() => activeTab=t.id} style="--theme-color: {t.color};">
                 <div class="icon-box relative">
                     <span class="material-icons-round">{t.icon}</span>
@@ -319,6 +337,7 @@
                  {:else}
                     {#if activeTab==='warehouse'}📦 Checklist Kho{/if}
                     {#if activeTab==='cashier'}💰 Checklist Thu Ngân{/if}
+                    {#if activeTab==='installment'}🧮 Tính Trả Góp{/if}
                     {#if activeTab==='8nttt'}📋 Kiểm tra 8NTTT{/if}
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                     {#if activeTab==='handover'}🤝 Bàn Giao{/if}
@@ -361,7 +380,7 @@
     </div>
   {/if}
   
-  {#if showAdminModal} <AdminModal on:close={() => showAdminModal = false} on:switchTab={(e) => { activeTab = e.detail; showAdminModal = false; }} /> {/if}
+  {#if showAdminModal} <AdminModal allTabs={ALL_TABS} on:close={() => showAdminModal = false} on:switchTab={(e) => { activeTab = e.detail; showAdminModal = false; }} /> {/if}
   {#if showTaskModal && selectedTask} 
       <TaskModal taskTitle={selectedTask.title} taskId={selectedTask.id} bind:note={noteInput} on:cancel={() => showTaskModal = false} on:confirm={confirmComplete} /> 
   {/if}

@@ -9,6 +9,9 @@
   import AdminSchedule from './admin/AdminSchedule.svelte';
   // ĐÃ PHẪU THUẬT: Import Component mới
   import AdminInstallmentConfig from './admin/AdminInstallmentConfig.svelte';
+  import AdminTabConfig from './admin/AdminTabConfig.svelte';
+
+  export let allTabs = [];
 
   const dispatch = createEventDispatcher();
   $: isSuperAdmin = $currentUser?.role === 'super_admin';
@@ -46,6 +49,8 @@
 
                     <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='template'?'bg-white text-orange-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'template'}>Mẫu Việc</button>
 
+                    <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='ui'?'bg-white text-emerald-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'ui'}>Giao Diện</button>
+
                     {#if isSuperAdmin}
                         <button class="px-3 lg:px-4 py-1.5 rounded-md text-sm font-bold whitespace-nowrap transition-all {activeSection==='installment'?'bg-white text-purple-600 shadow-sm':'text-slate-500 hover:text-slate-700'}" on:click={() => activeSection = 'installment'}>Khai Báo Trả Góp</button>
                     {/if}
@@ -65,6 +70,10 @@
 
         {#if activeSection === 'template'}
             <AdminTemplate {targetStore} />
+        {/if}
+
+        {#if activeSection === 'ui'}
+            <AdminTabConfig {targetStore} {allTabs} />
         {/if}
 
         {#if activeSection === 'installment'}
