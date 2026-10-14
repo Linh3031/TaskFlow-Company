@@ -18,7 +18,7 @@
   import SknvDashboard from './components/SknvDashboard.svelte';
   import GroupTaskList from './components/GroupTaskList.svelte';
 
-  const APP_VERSION = 47; 
+  const APP_VERSION = 48; 
   let showUpdatePrompt = false;
 
   $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {

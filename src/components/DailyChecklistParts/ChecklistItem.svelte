@@ -77,7 +77,7 @@
     <div class="flex justify-between items-start">
         <div class="flex-1 pr-2 min-w-0">
             <div class="flex items-center gap-2">
-                <div class="font-bold text-slate-800 text-sm truncate {item.completed ? 'line-through decoration-green-400' : ''}">{item.areaName}</div>
+                <div class="font-bold text-slate-800 text-sm line-clamp-2 break-words min-w-0 {item.completed ? 'line-through decoration-green-400' : ''}">{item.areaName}</div>
                 
                 {#if isAdmin}
                     <div class="flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity shrink-0">
