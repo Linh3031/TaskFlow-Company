@@ -105,6 +105,34 @@ export function staffList(reports) {
     return Array.from(map.values()).map(({ uid, name }) => ({ uid, name })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Sản phẩm phụ = mọi mục đếm ngoài nhóm Sản phẩm chính (Bảo hiểm dạng đếm, PK - ĐH - SIM, Gia dụng, Vas)
+export const SUB_GROUPS = ['insurance', 'accessories', 'household', 'services'];
+export const mainQty = (r) => groupTotal(r, 'products');
+export const subQty = (r) => SUB_GROUPS.reduce((t, g) => t + groupTotal(r, g), 0);
+
+// Bảng nhân viên cho admin: số đơn, doanh thu, SL SP chính / phụ, bảo hiểm, trả góp, ví — sắp doanh thu cao → thấp
+export function staffRanking(reports) {
+    const map = new Map();
+    for (const r of reports) {
+        const key = r.username || r.staffName || '?';
+        let row = map.get(key);
+        if (!row) {
+            row = { uid: key, name: r.staffName || key, savedAt: '', orders: 0, revenue: 0, mainQty: 0, subQty: 0, insuranceTr: 0, traGop: 0, moVi: 0 };
+            map.set(key, row);
+        }
+        // Giữ tên của đơn mới nhất
+        if ((r.savedAt || '') > row.savedAt) { row.savedAt = r.savedAt || ''; row.name = r.staffName || key; }
+        row.orders++;
+        row.revenue += parseTr(r.revenueTotal);
+        row.mainQty += mainQty(r);
+        row.subQty += subQty(r);
+        row.insuranceTr += insuranceOf(r);
+        if (r.traGop) row.traGop++;
+        if (r.moVi) row.moVi++;
+    }
+    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue || b.orders - a.orders);
+}
+
 // Mục tự thêm đã dùng trong đơn — đính kèm vào đơn để admin (máy khác) vẫn cộng đúng
 export function usedFieldDefs(report, fields) {
     return fields

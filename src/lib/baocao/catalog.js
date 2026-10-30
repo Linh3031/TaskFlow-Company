@@ -61,13 +61,13 @@ export const AMOUNT_ITEMS = {
     accessories: [],
 };
 
-// multiline: mỗi mục một dòng có gạch đầu dòng trong văn bản báo cáo
+// multiline: mỗi mục một dòng có gạch đầu dòng trong văn bản báo cáo; tone: màu tiêu đề nhóm ở tab Biểu đồ
 export const GROUP_META = {
-    products: { label: 'Sản phẩm chính', short: 'S.Phẩm', emoji: '📦', icon: 'inventory_2', otherPlaceholder: 'Sản phẩm chính khác…', multiline: true },
-    household: { label: 'Gia dụng', short: 'G.Dụng', emoji: '🏠', icon: 'blender', otherPlaceholder: 'Gia dụng khác…' },
-    services: { label: 'Vas', short: 'Vas', emoji: '🛠', icon: 'verified_user', otherPlaceholder: 'Vas khác…' },
-    insurance: { label: 'Bảo hiểm', short: 'B.Hiểm', emoji: '🛡', icon: 'health_and_safety', otherPlaceholder: null },
-    accessories: { label: 'Phụ kiện - Đồng Hồ - SIM', short: 'PK - ĐH - SIM', emoji: '🎧', icon: 'headphones', otherPlaceholder: 'Phụ kiện khác…' },
+    products: { label: 'Sản phẩm chính', short: 'S.Phẩm', emoji: '📦', icon: 'inventory_2', otherPlaceholder: 'Sản phẩm chính khác…', multiline: true, tone: 'sky' },
+    household: { label: 'Gia dụng', short: 'G.Dụng', emoji: '🏠', icon: 'blender', otherPlaceholder: 'Gia dụng khác…', tone: 'amber' },
+    services: { label: 'Vas', short: 'Vas', emoji: '🛠', icon: 'verified_user', otherPlaceholder: 'Vas khác…', tone: 'rose' },
+    insurance: { label: 'Bảo hiểm', short: 'B.Hiểm', emoji: '🛡', icon: 'health_and_safety', otherPlaceholder: null, tone: 'emerald' },
+    accessories: { label: 'Phụ kiện - Đồng Hồ - SIM', short: 'PK - ĐH - SIM', emoji: '🎧', icon: 'headphones', otherPlaceholder: 'Phụ kiện khác…', tone: 'violet' },
 };
 
 export function emptyCounts() {

@@ -12,6 +12,7 @@
         sky: { icon: 'bg-sky-50 text-sky-700', value: 'text-sky-700', chip: 'bg-sky-50 text-sky-700 border-sky-200' },
         emerald: { icon: 'bg-emerald-50 text-emerald-700', value: 'text-emerald-700', chip: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
         rose: { icon: 'bg-rose-50 text-rose-700', value: 'text-rose-700', chip: 'bg-rose-50 text-rose-700 border-rose-200' },
+        violet: { icon: 'bg-violet-50 text-violet-700', value: 'text-violet-700', chip: 'bg-violet-50 text-violet-700 border-violet-200' },
         slate: { icon: 'bg-sky-50 text-sky-700', value: 'text-slate-900', chip: 'bg-sky-50 text-sky-700 border-sky-200' },
     };
     $: t = TONES[tone] || TONES.sky;
