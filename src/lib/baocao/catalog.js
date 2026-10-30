@@ -3,7 +3,7 @@
 // `icon` là tên Material Icons Round.
 import { evaluateExpression, hasOperator } from './expression.js';
 
-// Thứ tự nhóm dùng chung cho form và văn bản: Sản phẩm chính → Bảo hiểm → Phụ kiện → Gia dụng → Vas
+// Thứ tự nhóm dùng chung cho form và văn bản: Sản phẩm chính → BH → Phụ kiện → Gia dụng → Vas
 export const ITEM_GROUPS = ['products', 'insurance', 'accessories', 'household', 'services'];
 
 export const COUNT_ITEMS = {
@@ -32,10 +32,11 @@ export const COUNT_ITEMS = {
         { key: 'icalme', label: 'iCalme', short: 'iCalme', icon: 'nfc' },
         { key: 'kaspersky', label: 'Kaspersky', short: 'Kaspersky', icon: 'security' },
     ],
-    // Nhóm "Bảo hiểm" (khoá nội bộ `insurance`): 3 ô tiền (AMOUNT_ITEMS) + 2 mục đếm dịch vụ
+    // Nhóm "BH" (khoá nội bộ `insurance`): 3 ô tiền (AMOUNT_ITEMS) + 2 mục đếm dịch vụ.
+    // Nhãn viết gọn cho màn điện thoại; khoá `baoDuongMln`/`veSinhMl` giữ nguyên vì đơn đã lưu theo khoá này.
     insurance: [
-        { key: 'baoDuongMln', label: 'Gói bảo dưỡng MLN', short: 'BD MLN', icon: 'build' },
-        { key: 'veSinhMl', label: 'Vệ sinh máy lạnh', short: 'VSML', icon: 'cleaning_services' },
+        { key: 'baoDuongMln', label: 'Thay lõi MLN', short: 'Thay lõi MLN', icon: 'build' },
+        { key: 'veSinhMl', label: 'VSML', short: 'VSML', icon: 'cleaning_services' },
     ],
     accessories: [
         { key: 'camera', label: 'Camera', short: 'Cam', icon: 'videocam' },
@@ -54,8 +55,8 @@ export const AMOUNT_ITEMS = {
     household: [],
     services: [],
     insurance: [
-        { key: 'bhDmx', label: 'Bảo hiểm ĐMX (Tr)', short: 'BH ĐMX', icon: 'verified_user' },
-        { key: 'bh11', label: 'Bảo hiểm 1-1 (Tr)', short: 'BH 1-1', icon: 'swap_horiz' },
+        { key: 'bhDmx', label: 'BH ĐMX (Tr)', short: 'BH ĐMX', icon: 'verified_user' },
+        { key: 'bh11', label: 'BH 1-1 (Tr)', short: 'BH 1-1', icon: 'swap_horiz' },
         { key: 'bhmr', label: 'Bảo hành mở rộng (Tr)', short: 'BHMR', icon: 'more_time' },
     ],
     accessories: [],
@@ -66,7 +67,7 @@ export const GROUP_META = {
     products: { label: 'Sản phẩm chính', short: 'S.Phẩm', emoji: '📦', icon: 'inventory_2', otherPlaceholder: 'Sản phẩm chính khác…', multiline: true, tone: 'sky' },
     household: { label: 'Gia dụng', short: 'G.Dụng', emoji: '🏠', icon: 'blender', otherPlaceholder: 'Gia dụng khác…', tone: 'amber' },
     services: { label: 'Vas', short: 'Vas', emoji: '🛠', icon: 'verified_user', otherPlaceholder: 'Vas khác…', tone: 'rose' },
-    insurance: { label: 'Bảo hiểm', short: 'B.Hiểm', emoji: '🛡', icon: 'health_and_safety', otherPlaceholder: null, tone: 'emerald' },
+    insurance: { label: 'BH', short: 'BH', emoji: '🛡', icon: 'health_and_safety', otherPlaceholder: null, tone: 'emerald' },
     accessories: { label: 'Phụ kiện - Đồng Hồ - SIM', short: 'PK - ĐH - SIM', emoji: '🎧', icon: 'headphones', otherPlaceholder: 'Phụ kiện khác…', tone: 'violet' },
 };
 

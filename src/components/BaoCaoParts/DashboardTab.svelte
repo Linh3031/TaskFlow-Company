@@ -5,6 +5,7 @@
     import { GROUP_META, AMOUNT_ITEMS, customRevenueFields } from '../../lib/baocao/catalog.js';
     import { summarize, isInRange, pct, staffList, staffRanking, mainQty, subQty } from '../../lib/baocao/aggregate.js';
     import { fmtTr } from '../../lib/baocao/reportText.js';
+    import { shareDashboardImage } from '../../lib/baocao/dashboardImage.js';
     import BandHeader from './BandHeader.svelte';
     import KpiCard from './KpiCard.svelte';
     import RankingTable from './RankingTable.svelte';
@@ -80,6 +81,88 @@
         const d = sortKey === 'name' ? a.name.localeCompare(b.name) : (a[sortKey] || 0) - (b[sortKey] || 0);
         return (sortDir === 'asc' ? d : -d) || b.revenue - a.revenue;
     });
+
+    // ── Chụp ảnh: từ thẻ KPI đến hết bảng nhân viên, khổ dọc cho điện thoại ──
+    let capturing = false;
+    const rankRows = (items, other) => [
+        ...items.filter(i => i.count > 0).map(i => ({ label: i.label, value: i.count })),
+        ...(other > 0 ? [{ label: 'Khác', value: other }] : []),
+    ];
+    const trRows = (list, getVal) => list.map(x => ({ label: x.label ? x.label.replace(' (Tr)', '') : x.name, value: `${fmtTr(getVal(x))} Tr` }));
+
+    function buildImageData() {
+        const groups = [];
+        if (hasProducts) {
+            const rows = rankRows(s.ranking.products, s.otherCounts.products);
+            groups.push({ title: GROUP_META.products.label, tone: GROUP_META.products.tone, right: `Tổng ${rows.reduce((t, r) => t + r.value, 0)}`, rows });
+        }
+        if (hasInsurance) groups.push({
+            title: GROUP_META.insurance.label, tone: GROUP_META.insurance.tone, right: `Tổng ${fmtTr(s.insuranceTr)} Tr`,
+            rows: [...trRows(insAmounts, x => s.amounts[x.key]), ...trRows(insRevenue, f => s.customRevenue[f.id]), ...rankRows(insCounts, 0)],
+        });
+        if (hasAccessories) groups.push({
+            title: GROUP_META.accessories.label, tone: GROUP_META.accessories.tone,
+            rows: [...rankRows(accCounts, 0), ...trRows(accRevenue, f => s.customRevenue[f.id]), ...(s.otherCounts.accessories > 0 ? [{ label: 'Khác', value: s.otherCounts.accessories }] : [])],
+        });
+        if (hasHousehold) {
+            const rows = rankRows(s.ranking.household, s.otherCounts.household);
+            groups.push({ title: GROUP_META.household.label, tone: GROUP_META.household.tone, right: `Tổng ${rows.reduce((t, r) => t + r.value, 0)}`, rows });
+        }
+        if (hasServices) groups.push({
+            title: GROUP_META.services.label, tone: GROUP_META.services.tone,
+            rows: [
+                ...(s.moViCount > 0 ? [{ label: 'Thanh toán ví', value: `${s.moViCount} đơn` }] : []),
+                ...rankRows(svcCounts, 0), ...trRows(svcRevenue, f => s.customRevenue[f.id]),
+                ...(s.otherCounts.services > 0 ? [{ label: 'Khác', value: s.otherCounts.services }] : []),
+            ],
+        });
+
+        const staff = showStaffTable && sortedStaff.length > 0 ? {
+            title: 'Nhân viên theo doanh thu',
+            right: `${sortedStaff.length} NV`,
+            columns: [
+                { label: '#', width: 50, tone: 'slate' },
+                { label: 'Nhân viên', width: 0, tone: 'slate' },
+                { label: 'Đơn', width: 70, tone: 'slate', align: 'right' },
+                { label: 'DT (Tr)', width: 110, tone: 'indigo', align: 'right', bold: true },
+                { label: 'SP chính', width: 110, tone: 'sky', align: 'right' },
+                { label: 'SP phụ', width: 100, tone: 'violet', align: 'right' },
+                { label: 'BH (Tr)', width: 95, tone: 'emerald', align: 'right' },
+                { label: 'Góp', width: 72, tone: 'teal', align: 'right' },
+                { label: 'Ví', width: 60, tone: 'amber', align: 'right' },
+            ],
+            rows: sortedStaff.map((r, i) => [i + 1, r.name, r.orders, fmtTr(r.revenue), r.mainQty || '—', r.subQty || '—', r.insuranceTr > 0 ? fmtTr(r.insuranceTr) : '—', r.traGop || '—', r.moVi || '—']),
+        } : null;
+
+        const scope = isAdmin && staffFilter === 'all' ? 'Doanh số cả kho' : 'Doanh số cá nhân';
+        const who = isAdmin && staffFilter === 'all' ? `${viewName} (${staffCount} NV)` : viewName;
+        return {
+            title: `${scope} · ${RANGE_LABEL[range]}`.toUpperCase(),
+            subtitle: [who, new Date().toLocaleDateString('vi-VN'), `${s.orders} đơn`].filter(Boolean).join(' · '),
+            kpis: [
+                { title: 'Tổng doanh số', value: fmtTr(s.revenueTotal), unit: 'Tr', subLabel: 'Số đơn', subValue: s.orders, tone: 'slate' },
+                { title: 'Trả góp', value: s.traGopCount, unit: 'đơn', subLabel: 'Tỉ lệ', subValue: `${pct(s.traGopCount, s.orders)}%`, tone: 'emerald' },
+                { title: 'Sản phẩm chính', value: mainTotal, unit: 'SP', subLabel: 'TB / đơn', subValue: mainPerOrder, tone: 'sky' },
+                { title: 'Sản phẩm phụ', value: subTotal, unit: 'SP', subLabel: 'BH', subValue: `${fmtTr(s.insuranceTr)} Tr`, tone: 'violet' },
+            ],
+            groups,
+            staff,
+        };
+    }
+
+    async function captureImage() {
+        if (capturing) return;
+        capturing = true;
+        try {
+            const day = new Date().toLocaleDateString('vi-VN').replace(/\//g, '-');
+            await shareDashboardImage(buildImageData(), `bieu-do-${range}-${day}.png`);
+        } catch (e) {
+            console.error(e);
+            alert('Không tạo được ảnh: ' + e.message);
+        } finally {
+            capturing = false;
+        }
+    }
 </script>
 
 <div class="space-y-3">
@@ -89,14 +172,20 @@
                 <button class="flex-1 sm:flex-none px-3 h-7 rounded text-[12px] font-bold transition-all {range === r.id ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500'}" on:click={() => range = r.id}>{r.label}</button>
             {/each}
         </div>
-        {#if isAdmin}
-            <select bind:value={staffFilter} aria-label="Chọn nhân viên" class="w-full sm:w-64 min-w-0 h-8 rounded border border-slate-200 bg-white px-2 text-base sm:text-[13px] font-semibold text-slate-700 outline-none focus:border-sky-500">
-                <option value="all">Tất cả nhân viên</option>
-                {#each staffOptions as s (s.uid)}
-                    <option value={s.uid}>{s.name}</option>
-                {/each}
-            </select>
-        {/if}
+        <div class="flex items-center gap-2 w-full sm:w-auto min-w-0">
+            {#if isAdmin}
+                <select bind:value={staffFilter} aria-label="Chọn nhân viên" class="flex-1 sm:flex-none sm:w-64 min-w-0 h-8 rounded border border-slate-200 bg-white px-2 text-base sm:text-[13px] font-semibold text-slate-700 outline-none focus:border-sky-500">
+                    <option value="all">Tất cả nhân viên</option>
+                    {#each staffOptions as s (s.uid)}
+                        <option value={s.uid}>{s.name}</option>
+                    {/each}
+                </select>
+            {/if}
+            <button class="h-8 px-3 shrink-0 rounded bg-sky-600 text-white text-[12px] font-bold flex items-center gap-1 hover:bg-sky-700 disabled:opacity-50 {isAdmin ? '' : 'ml-auto sm:ml-0'}"
+                disabled={capturing || filtered.length === 0} on:click={captureImage} title="Chụp ảnh từ thẻ KPI đến hết bảng nhân viên">
+                <span class="material-icons-round text-base">photo_camera</span> {capturing ? 'Đang tạo…' : 'Chụp ảnh'}
+            </button>
+        </div>
     </div>
 
     <div class="flex items-baseline justify-between gap-2 border-b border-slate-200 pb-1 min-w-0">
@@ -116,7 +205,7 @@
             <KpiCard icon="payments" tone="slate" title="Tổng doanh số" value={fmtTr(s.revenueTotal)} unit="Tr" subLabel="Số đơn" subValue={s.orders} />
             <KpiCard icon="credit_card" tone="emerald" title="Trả góp" value={s.traGopCount} unit="đơn" subLabel="Tỉ lệ" subValue="{pct(s.traGopCount, s.orders)}%" />
             <KpiCard icon="inventory_2" tone="sky" title="Sản phẩm chính" value={mainTotal} unit="SP" subLabel="TB / đơn" subValue={mainPerOrder} />
-            <KpiCard icon="headphones" tone="violet" title="Sản phẩm phụ" value={subTotal} unit="SP" subLabel="Bảo hiểm" subValue="{fmtTr(s.insuranceTr)} Tr" />
+            <KpiCard icon="headphones" tone="violet" title="Sản phẩm phụ" value={subTotal} unit="SP" subLabel="BH" subValue="{fmtTr(s.insuranceTr)} Tr" />
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -124,7 +213,7 @@
                 <RankingTable group="products" items={s.ranking.products} otherCount={s.otherCounts.products} />
             {/if}
 
-            <!-- Bảo hiểm: ô tiền (BH ĐMX, BH 1-1, BHMR) trước, mục đếm (bảo dưỡng MLN, vệ sinh ML) sau -->
+            <!-- BH: ô tiền (BH ĐMX, BH 1-1, BHMR) trước, mục đếm (Thay lõi MLN, VSML) sau -->
             {#if hasInsurance}
                 <section class="border border-slate-200 bg-white min-w-0">
                     <BandHeader icon={GROUP_META.insurance.icon} title={GROUP_META.insurance.label} tone={GROUP_META.insurance.tone}>

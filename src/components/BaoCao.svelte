@@ -4,7 +4,7 @@
     // Nhân viên chỉ thấy đơn của chính mình (theo username đăng nhập); admin thấy đơn cả kho.
     import { onMount, onDestroy } from 'svelte';
     import { currentUser, activeStoreId } from '../lib/stores.js';
-    import { ITEM_GROUPS, createEmptyDraft, normalizeDraft, isValidStaffName, parseTr } from '../lib/baocao/catalog.js';
+    import { ITEM_GROUPS, createEmptyDraft, normalizeDraft, parseTr } from '../lib/baocao/catalog.js';
     import { sanitizeExpressionInput, evaluateExpression, hasOperator } from '../lib/baocao/expression.js';
     import { buildReportText, fmtTr } from '../lib/baocao/reportText.js';
     import { streakWarnings, localDateKey } from '../lib/baocao/streak.js';
@@ -38,8 +38,6 @@
     let dashboardStaff = 'all';
     let loaded = false;
     let isSaving = false;
-    let editingName = false;
-    let nameInput = '';
     let fieldModalGroup = null;
     let notice = '';
     let noticeTimer;
@@ -87,20 +85,12 @@
         }
     }
 
-    // Tên theo tài khoản đang đăng nhập: lấy đúng username (VD "Linh-3031")
-    function defaultStaffName(u) {
-        if (!u) return '';
-        return String(u.username || '').trim();
-    }
+    // Tên nhân viên trên báo cáo = username đăng nhập (VD "Linh-3031"), không cho sửa tay
+    $: loginName = String($currentUser?.username || $currentUser?.name || '').trim();
 
     onMount(() => {
-        const loginName = defaultStaffName($currentUser);
-        draft = normalizeDraft(baoCaoStorage.loadDraft(uid), loginName);
-        // Luôn điền theo nhân viên đang đăng nhập
-        if (isValidStaffName(loginName)) draft.staffName = loginName;
+        draft = { ...normalizeDraft(baoCaoStorage.loadDraft(uid), loginName), staffName: loginName };
         localFields = baoCaoStorage.loadCustomFields(uid);
-        editingName = !isValidStaffName(draft.staffName);
-        nameInput = draft.staffName || loginName;
         loaded = true;
         window.addEventListener('pagehide', flushDraft);
     });
@@ -198,17 +188,6 @@
         showNotice(`Đã xoá mục "${f.name}"`);
     }
 
-    // ── Tên nhân viên ──
-    function commitName() {
-        const v = nameInput.trim();
-        if (!isValidStaffName(v)) {
-            alert('Nhập đúng dạng "Tên - Mã", ví dụ: Linh -3031');
-            return;
-        }
-        patchDraft({ staffName: v }, true);
-        editingName = false;
-    }
-
     // ── Doanh thu: nhận phép tính, rời ô (blur/Enter) thì thay bằng số đã tính ──
     $: isExpression = hasOperator(draft.revenueTotal);
     $: evaluated = isExpression ? evaluateExpression(draft.revenueTotal) : null;
@@ -234,13 +213,7 @@
     }
 
     async function submitReport() {
-        if (!isValidStaffName(draft.staffName)) {
-            alert('Nhập tên nhân viên dạng "Tên - Mã" (VD: Linh -3031) trước khi báo cáo');
-            nameInput = draft.staffName;
-            editingName = true;
-            return;
-        }
-        if (!$activeStoreId || !uid) {
+        if (!$activeStoreId || !uid || !loginName) {
             alert('Chưa xác định được kho / tài khoản để lưu đơn. Vui lòng đăng nhập lại.');
             return;
         }
@@ -303,8 +276,8 @@
 
 <div class="h-full overflow-y-auto bg-slate-50">
     <div class="w-full max-w-[960px] mx-auto pb-4 space-y-3">
-        <!-- Tab con + tên nhân viên -->
-        <div class="flex items-center justify-between gap-2 flex-wrap">
+        <!-- Tab con -->
+        <div class="flex items-center gap-2">
             <div class="flex gap-3 border-b border-slate-200 shrink-0">
                 {#each SUB_TABS as t (t.id)}
                     <button class="pb-1.5 text-[13px] font-bold border-b-2 -mb-px transition-colors {subTab === t.id ? 'text-sky-700 border-sky-600' : 'text-slate-400 border-transparent hover:text-slate-600'}" on:click={() => subTab = t.id}>
@@ -312,23 +285,6 @@
                         {#if t.id === 'history' && myReports.length > 0}<span class="ml-0.5 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{myReports.length}</span>{/if}
                     </button>
                 {/each}
-            </div>
-            <div class="flex items-center gap-1.5 min-w-0">
-                <span class="material-icons-round text-lg text-slate-400 shrink-0">person</span>
-                {#if editingName}
-                    <!-- svelte-ignore a11y_autofocus -->
-                    <input autofocus placeholder="VD: Linh -3031" bind:value={nameInput} aria-label="Tên nhân viên"
-                        on:keydown={(e) => { if (e.key === 'Enter') commitName(); }}
-                        class="h-8 w-48 sm:w-56 min-w-0 rounded border border-slate-300 px-2 text-base sm:text-[13px] outline-none focus:border-sky-500" />
-                    <button class="h-8 w-8 shrink-0 rounded bg-sky-600 text-white flex items-center justify-center" aria-label="Lưu tên" on:click={commitName}>
-                        <span class="material-icons-round text-lg">check</span>
-                    </button>
-                {:else}
-                    <button class="h-8 min-w-0 rounded border border-slate-200 bg-white px-2 flex items-center gap-1.5" title="Đổi tên nhân viên" on:click={() => { nameInput = draft.staffName; editingName = true; }}>
-                        <span class="font-semibold text-[13px] text-slate-800 truncate">{draft.staffName || 'Chưa có tên'}</span>
-                        <span class="material-icons-round text-sm text-slate-400 shrink-0">edit</span>
-                    </button>
-                {/if}
             </div>
         </div>
 

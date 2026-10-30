@@ -63,7 +63,7 @@ export function summarize(reports, fields) {
         traGopCount,
         moViCount,
         priceWarCount,
-        // Tổng các ô tiền nhóm Bảo hiểm (BH ĐMX + BH 1-1 + BHMR)
+        // Tổng các ô tiền nhóm BH (BH ĐMX + BH 1-1 + BHMR)
         insuranceTr: AMOUNT_ITEMS.insurance.reduce((s, item) => s + (amounts[item.key] || 0), 0),
         amounts,
         ranking,
@@ -105,7 +105,7 @@ export function staffList(reports) {
     return Array.from(map.values()).map(({ uid, name }) => ({ uid, name })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// Sản phẩm phụ = mọi mục đếm ngoài nhóm Sản phẩm chính (Bảo hiểm dạng đếm, PK - ĐH - SIM, Gia dụng, Vas)
+// Sản phẩm phụ = mọi mục đếm ngoài nhóm Sản phẩm chính (BH dạng đếm, PK - ĐH - SIM, Gia dụng, Vas)
 export const SUB_GROUPS = ['insurance', 'accessories', 'household', 'services'];
 export const mainQty = (r) => groupTotal(r, 'products');
 export const subQty = (r) => SUB_GROUPS.reduce((t, g) => t + groupTotal(r, g), 0);

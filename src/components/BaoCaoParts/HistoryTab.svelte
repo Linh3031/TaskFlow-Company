@@ -138,7 +138,7 @@
                             <th class="{TH} text-right">Doanh thu</th>
                             <th class="{TH} text-right">SP</th>
                             <th class="{TH} text-right">BH (Tr)</th>
-                            <th class="{TH} text-right" title="Gói bảo dưỡng MLN + Vệ sinh máy lạnh">BD/VS</th>
+                            <th class="{TH} text-right" title="Thay lõi MLN + VSML">Lõi/VS</th>
                             <th class="{TH} text-right" title="Phụ kiện - Đồng Hồ - SIM">PK-ĐH-SIM</th>
                             <th class="{TH} text-right">GD</th>
                             <th class="{TH} text-right">Vas</th>

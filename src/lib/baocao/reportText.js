@@ -12,7 +12,7 @@ function groupLine(draft, group, fields) {
     const counts = draft.counts?.[group] || {};
     const amounts = draft.amounts || {};
 
-    // Ô tiền cố định trước, mục đếm sau (nhóm Bảo hiểm: BH ĐMX, BH 1-1, BHMR rồi BD MLN, VSML)
+    // Ô tiền cố định trước, mục đếm sau (nhóm BH: BH ĐMX, BH 1-1, BHMR rồi Thay lõi MLN, VSML)
     for (const item of AMOUNT_ITEMS[group]) {
         const v = parseTr(amounts[item.key]);
         if (v > 0) parts.push(`${item.short}: ${fmtTr(v)}`);
