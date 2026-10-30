@@ -17,8 +17,9 @@
   import Chatbot from './components/Chatbot.svelte';
   import SknvDashboard from './components/SknvDashboard.svelte';
   import GroupTaskList from './components/GroupTaskList.svelte';
+  import BaoCao from './components/BaoCao.svelte';
 
-  const APP_VERSION = 48; 
+  const APP_VERSION = 49; 
   let showUpdatePrompt = false;
 
   $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {
@@ -50,6 +51,7 @@
       {id:'warehouse', icon:'inventory_2', label:'Kho', color:'#ff9800'}, 
       {id:'handover', icon:'assignment_ind', label:'Bàn Giao', color:'#9c27b0'},
       {id:'group_task', icon:'groups', label:'Điểm Danh', color:'#f97316'},
+      {id:'baocao', icon:'summarize', label:'Báo Cáo', color:'#0284c7'},
       {id:'cashier', icon:'point_of_sale', label:'Thu Ngân', color:'#4caf50', defaultHidden: true},
       {id:'installment', icon:'calculate', label:'Trả Góp', color:'#673ab7', defaultHidden: true}
   ];
@@ -342,6 +344,7 @@
                     {#if activeTab==='schedule'}📅 Lịch Phân Ca{/if}
                     {#if activeTab==='handover'}🤝 Bàn Giao{/if}
                     {#if activeTab==='group_task'}👥 Điểm Danh Tập Thể{/if}
+                    {#if activeTab==='baocao'}📊 Báo Cáo Khai Thác{/if}
                  {/if}
               </h3>
                {#if activeTab === 'warehouse' || activeTab === 'cashier' || activeTab === 'handover'}
@@ -349,7 +352,7 @@
                {/if}
            </div>
            
-           {#if activeTab !== 'schedule' && activeTab !== 'installment' && activeTab !== 'sknv'}
+           {#if activeTab !== 'schedule' && activeTab !== 'installment' && activeTab !== 'sknv' && activeTab !== 'baocao'}
             <div id="date-navigator" class="flex items-center gap-1 w-full sm:w-auto bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-sm">
                 <button class="w-8 h-8 flex items-center justify-center bg-white rounded-md text-gray-500 hover:text-indigo-600 hover:shadow-sm transition-all active:scale-95" on:click={() => changeDate(-1)}>
                     <span class="material-icons-round text-lg">chevron_left</span>
@@ -372,6 +375,7 @@
         {:else if activeTab === 'sknv'} <SknvDashboard />
         {:else if activeTab === '8nttt'} <DailyChecklist activeStoreId={$activeStoreId} dateStr={selectedDate} />
         {:else if activeTab === 'group_task'} <GroupTaskList {selectedDate} on:updateBadge={(e) => unsubmittedGroupTaskCount = e.detail} />
+        {:else if activeTab === 'baocao'} <BaoCao />
         {:else} 
             {#if activeTab === 'handover'} <HandoverInput /> {/if}
             <TaskList {activeTab} on:taskClick={handleTaskClick} /> 
