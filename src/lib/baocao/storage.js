@@ -42,4 +42,15 @@ export const baoCaoStorage = {
         return Array.isArray(v) ? v : [];
     },
     saveReports: (reports) => writeJSON(KEY_REPORTS, reports),
+
+    // Nút "Xoá hết" ở tab Nhật ký — chỉ dữ liệu trên máy, không đụng mục chung của kho
+    clearAll: () => {
+        try {
+            [KEY_DRAFT, KEY_FIELDS, KEY_REPORTS].forEach(k => localStorage.removeItem(k));
+            return true;
+        } catch (e) {
+            console.error('[baocao] Không xoá được dữ liệu', e);
+            return false;
+        }
+    },
 };

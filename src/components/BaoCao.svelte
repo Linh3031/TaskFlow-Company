@@ -12,7 +12,17 @@
     import BandHeader from './BaoCaoParts/BandHeader.svelte';
     import GroupSection from './BaoCaoParts/GroupSection.svelte';
     import CustomFieldModal from './BaoCaoParts/CustomFieldModal.svelte';
+    import DashboardTab from './BaoCaoParts/DashboardTab.svelte';
+    import HistoryTab from './BaoCaoParts/HistoryTab.svelte';
     import AppFooter from './AppFooter.svelte';
+
+    const SUB_TABS = [
+        { id: 'entry', label: 'Nhập báo cáo' },
+        { id: 'dashboard', label: 'Biểu đồ' },
+        { id: 'history', label: 'Nhật ký' },
+    ];
+    let subTab = 'entry';
+    let range = 'today';
 
     let draft = createEmptyDraft('');
     let localFields = [];   // nhân viên tự thêm — chỉ trên máy này
@@ -211,13 +221,44 @@
             isSaving = false;
         }
     }
+
+    // ── Nhật ký ──
+    function editReport(e) {
+        const { id, date, savedAt, ...rest } = e.detail;
+        updateDraft(normalizeDraft(rest, draft.staffName));
+        subTab = 'entry';
+        showNotice('Đã tải lại đơn để sửa — bấm Báo cáo để ghi thành đơn mới');
+    }
+    function deleteReport(e) {
+        const next = reports.filter(r => r.id !== e.detail);
+        if (!baoCaoStorage.saveReports(next)) { alert('Không xoá được trên máy — bộ nhớ trình duyệt có thể đã đầy.'); return; }
+        reports = next;
+    }
+    function clearAll() {
+        // Huỷ (không ghi) bản nháp đang chờ, tránh ghi nháp cũ trở lại ngay sau khi xoá
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        pendingDraft = null;
+        if (!baoCaoStorage.clearAll()) { alert('Không xoá được dữ liệu'); return; }
+        reports = [];
+        localFields = [];
+        draft = createEmptyDraft(draft.staffName);
+        alert('Đã xoá toàn bộ dữ liệu Báo cáo trên máy này');
+    }
 </script>
 
 <div class="h-full overflow-y-auto bg-slate-50">
     <div class="w-full max-w-[960px] mx-auto pb-4 space-y-3">
-        <!-- Tên nhân viên -->
-        <div class="flex items-center justify-between gap-2">
-            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 shrink-0">Nhập báo cáo</span>
+        <!-- Tab con + tên nhân viên -->
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex gap-3 border-b border-slate-200 shrink-0">
+                {#each SUB_TABS as t (t.id)}
+                    <button class="pb-1.5 text-[13px] font-bold border-b-2 -mb-px transition-colors {subTab === t.id ? 'text-sky-700 border-sky-600' : 'text-slate-400 border-transparent hover:text-slate-600'}" on:click={() => subTab = t.id}>
+                        {t.label}
+                        {#if t.id === 'history' && reports.length > 0}<span class="ml-0.5 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{reports.length}</span>{/if}
+                    </button>
+                {/each}
+            </div>
             <div class="flex items-center gap-1.5 min-w-0">
                 <span class="material-icons-round text-lg text-slate-400 shrink-0">person</span>
                 {#if editingName}
@@ -239,6 +280,10 @@
 
         {#if !loaded}
             <div class="border border-slate-200 bg-white h-40"></div>
+        {:else if subTab === 'dashboard'}
+            <DashboardTab {reports} {fields} staffName={draft.staffName} bind:range />
+        {:else if subTab === 'history'}
+            <HistoryTab {reports} {fields} on:edit={editReport} on:delete={deleteReport} on:clearAll={clearAll} />
         {:else}
             <div class="lg:grid lg:grid-cols-12 lg:gap-3 space-y-3 lg:space-y-0">
                 <div class="lg:col-span-8 space-y-3">
