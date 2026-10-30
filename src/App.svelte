@@ -19,7 +19,7 @@
   import GroupTaskList from './components/GroupTaskList.svelte';
   import BaoCao from './components/BaoCao.svelte';
 
-  const APP_VERSION = 49; 
+  const APP_VERSION = 50; 
   let showUpdatePrompt = false;
 
   $: if ($currentUser && $currentUser.username === 'linh-3031' && $currentUser.role !== 'super_admin') {
