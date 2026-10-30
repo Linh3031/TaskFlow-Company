@@ -1,7 +1,8 @@
 <script>
-    // Tab Biểu đồ — doanh số cá nhân theo Hôm nay / Tuần này / Tháng này (từ các đơn đã báo cáo trên máy)
+    // Tab Biểu đồ — doanh số theo Hôm nay / Tuần này / Tháng này.
+    // Nhân viên: chỉ của mình. Admin: chọn 1 nhân viên hoặc "Tất cả nhân viên" (cộng chung thành 1 biểu đồ).
     import { GROUP_META, AMOUNT_ITEMS, customRevenueFields } from '../../lib/baocao/catalog.js';
-    import { summarize, isInRange, pct } from '../../lib/baocao/aggregate.js';
+    import { summarize, isInRange, pct, staffList } from '../../lib/baocao/aggregate.js';
     import { fmtTr } from '../../lib/baocao/reportText.js';
     import BandHeader from './BandHeader.svelte';
     import KpiCard from './KpiCard.svelte';
@@ -11,6 +12,9 @@
     export let fields = [];
     export let staffName = '';
     export let range = 'today';
+    export let isAdmin = false;
+    export let uid = '';
+    export let staffFilter = 'all'; // admin: 'all' hoặc uid nhân viên
 
     const RANGE_ITEMS = [
         { id: 'today', label: 'Hôm nay' },
@@ -19,7 +23,14 @@
     ];
     const RANGE_LABEL = { today: 'hôm nay', week: 'tuần này', month: 'tháng này' };
 
-    $: filtered = reports.filter(r => isInRange(r.date, range));
+    $: staffOptions = isAdmin ? staffList(reports) : [];
+    $: if (isAdmin && staffFilter !== 'all' && staffOptions.length > 0 && !staffOptions.some(s => s.uid === staffFilter)) staffFilter = 'all';
+    $: scoped = isAdmin ? reports.filter(r => staffFilter === 'all' || r.username === staffFilter) : reports.filter(r => r.username === uid);
+    $: viewName = !isAdmin ? staffName
+        : staffFilter === 'all' ? 'Tất cả nhân viên'
+        : (staffOptions.find(s => s.uid === staffFilter)?.name || staffFilter);
+    $: filtered = scoped.filter(r => isInRange(r.date, range));
+    $: staffCount = new Set(filtered.map(r => r.username)).size;
     $: s = summarize(filtered, fields);
     $: svcRevenueFields = customRevenueFields(fields, 'services');
     $: accRevenueFields = customRevenueFields(fields, 'accessories');
@@ -27,16 +38,26 @@
 </script>
 
 <div class="space-y-3">
-    <div class="flex bg-slate-100 rounded p-0.5 border border-slate-200 w-full sm:w-auto sm:inline-flex">
-        {#each RANGE_ITEMS as r (r.id)}
-            <button class="flex-1 sm:flex-none px-3 h-7 rounded text-[12px] font-bold transition-all {range === r.id ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500'}" on:click={() => range = r.id}>{r.label}</button>
-        {/each}
+    <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex bg-slate-100 rounded p-0.5 border border-slate-200 w-full sm:w-auto sm:inline-flex">
+            {#each RANGE_ITEMS as r (r.id)}
+                <button class="flex-1 sm:flex-none px-3 h-7 rounded text-[12px] font-bold transition-all {range === r.id ? 'bg-white text-sky-700 shadow-sm' : 'text-slate-500'}" on:click={() => range = r.id}>{r.label}</button>
+            {/each}
+        </div>
+        {#if isAdmin}
+            <select bind:value={staffFilter} aria-label="Chọn nhân viên" class="w-full sm:w-64 min-w-0 h-8 rounded border border-slate-200 bg-white px-2 text-base sm:text-[13px] font-semibold text-slate-700 outline-none focus:border-sky-500">
+                <option value="all">Tất cả nhân viên</option>
+                {#each staffOptions as s (s.uid)}
+                    <option value={s.uid}>{s.name}</option>
+                {/each}
+            </select>
+        {/if}
     </div>
 
     <div class="flex items-baseline justify-between gap-2 border-b border-slate-200 pb-1 min-w-0">
         <div class="min-w-0 truncate">
-            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Doanh số cá nhân · {RANGE_LABEL[range]}</span>
-            {#if staffName}<span class="ml-2 text-[12px] font-semibold text-sky-700">{staffName}</span>{/if}
+            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">{isAdmin && staffFilter === 'all' ? 'Doanh số cả kho' : 'Doanh số cá nhân'} · {RANGE_LABEL[range]}</span>
+            {#if viewName}<span class="ml-2 text-[12px] font-semibold text-sky-700">{viewName}{isAdmin && staffFilter === 'all' ? ` (${staffCount} NV)` : ''}</span>{/if}
         </div>
         <span class="text-[11.5px] text-slate-400 tabular-nums shrink-0">{new Date().toLocaleDateString('vi-VN')} · {s.orders} đơn</span>
     </div>

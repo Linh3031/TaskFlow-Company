@@ -85,6 +85,40 @@ export function insuranceOf(r) {
     return AMOUNT_ITEMS.insurance.reduce((s, item) => s + parseTr(a[item.key]), 0);
 }
 
+// Ngày đầu khoảng cần tải: sớm nhất giữa đầu tháng, Thứ Hai tuần này và 14 ngày trước (cho cảnh báo 3 ngày)
+export function windowStartKey(now = new Date()) {
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const twoWeeks = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 14);
+    const earliest = [monthStart, startOfWeek(now), twoWeeks].reduce((a, b) => (a < b ? a : b));
+    return localDateKey(earliest);
+}
+
+// Danh sách nhân viên có đơn (cho admin lọc): [{ uid, name }] theo tên
+export function staffList(reports) {
+    const map = new Map();
+    for (const r of reports) {
+        if (!r.username) continue;
+        // Giữ tên của đơn mới nhất
+        const cur = map.get(r.username);
+        if (!cur || (r.savedAt || '') > cur.savedAt) map.set(r.username, { uid: r.username, name: r.staffName || r.username, savedAt: r.savedAt || '' });
+    }
+    return Array.from(map.values()).map(({ uid, name }) => ({ uid, name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Mục tự thêm đã dùng trong đơn — đính kèm vào đơn để admin (máy khác) vẫn cộng đúng
+export function usedFieldDefs(report, fields) {
+    return fields
+        .filter(f => (Number(report.counts?.[f.group]?.[f.id]) || 0) > 0 || parseTr(report.amounts?.[f.id]) > 0)
+        .map(({ id, name, group, type }) => ({ id, name, group, type }));
+}
+
+// Gộp mục của máy này với mục đính kèm trong các đơn (theo id)
+export function mergeFields(fields, reports) {
+    const map = new Map(fields.map(f => [f.id, f]));
+    for (const r of reports) for (const f of r.fieldDefs || []) if (!map.has(f.id)) map.set(f.id, f);
+    return Array.from(map.values());
+}
+
 // Tỉ lệ %, mẫu số 0 → 0 (không để NaN/Infinity lên UI)
 export function pct(part, whole) {
     return whole > 0 ? Math.round((part / whole) * 100) : 0;

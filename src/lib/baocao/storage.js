@@ -1,7 +1,10 @@
-// Lưu cục bộ trên máy (localStorage) cho tab Báo cáo: nháp đang nhập, mục tuỳ chỉnh, các đơn đã báo cáo
+// Lưu cục bộ trên máy (localStorage) cho tab Báo cáo: nháp đang nhập và mục tự thêm.
+// Tách theo tài khoản đăng nhập (uid) để máy dùng chung không lẫn dữ liệu giữa nhân viên.
+// Đơn đã báo cáo lưu trên Firestore — xem reportsRepo.js.
 const KEY_DRAFT = 'baocao_draft_v1';
 const KEY_FIELDS = 'baocao_custom_fields_v1';
-const KEY_REPORTS = 'baocao_reports_v1';
+
+const keyOf = (base, uid) => `${base}__${uid || 'guest'}`;
 
 function readJSON(key, fallback) {
     try {
@@ -28,25 +31,19 @@ export function newId() {
 }
 
 export const baoCaoStorage = {
-    loadDraft: () => readJSON(KEY_DRAFT, null),
-    saveDraft: (draft) => writeJSON(KEY_DRAFT, draft),
+    loadDraft: (uid) => readJSON(keyOf(KEY_DRAFT, uid), null),
+    saveDraft: (uid, draft) => writeJSON(keyOf(KEY_DRAFT, uid), draft),
 
-    loadCustomFields: () => {
-        const v = readJSON(KEY_FIELDS, []);
+    loadCustomFields: (uid) => {
+        const v = readJSON(keyOf(KEY_FIELDS, uid), []);
         return Array.isArray(v) ? v : [];
     },
-    saveCustomFields: (fields) => writeJSON(KEY_FIELDS, fields),
+    saveCustomFields: (uid, fields) => writeJSON(keyOf(KEY_FIELDS, uid), fields),
 
-    loadReports: () => {
-        const v = readJSON(KEY_REPORTS, []);
-        return Array.isArray(v) ? v : [];
-    },
-    saveReports: (reports) => writeJSON(KEY_REPORTS, reports),
-
-    // Nút "Xoá hết" ở tab Nhật ký — chỉ dữ liệu trên máy, không đụng mục chung của kho
-    clearAll: () => {
+    // Nút "Xoá dữ liệu trên máy" ở tab Nhật ký — chỉ nháp + mục tự thêm của tài khoản này
+    clearLocal: (uid) => {
         try {
-            [KEY_DRAFT, KEY_FIELDS, KEY_REPORTS].forEach(k => localStorage.removeItem(k));
+            [KEY_DRAFT, KEY_FIELDS].forEach(k => localStorage.removeItem(keyOf(k, uid)));
             return true;
         } catch (e) {
             console.error('[baocao] Không xoá được dữ liệu', e);

@@ -1,14 +1,21 @@
 <script>
-    // Tab Nhật ký — danh sách đơn đã báo cáo trên máy: lọc ngày, tìm kiếm, xem/copy lại, sửa lại, xoá
+    // Tab Nhật ký — đơn đã báo cáo: lọc ngày, tìm kiếm, xem/copy lại, sửa lại, xoá.
+    // Nhân viên chỉ nhận đơn của mình; admin nhận đơn cả kho và lọc theo nhân viên.
     import { createEventDispatcher } from 'svelte';
     import { parseTr } from '../../lib/baocao/catalog.js';
-    import { buildReportText, fmtTr } from '../../lib/baocao/reportText.js';
-    import { groupTotal, insuranceOf } from '../../lib/baocao/aggregate.js';
+    import { buildReportText, buildDailyReportText, fmtTr } from '../../lib/baocao/reportText.js';
+    import { groupTotal, insuranceOf, staffList } from '../../lib/baocao/aggregate.js';
+    import { localDateKey } from '../../lib/baocao/streak.js';
     import BandHeader from './BandHeader.svelte';
     const dispatch = createEventDispatcher();
 
     export let reports = [];
     export let fields = [];
+    export let staffName = '';
+    export let isAdmin = false;
+    export let uid = '';
+    export let windowStart = '';
+    export let staffFilter = 'all'; // admin: 'all' hoặc uid nhân viên
 
     let dateFilter = '';
     let search = '';
@@ -20,12 +27,40 @@
         return `${d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
     }
 
+    // Ngày cũ hơn khoảng đang nghe → nhờ cha tải riêng ngày đó
+    $: if (dateFilter && windowStart && dateFilter < windowStart) dispatch('loadDay', dateFilter);
+
+    $: staffOptions = isAdmin ? staffList(reports) : [];
+    $: if (isAdmin && staffFilter !== 'all' && staffOptions.length > 0 && !staffOptions.some(s => s.uid === staffFilter)) staffFilter = 'all';
+    $: scoped = isAdmin ? reports.filter(r => staffFilter === 'all' || r.username === staffFilter) : reports.filter(r => r.username === uid);
+
     $: q = search.trim().toLowerCase();
-    $: rows = reports
+    $: rows = scoped
         .filter(r => !dateFilter || r.date === dateFilter)
         .filter(r => !q || (r.staffName || '').toLowerCase().includes(q) || String(parseTr(r.revenueTotal)).includes(q) || (r.notes || '').toLowerCase().includes(q))
         .sort((a, b) => (b.savedAt || b.date).localeCompare(a.savedAt || a.date));
     $: totalTr = rows.reduce((s, r) => s + parseTr(r.revenueTotal), 0);
+
+    // ── Báo cáo cuối ngày: ngày đang lọc (mặc định hôm nay), theo nhân viên đang xem ──
+    $: dayKey = dateFilter || localDateKey();
+    $: dayLabel = dayKey.split('-').reverse().join('/');
+    $: dayReports = scoped
+        .filter(r => r.date === dayKey)
+        .sort((a, b) => (a.savedAt || '').localeCompare(b.savedAt || ''));
+    $: dayStaffCount = new Set(dayReports.map(r => r.username)).size;
+    $: dayName = !isAdmin ? staffName
+        : staffFilter === 'all' ? `Tất cả nhân viên (${dayStaffCount} NV)`
+        : (staffOptions.find(s => s.uid === staffFilter)?.name || staffFilter);
+    $: dailyText = buildDailyReportText(dayReports, fields, dayName, dayLabel);
+
+    async function copyText(text, okMsg) {
+        try {
+            await navigator.clipboard.writeText(text);
+            alert(okMsg);
+        } catch (e) {
+            alert(text);
+        }
+    }
 
     async function copyReport(r) {
         const text = buildReportText(r, fields);
@@ -38,19 +73,48 @@
     }
 
     function askDelete(r) {
-        if (confirm(`Xoá đơn ${fmtTr(parseTr(r.revenueTotal))} Tr lúc ${fmtTime(r.savedAt, r.date)}? Không hoàn tác được.`)) dispatch('delete', r.id);
+        if (confirm(`Xoá đơn ${fmtTr(parseTr(r.revenueTotal))} Tr lúc ${fmtTime(r.savedAt, r.date)}? Không hoàn tác được.`)) dispatch('delete', r);
     }
 
-    function askClearAll() {
-        if (confirm('Toàn bộ nháp, nhật ký đơn hàng và mục tự thêm trên máy này sẽ bị xoá (mục chung của kho giữ nguyên). Không hoàn tác được. Đồng ý xoá hết?')) dispatch('clearAll');
+    function askClearLocal() {
+        if (confirm('Xoá nháp đang nhập và mục tự thêm của bạn trên máy này? Đơn đã báo cáo vẫn giữ nguyên.')) dispatch('clearLocal');
     }
 
     const TH = 'h-7 px-2 text-[11px] font-bold uppercase tracking-wider text-slate-600 bg-slate-100 border-b border-slate-200 text-left whitespace-nowrap';
 </script>
 
 <div class="space-y-3">
+    {#if isAdmin}
+        <div class="flex items-center gap-2 min-w-0">
+            <span class="material-icons-round text-lg text-slate-400 shrink-0">group</span>
+            <select bind:value={staffFilter} aria-label="Lọc nhân viên" class="flex-1 sm:flex-none sm:w-64 min-w-0 h-9 rounded border border-slate-200 bg-white px-2 text-base sm:text-[13px] font-semibold text-slate-700 outline-none focus:border-sky-500">
+                <option value="all">Tất cả nhân viên</option>
+                {#each staffOptions as s (s.uid)}
+                    <option value={s.uid}>{s.name}</option>
+                {/each}
+            </select>
+        </div>
+    {/if}
+
     <section class="border border-slate-200 bg-white">
-        <BandHeader icon="history" title="Nhật ký đơn hàng ({reports.length})" />
+        <BandHeader icon="summarize" title="Báo cáo cuối ngày · {dayLabel}">
+            <span slot="right" class="text-[11px] text-slate-500 tabular-nums">{dayReports.length} đơn</span>
+        </BandHeader>
+        {#if dayReports.length === 0}
+            <p class="px-3 py-4 text-[13px] text-slate-500 text-center">Chưa có đơn nào của <b>{dayName || 'bạn'}</b> trong ngày {dayLabel}. Đổi ngày ở ô lọc ngày bên dưới để xem ngày khác.</p>
+        {:else}
+            <pre class="px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap break-words font-sans text-slate-800 overflow-hidden">{dailyText}</pre>
+            <div class="px-2 pb-2">
+                <button class="w-full sm:w-auto h-10 lg:h-9 px-4 rounded bg-sky-600 text-white font-bold text-sm flex items-center justify-center gap-1.5 hover:bg-sky-700"
+                    on:click={() => copyText(dailyText, 'Đã copy báo cáo cuối ngày. Dán lên nhóm Zalo/Line nhé!')}>
+                    <span class="material-icons-round text-lg">content_copy</span> Copy báo cáo cuối ngày
+                </button>
+            </div>
+        {/if}
+    </section>
+
+    <section class="border border-slate-200 bg-white">
+        <BandHeader icon="history" title="Nhật ký đơn hàng ({scoped.length})" />
         <div class="flex items-center gap-2 px-2 py-1.5 border-b border-slate-100 flex-wrap">
             <input type="date" bind:value={dateFilter} aria-label="Lọc theo ngày" class="h-8 lg:h-7 rounded border border-slate-200 px-1.5 text-[13px] w-[140px] outline-none focus:border-sky-500" />
             <input placeholder="Tìm NV, doanh thu, ghi chú…" bind:value={search} aria-label="Tìm trong nhật ký" class="flex-1 min-w-[140px] h-8 lg:h-7 rounded border border-slate-200 px-2 text-base sm:text-[13px] outline-none focus:border-sky-500" />
@@ -59,7 +123,7 @@
             {/if}
         </div>
 
-        {#if reports.length === 0}
+        {#if scoped.length === 0}
             <div class="m-2 bg-white rounded-lg border border-slate-200 px-4 py-10 text-center">
                 <p class="text-[13px] text-slate-500">Chưa có đơn hàng nào được ghi nhận. Bấm <b class="text-sky-600">Báo cáo</b> ở tab Nhập báo cáo.</p>
             </div>
@@ -106,8 +170,11 @@
                                 </td>
                                 <td class="px-2 text-right whitespace-nowrap" on:click|stopPropagation>
                                     <button class="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-sky-700" title="Sao chép văn bản" aria-label="Sao chép" on:click={() => copyReport(r)}><span class="material-icons-round text-base">content_copy</span></button>
-                                    <button class="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-sky-700" title="Sửa lại" aria-label="Sửa lại" on:click={() => dispatch('edit', r)}><span class="material-icons-round text-base">edit</span></button>
-                                    <button class="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-rose-600" title="Xoá" aria-label="Xoá" on:click={() => askDelete(r)}><span class="material-icons-round text-base">delete</span></button>
+                                    <!-- Chỉ đơn của chính mình mới sửa / xoá được -->
+                                    {#if r.username === uid}
+                                        <button class="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-sky-700" title="Sửa lại" aria-label="Sửa lại" on:click={() => dispatch('edit', r)}><span class="material-icons-round text-base">edit</span></button>
+                                        <button class="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-rose-600" title="Xoá" aria-label="Xoá" on:click={() => askDelete(r)}><span class="material-icons-round text-base">delete</span></button>
+                                    {/if}
                                 </td>
                             </tr>
                             {#if open}
@@ -133,9 +200,9 @@
 
     <section class="border border-rose-200 bg-rose-50 px-3 py-2 flex items-center justify-between gap-3">
         <div class="min-w-0">
-            <p class="text-[12px] font-bold text-rose-700 uppercase tracking-wider">Xoá toàn bộ dữ liệu</p>
-            <p class="text-[12px] text-rose-700/80">Xoá nháp, nhật ký đơn hàng và mục tự thêm trên máy này.</p>
+            <p class="text-[12px] font-bold text-rose-700 uppercase tracking-wider">Xoá dữ liệu trên máy</p>
+            <p class="text-[12px] text-rose-700/80">Xoá nháp và mục tự thêm của bạn trên máy này. Đơn đã báo cáo vẫn giữ nguyên.</p>
         </div>
-        <button class="h-9 px-3 shrink-0 rounded bg-rose-600 text-white text-sm font-bold hover:bg-rose-700" on:click={askClearAll}>Xoá hết</button>
+        <button class="h-9 px-3 shrink-0 rounded bg-rose-600 text-white text-sm font-bold hover:bg-rose-700" on:click={askClearLocal}>Xoá</button>
     </section>
 </div>

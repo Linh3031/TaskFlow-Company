@@ -29,8 +29,10 @@ function groupLine(draft, group, fields) {
         const v = parseTr(amounts[f.id]);
         if (v > 0) parts.push(`${f.name}: ${fmtTr(v)}`);
     }
-    const other = draft.others?.[group];
-    if (other && other.name.trim() && other.count > 0) parts.push(`${other.name.trim()}: ${other.count}`);
+    // Một đơn có 1 dòng "khác"/nhóm; báo cáo cuối ngày truyền vào mảng đã gộp theo tên
+    for (const other of [].concat(draft.others?.[group] || [])) {
+        if (other && other.name.trim() && other.count > 0) parts.push(`${other.name.trim()}: ${other.count}`);
+    }
 
     if (parts.length === 0) return null;
     const meta = GROUP_META[group];
@@ -64,6 +66,63 @@ export function buildReportText(draft, fields) {
     if (draft.notes.trim()) {
         lines.push('');
         lines.push(`📝 ${draft.notes.trim()}`);
+    }
+
+    return lines.join('\n').trim();
+}
+
+// Báo cáo cuối ngày: gom các đơn trong ngày thành 1 báo cáo, cộng dồn từng mục theo nhóm
+export function buildDailyReportText(reports, fields, staffName, dateLabel) {
+    let revenue = 0, traGop = 0, moVi = 0, priceWar = 0;
+    const counts = Object.fromEntries(ITEM_GROUPS.map(g => [g, {}]));
+    // Gộp dòng "khác" theo tên (không phân biệt hoa/thường, giữ cách viết lần đầu)
+    const others = Object.fromEntries(ITEM_GROUPS.map(g => [g, new Map()]));
+    const amounts = {};
+    const notes = [];
+
+    for (const r of reports) {
+        revenue += parseTr(r.revenueTotal);
+        if (r.traGop) traGop++;
+        if (r.moVi) moVi++;
+        if (r.priceWar) priceWar++;
+        for (const [k, v] of Object.entries(r.amounts || {})) amounts[k] = (amounts[k] || 0) + parseTr(v);
+        for (const g of ITEM_GROUPS) {
+            for (const [k, v] of Object.entries(r.counts?.[g] || {})) counts[g][k] = (counts[g][k] || 0) + (Number(v) || 0);
+            const o = r.others?.[g];
+            const name = o?.name?.trim();
+            if (name && o.count > 0) {
+                const key = name.toLowerCase();
+                const cur = others[g].get(key);
+                others[g].set(key, { name: cur ? cur.name : name, count: (cur ? cur.count : 0) + o.count });
+            }
+        }
+        if (r.notes?.trim()) notes.push(r.notes.trim());
+    }
+
+    const merged = {
+        counts,
+        amounts,
+        others: Object.fromEntries(ITEM_GROUPS.map(g => [g, Array.from(others[g].values())])),
+    };
+
+    const lines = [`📊 BÁO CÁO CUỐI NGÀY${dateLabel ? ` ${dateLabel}` : ''}`];
+    if (staffName?.trim()) lines.push(`👤 ${staffName.trim()}`);
+    lines.push('');
+    lines.push(`🧾 Số đơn: ${reports.length}`);
+    lines.push(`💰 Doanh thu: ${fmtTr(revenue)}tr`);
+    lines.push(`   - Trả góp: ${traGop} đơn | Thanh toán ví: ${moVi} đơn`);
+
+    for (const group of ITEM_GROUPS) {
+        const line = groupLine(merged, group, fields);
+        if (line) lines.push(line);
+    }
+
+    if (priceWar > 0) lines.push(`⚔️ Chiến giá: ${priceWar} đơn`);
+
+    if (notes.length > 0) {
+        lines.push('');
+        lines.push('📝 Ghi chú:');
+        notes.forEach(n => lines.push(n.split('\n').map(l => `   ${l}`).join('\n')));
     }
 
     return lines.join('\n').trim();

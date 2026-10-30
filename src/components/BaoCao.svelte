@@ -1,14 +1,17 @@
 <script>
     // Tab "Báo cáo" — clone phần "Nhập báo cáo" của Son911 (Báo cáo khai thác).
-    // Mỗi lần bấm Báo cáo = 1 đơn hàng: copy văn bản chuẩn Zalo/Line, ghi đơn lại trên máy, làm sạch form.
+    // Mỗi lần bấm Báo cáo = 1 đơn hàng: copy văn bản chuẩn Zalo/Line, ghi đơn lên Firestore của kho, làm sạch form.
+    // Nhân viên chỉ thấy đơn của chính mình (theo username đăng nhập); admin thấy đơn cả kho.
     import { onMount, onDestroy } from 'svelte';
     import { currentUser, activeStoreId } from '../lib/stores.js';
     import { ITEM_GROUPS, createEmptyDraft, normalizeDraft, isValidStaffName, parseTr } from '../lib/baocao/catalog.js';
     import { sanitizeExpressionInput, evaluateExpression, hasOperator } from '../lib/baocao/expression.js';
     import { buildReportText, fmtTr } from '../lib/baocao/reportText.js';
     import { streakWarnings, localDateKey } from '../lib/baocao/streak.js';
+    import { windowStartKey, usedFieldDefs, mergeFields } from '../lib/baocao/aggregate.js';
     import { baoCaoStorage, newId } from '../lib/baocao/storage.js';
     import { listenStoreFields, addStoreField, removeStoreField } from '../lib/baocao/storeFields.js';
+    import { listenOwnReports, listenStoreReports, fetchDay, saveReport, deleteReport as deleteReportDoc, dateKeysBetween } from '../lib/baocao/reportsRepo.js';
     import BandHeader from './BaoCaoParts/BandHeader.svelte';
     import GroupSection from './BaoCaoParts/GroupSection.svelte';
     import CustomFieldModal from './BaoCaoParts/CustomFieldModal.svelte';
@@ -18,8 +21,8 @@
 
     const SUB_TABS = [
         { id: 'entry', label: 'Nhập báo cáo' },
-        { id: 'dashboard', label: 'Biểu đồ' },
         { id: 'history', label: 'Nhật ký' },
+        { id: 'dashboard', label: 'Biểu đồ' },
     ];
     let subTab = 'entry';
     let range = 'today';
@@ -28,7 +31,11 @@
     let localFields = [];   // nhân viên tự thêm — chỉ trên máy này
     let storeFields = [];   // admin thêm — chung cả kho
     let unsubStoreFields = () => {};
-    let reports = [];
+    let windowReports = []; // đơn trong khoảng đang nghe (đầu tháng / đầu tuần / 14 ngày → hôm nay)
+    let extraReports = [];  // ngày cũ hơn, tải khi lọc ở Nhật ký
+    let unsubReports = () => {};
+    let historyStaff = 'all';
+    let dashboardStaff = 'all';
     let loaded = false;
     let isSaving = false;
     let editingName = false;
@@ -47,6 +54,39 @@
     }
     $: watchStoreFields($activeStoreId);
 
+    // Định danh tài khoản để tách dữ liệu: username_idx (id hồ sơ), thiếu thì dùng username
+    $: uid = String($currentUser?.username_idx || $currentUser?.username || '').trim();
+    $: windowStart = windowStartKey();
+
+    function watchReports(storeId, userId, admin) {
+        unsubReports();
+        windowReports = [];
+        extraReports = [];
+        const from = windowStartKey();
+        const to = localDateKey();
+        unsubReports = admin
+            ? listenStoreReports(storeId, from, to, (list) => windowReports = list)
+            : listenOwnReports(storeId, userId, dateKeysBetween(from, to), (list) => windowReports = list);
+    }
+    $: watchReports($activeStoreId, uid, isAdmin);
+
+    // Gộp + bỏ trùng theo id; nhân viên chỉ giữ đơn của chính mình
+    $: reports = Array.from(new Map([...windowReports, ...extraReports].map(r => [r.id, r])).values())
+        .filter(r => isAdmin || r.username === uid);
+    $: myReports = reports.filter(r => r.username === uid);
+    $: viewFields = mergeFields(fields, reports);
+
+    async function loadDay(e) {
+        const date = e.detail;
+        try {
+            const list = await fetchDay($activeStoreId, date, uid, isAdmin);
+            extraReports = [...extraReports.filter(r => r.date !== date), ...list];
+        } catch (err) {
+            console.error(err);
+            alert('Lỗi tải đơn ngày ' + date + ': ' + err.message);
+        }
+    }
+
     // Tên theo tài khoản đang đăng nhập: lấy đúng username (VD "Linh-3031")
     function defaultStaffName(u) {
         if (!u) return '';
@@ -55,11 +95,10 @@
 
     onMount(() => {
         const loginName = defaultStaffName($currentUser);
-        draft = normalizeDraft(baoCaoStorage.loadDraft(), loginName);
-        // Luôn điền theo nhân viên đang đăng nhập (máy dùng chung thì không lấy nhầm tên người trước)
+        draft = normalizeDraft(baoCaoStorage.loadDraft(uid), loginName);
+        // Luôn điền theo nhân viên đang đăng nhập
         if (isValidStaffName(loginName)) draft.staffName = loginName;
-        localFields = baoCaoStorage.loadCustomFields();
-        reports = baoCaoStorage.loadReports();
+        localFields = baoCaoStorage.loadCustomFields(uid);
         editingName = !isValidStaffName(draft.staffName);
         nameInput = draft.staffName || loginName;
         loaded = true;
@@ -68,6 +107,7 @@
 
     onDestroy(() => {
         unsubStoreFields();
+        unsubReports();
         clearTimeout(noticeTimer);
         if (typeof window !== 'undefined') window.removeEventListener('pagehide', flushDraft);
         flushDraft();
@@ -86,7 +126,7 @@
         saveTimer = null;
         const next = pendingDraft;
         pendingDraft = null;
-        if (next && !baoCaoStorage.saveDraft(next)) showNotice('⚠️ Bản nháp chưa lưu được trên máy (bộ nhớ trình duyệt có thể đã đầy)');
+        if (next && !baoCaoStorage.saveDraft(uid, next)) showNotice('⚠️ Bản nháp chưa lưu được trên máy (bộ nhớ trình duyệt có thể đã đầy)');
     }
     function updateDraft(next, immediate = true) {
         draft = next;
@@ -128,7 +168,7 @@
         }
         const field = { ...e.detail, id: `cf_${newId()}` };
         const next = [...localFields, field];
-        if (!baoCaoStorage.saveCustomFields(next)) { alert('Không lưu được trên máy — bộ nhớ trình duyệt có thể đã đầy.'); return; }
+        if (!baoCaoStorage.saveCustomFields(uid, next)) { alert('Không lưu được trên máy — bộ nhớ trình duyệt có thể đã đầy.'); return; }
         localFields = next;
         showNotice(`Đã thêm mục "${field.name}" (chỉ trên máy này)`);
     }
@@ -147,7 +187,7 @@
         } else {
             if (!confirm(`Xoá mục "${f.name}"?`)) return;
             const next = localFields.filter(x => x.id !== f.id);
-            if (!baoCaoStorage.saveCustomFields(next)) { alert('Không lưu được trên máy — bộ nhớ trình duyệt có thể đã đầy.'); return; }
+            if (!baoCaoStorage.saveCustomFields(uid, next)) { alert('Không lưu được trên máy — bộ nhớ trình duyệt có thể đã đầy.'); return; }
             localFields = next;
         }
         const groupCounts = { ...draft.counts[f.group] };
@@ -177,7 +217,7 @@
     }
 
     $: previewText = buildReportText(draft, fields);
-    $: warnings = loaded ? streakWarnings(draft, reports, fields) : [];
+    $: warnings = loaded ? streakWarnings(draft, myReports, fields) : [];
 
     function resetForm() {
         updateDraft(createEmptyDraft(draft.staffName));
@@ -200,19 +240,26 @@
             editingName = true;
             return;
         }
+        if (!$activeStoreId || !uid) {
+            alert('Chưa xác định được kho / tài khoản để lưu đơn. Vui lòng đăng nhập lại.');
+            return;
+        }
         isSaving = true;
         try {
             const text = buildReportText(draft, fields);
             const copied = await copyText(text);
             // Lưu số đã tính (ô doanh thu có thể còn chứa phép tính nếu bấm Báo cáo khi chưa rời ô)
             const revenueValue = parseTr(draft.revenueTotal);
-            const report = { ...draft, revenueTotal: revenueValue > 0 ? fmtTr(revenueValue) : '', id: newId(), date: localDateKey(), savedAt: new Date().toISOString() };
-            const nextReports = [...reports, report];
-            if (!baoCaoStorage.saveReports(nextReports)) {
-                alert('Không lưu được đơn hàng trên máy — bộ nhớ trình duyệt có thể đã đầy.');
+            const report = { ...draft, revenueTotal: revenueValue > 0 ? fmtTr(revenueValue) : '', id: newId(), date: localDateKey(), savedAt: new Date().toISOString(), username: uid };
+            // Đính kèm mục tự thêm đã dùng để admin ở máy khác vẫn cộng đúng
+            report.fieldDefs = usedFieldDefs(report, fields);
+            try {
+                await saveReport($activeStoreId, uid, report);
+            } catch (err) {
+                console.error(err);
+                alert('Không lưu được đơn hàng lên hệ thống: ' + err.message);
                 return;
             }
-            reports = nextReports;
             updateDraft(createEmptyDraft(draft.staffName));
             showNotice(copied ? '✅ Đã copy báo cáo. Dán lên nhóm Zalo/Line nhé!' : '⚠️ Đã ghi đơn nhưng không copy tự động được — copy tay nội dung vừa hiện');
             // Form đã làm sạch nên hiện lại văn bản để copy tay
@@ -223,27 +270,34 @@
     }
 
     // ── Nhật ký ──
+    // Chỉ sửa / xoá đơn của chính mình (admin xem đơn người khác chỉ để đọc + copy)
     function editReport(e) {
-        const { id, date, savedAt, ...rest } = e.detail;
-        updateDraft(normalizeDraft(rest, draft.staffName));
+        const { id, date, savedAt, username, fieldDefs, ...rest } = e.detail;
+        if (username !== uid) return;
+        updateDraft({ ...normalizeDraft(rest, draft.staffName), staffName: draft.staffName });
         subTab = 'entry';
         showNotice('Đã tải lại đơn để sửa — bấm Báo cáo để ghi thành đơn mới');
     }
-    function deleteReport(e) {
-        const next = reports.filter(r => r.id !== e.detail);
-        if (!baoCaoStorage.saveReports(next)) { alert('Không xoá được trên máy — bộ nhớ trình duyệt có thể đã đầy.'); return; }
-        reports = next;
+    async function deleteReport(e) {
+        const r = e.detail;
+        if (r.username !== uid) return;
+        try {
+            await deleteReportDoc($activeStoreId, uid, r);
+            extraReports = extraReports.filter(x => x.id !== r.id);
+        } catch (err) {
+            console.error(err);
+            alert('Không xoá được đơn: ' + err.message);
+        }
     }
-    function clearAll() {
+    function clearLocal() {
         // Huỷ (không ghi) bản nháp đang chờ, tránh ghi nháp cũ trở lại ngay sau khi xoá
         clearTimeout(saveTimer);
         saveTimer = null;
         pendingDraft = null;
-        if (!baoCaoStorage.clearAll()) { alert('Không xoá được dữ liệu'); return; }
-        reports = [];
+        if (!baoCaoStorage.clearLocal(uid)) { alert('Không xoá được dữ liệu'); return; }
         localFields = [];
         draft = createEmptyDraft(draft.staffName);
-        alert('Đã xoá toàn bộ dữ liệu Báo cáo trên máy này');
+        alert('Đã xoá nháp và mục tự thêm trên máy này');
     }
 </script>
 
@@ -255,7 +309,7 @@
                 {#each SUB_TABS as t (t.id)}
                     <button class="pb-1.5 text-[13px] font-bold border-b-2 -mb-px transition-colors {subTab === t.id ? 'text-sky-700 border-sky-600' : 'text-slate-400 border-transparent hover:text-slate-600'}" on:click={() => subTab = t.id}>
                         {t.label}
-                        {#if t.id === 'history' && reports.length > 0}<span class="ml-0.5 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{reports.length}</span>{/if}
+                        {#if t.id === 'history' && myReports.length > 0}<span class="ml-0.5 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-full text-slate-500">{myReports.length}</span>{/if}
                     </button>
                 {/each}
             </div>
@@ -281,9 +335,10 @@
         {#if !loaded}
             <div class="border border-slate-200 bg-white h-40"></div>
         {:else if subTab === 'dashboard'}
-            <DashboardTab {reports} {fields} staffName={draft.staffName} bind:range />
+            <DashboardTab {reports} fields={viewFields} {isAdmin} {uid} staffName={draft.staffName} bind:range bind:staffFilter={dashboardStaff} />
         {:else if subTab === 'history'}
-            <HistoryTab {reports} {fields} on:edit={editReport} on:delete={deleteReport} on:clearAll={clearAll} />
+            <HistoryTab {reports} fields={viewFields} {isAdmin} {uid} {windowStart} staffName={draft.staffName} bind:staffFilter={historyStaff}
+                on:edit={editReport} on:delete={deleteReport} on:clearLocal={clearLocal} on:loadDay={loadDay} />
         {:else}
             <div class="lg:grid lg:grid-cols-12 lg:gap-3 space-y-3 lg:space-y-0">
                 <div class="lg:col-span-8 space-y-3">
